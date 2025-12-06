@@ -25,13 +25,14 @@
         devShells.default = pkgs.mkShell {
           name = "workaholick-dev-shell";
 
-          buildInputs = [
+          buildInputs = with pkgs; [
             rustToolchain
-            pkgs.rust-analyzer
-            pkgs.pkg-config
-            pkgs.openssl
-            pkgs.cmake
-            pkgs.gcc
+            rust-analyzer
+            pkg-config
+            openssl
+            cmake
+            gcc
+            just
           ];
 
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
