@@ -26,7 +26,9 @@
           overlays = [(import rust-overlay)];
         };
 
-        rustToolchain = pkgs.rust-bin.nightly.latest.default;
+        rustToolchain = pkgs.rust-bin.nightly.latest.default.override {
+          extensions = ["rust-src" "rustfmt" "clippy"];
+        };
 
         preCommit = pre-commit-hooks.lib.${system}.run {
           src = ./.;
@@ -37,8 +39,7 @@
 
             clippy = {
               enable = true;
-              packageOverrides.cargo = pkgs.cargo;
-              packageOverrides.clippy = pkgs.clippy;
+              package = rustToolchain;
               settings.allFeatures = true;
             };
 
@@ -61,17 +62,17 @@
 
           inherit (preCommit) shellHook enabledPackages;
 
-          buildInputs =
+          buildInputs = with pkgs;
             [
               rustToolchain
-              pkgs.rust-analyzer
-              pkgs.pkg-config
-              pkgs.openssl
-              pkgs.cmake
-              pkgs.gcc
-              pkgs.just
-              pkgs.cargo-watch
-              pkgs.pre-commit
+              rust-analyzer
+              pkg-config
+              openssl
+              cmake
+              gcc
+              just
+              cargo-watch
+              pre-commit
             ]
             ++ preCommit.enabledPackages;
 
