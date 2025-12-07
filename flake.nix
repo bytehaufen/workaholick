@@ -73,6 +73,7 @@
               just
               cargo-watch
               pre-commit
+              simple-http-server
             ]
             ++ preCommit.enabledPackages;
 
