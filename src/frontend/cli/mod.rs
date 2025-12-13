@@ -1,13 +1,11 @@
+pub mod args;
+
+pub use args::{Cli, Commands};
+
 use anyhow::Result;
 use clap::Parser;
 
-use crate::{
-    core::{
-        App,
-        cli::{Cli, Commands},
-    },
-    frontend::web,
-};
+use crate::{core::App, frontend::web};
 
 pub fn run(app: &App) -> Result<()> {
     let cli = Cli::parse();

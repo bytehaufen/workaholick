@@ -1,10 +1,6 @@
 #[derive(Debug)]
 pub enum Command {
-    In {
-        description: String,
-        // maybe later: place: Place, date: NaiveDate, ...
-    },
+    In { description: String },
     Out,
     Status,
-    // whatever else your domain needs
 }
