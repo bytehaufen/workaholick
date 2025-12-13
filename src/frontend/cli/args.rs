@@ -37,7 +37,7 @@ pub enum Commands {
         description: Option<String>,
     },
     /// Start or log a break
-    #[command(visible_alias = "b")]
+    #[command(visible_alias = "p")]
     Pause,
     /// Inspect a day
     #[command(visible_alias = "d")]

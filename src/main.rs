@@ -1,8 +1,7 @@
-mod core;
-mod frontend;
+use workaholick::{App, frontend};
 
 fn main() -> anyhow::Result<()> {
-    let app = core::App::new();
+    let app = App::new();
 
     frontend::cli::run(&app)
 }
