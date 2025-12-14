@@ -1,9 +1,11 @@
 use core::fmt;
 use std::str::FromStr;
 
+use chrono::{DateTime, Local, NaiveDate};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub enum Place {
     Office,
     Home,
@@ -45,11 +47,51 @@ impl FromStr for Place {
     }
 }
 
-#[derive(Debug)]
+type Time = DateTime<Local>;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EventBase {
+    id: u64,
+    version: u16,
+    timestamp: Time,
+    date: NaiveDate,
+}
+
+impl EventBase {
+    pub fn new(id: u64, version: u16, timestamp: Time, date: NaiveDate) -> EventBase {
+        EventBase {
+            id,
+            version,
+            timestamp,
+            date,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Event {
-    In { place: Place },
-    Out { description: Option<String> },
-    Log { description: Option<String> },
-    Pause { description: Option<String> },
-    Day { date: chrono::NaiveDate },
+    In {
+        #[serde(flatten)]
+        base: EventBase,
+        place: Place,
+    },
+    Out {
+        #[serde(flatten)]
+        base: EventBase,
+        description: Option<String>,
+    },
+    Log {
+        #[serde(flatten)]
+        base: EventBase,
+        description: Option<String>,
+    },
+    BreakStart {
+        #[serde(flatten)]
+        base: EventBase,
+    },
+    BreakEnd {
+        #[serde(flatten)]
+        base: EventBase,
+        description: Option<String>,
+    },
 }

@@ -35,12 +35,12 @@ pub enum CliCommand {
         /// What have you finished?
         description: Option<String>,
     },
-    /// Start or log a break
-    #[command(visible_alias = "p")]
-    Pause {
-        /// What is the reason for the break?
-        description: Option<String>,
-    },
+    /// Start a break
+    #[command(visible_alias = "bs")]
+    BreakStart,
+    // End a break
+    #[command(visible_alias = "be")]
+    BreakEnd { description: Option<String> },
     /// Inspect a day
     #[command(visible_alias = "d")]
     Day { date: NaiveDate },

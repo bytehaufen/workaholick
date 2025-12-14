@@ -10,20 +10,20 @@ impl App {
 
     pub fn execute(&self, cmd: Event) -> anyhow::Result<()> {
         match cmd {
-            Event::In { place } => {
-                println!("Core: starting work at {}", place);
+            Event::In { base, place } => {
+                println!("Core: starting work at {} {:?}", place, base);
             }
-            Event::Out { description } => {
-                println!("Core: stopping work: {:?}", description);
+            Event::Out { base, description } => {
+                println!("Core: stopping work: {:?} {:?}", description, base);
             }
-            Event::Log { description } => {
-                println!("Core: log: {:?}", description);
+            Event::Log { base, description } => {
+                println!("Core: log: {:?} {:?}", description, base);
             }
-            Event::Pause { description } => {
-                println!("Core: pause: {:?}", description);
+            Event::BreakStart { base } => {
+                println!("Core: break {:?}", base);
             }
-            Event::Day { date } => {
-                println!("Core: day {}", date);
+            Event::BreakEnd { base, description } => {
+                println!("Core: break end: {:?} {:?}", description, base);
             }
         }
 
