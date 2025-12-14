@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
-use crate::domain::model::Place;
+use crate::domain::event::Place;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -11,11 +11,11 @@ pub struct Cli {
     pub config: Option<PathBuf>,
 
     #[command(subcommand)]
-    pub command: Command,
+    pub command: CliCommand,
 }
 
 #[derive(Subcommand, Debug)]
-pub enum Command {
+pub enum CliCommand {
     /// Start a workday
     #[command(visible_alias = "i")]
     In {

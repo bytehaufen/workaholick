@@ -1,4 +1,4 @@
-use crate::domain;
+use crate::domain::Event;
 
 #[derive(Debug, Clone, Default)]
 pub struct App;
@@ -8,21 +8,21 @@ impl App {
         App
     }
 
-    pub fn execute(&self, cmd: domain::Command) -> anyhow::Result<()> {
+    pub fn execute(&self, cmd: Event) -> anyhow::Result<()> {
         match cmd {
-            domain::Command::In { place } => {
+            Event::In { place } => {
                 println!("Core: starting work at {}", place);
             }
-            domain::Command::Out { description } => {
+            Event::Out { description } => {
                 println!("Core: stopping work: {:?}", description);
             }
-            domain::Command::Log { description } => {
+            Event::Log { description } => {
                 println!("Core: log: {:?}", description);
             }
-            domain::Command::Pause { description } => {
+            Event::Pause { description } => {
                 println!("Core: pause: {:?}", description);
             }
-            domain::Command::Day { date } => {
+            Event::Day { date } => {
                 println!("Core: day {}", date);
             }
         }

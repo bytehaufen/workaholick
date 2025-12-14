@@ -1,20 +1,20 @@
-use super::args;
-use crate::domain;
+use super::args::CliCommand;
+use crate::domain::Event;
 
-impl TryFrom<args::Command> for domain::Command {
+impl TryFrom<CliCommand> for Event {
     type Error = anyhow::Error;
 
-    fn try_from(command: args::Command) -> Result<Self, Self::Error> {
+    fn try_from(command: CliCommand) -> Result<Self, Self::Error> {
         Ok(match command {
-            args::Command::In { place } => domain::Command::In { place },
-            args::Command::Out { description } => domain::Command::Out { description },
-            args::Command::Log { description } => domain::Command::Log { description },
-            args::Command::Pause { description } => domain::Command::Pause { description },
-            args::Command::Day { date } => domain::Command::Day { date },
-            args::Command::Report {} => todo!(),
-            args::Command::Edit {} => todo!(),
-            args::Command::Delete {} => todo!(),
-            args::Command::Web => {
+            CliCommand::In { place } => Event::In { place },
+            CliCommand::Out { description } => Event::Out { description },
+            CliCommand::Log { description } => Event::Log { description },
+            CliCommand::Pause { description } => Event::Pause { description },
+            CliCommand::Day { date } => Event::Day { date },
+            CliCommand::Report {} => todo!(),
+            CliCommand::Edit {} => todo!(),
+            CliCommand::Delete {} => todo!(),
+            CliCommand::Web => {
                 anyhow::bail!("Web is handled by the frontend, not the core adapter.")
             }
         })

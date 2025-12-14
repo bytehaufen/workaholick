@@ -1,4 +1,4 @@
-use super::args::{Cli, Command};
+use super::args::{Cli, CliCommand};
 use crate::domain::App;
 use crate::web;
 
@@ -12,7 +12,7 @@ pub fn run(app: &App) -> anyhow::Result<()> {
     }
 
     match cli.command {
-        Command::Web => web::run(app),
+        CliCommand::Web => web::run(app),
         other => app.execute(other.try_into()?),
     }
 }
