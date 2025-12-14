@@ -2,6 +2,8 @@ use chrono::NaiveDate;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+use crate::domain::model::Place;
+
 #[derive(Parser, Debug)]
 #[command(version, about)]
 pub struct Cli {
@@ -9,20 +11,17 @@ pub struct Cli {
     pub config: Option<PathBuf>,
 
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Command,
 }
 
 #[derive(Subcommand, Debug)]
-pub enum Commands {
+pub enum Command {
     /// Start a workday
     #[command(visible_alias = "i")]
     In {
         /// Where are you working?
-        #[arg(value_enum)]
+        #[arg(value_name = "PLACE")]
         place: Place,
-
-        /// Optional initial description for what you're starting with
-        description: Option<String>,
     },
     /// End the current workday
     #[command(visible_alias = "o")]
@@ -38,7 +37,10 @@ pub enum Commands {
     },
     /// Start or log a break
     #[command(visible_alias = "p")]
-    Pause,
+    Pause {
+        /// What is the reason for the break?
+        description: Option<String>,
+    },
     /// Inspect a day
     #[command(visible_alias = "d")]
     Day { date: NaiveDate },
@@ -62,11 +64,21 @@ pub enum Commands {
     Web, // TODO: Implement more alternative frontends
 }
 
-// TODO: Move into settings as default
 #[derive(Copy, Clone, Debug, ValueEnum)]
-pub enum Place {
+enum PlaceArg {
     Office,
     Home,
     Travel,
     Vacation,
+}
+
+impl From<PlaceArg> for Place {
+    fn from(value: PlaceArg) -> Self {
+        match value {
+            PlaceArg::Office => Place::Office,
+            PlaceArg::Home => Place::Home,
+            PlaceArg::Travel => Place::Travel,
+            PlaceArg::Vacation => Place::Vacation,
+        }
+    }
 }

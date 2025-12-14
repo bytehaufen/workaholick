@@ -1,7 +1,7 @@
-use workaholick::{App, frontend};
+use workaholick::{App, cli};
 
 fn main() -> anyhow::Result<()> {
     let app = App::new();
 
-    frontend::cli::run(&app)
+    cli::run(&app)
 }
