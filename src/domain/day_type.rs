@@ -8,7 +8,9 @@ pub struct ParseDayTypeError {
     input: String,
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, strum::Display, strum::EnumString)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Serialize, Deserialize, strum::Display, strum::EnumString,
+)]
 #[strum(ascii_case_insensitive)]
 #[serde(rename_all = "lowercase")]
 pub enum DayType {
