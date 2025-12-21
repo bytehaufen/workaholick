@@ -2,16 +2,16 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::{fs::OpenOptions, path::Path};
 
-use crate::domain::Command;
+use crate::domain::Entry;
 
-pub fn append(path: &Path, event: &Command) -> anyhow::Result<()> {
+pub fn append(path: &Path, event: &Entry) -> anyhow::Result<()> {
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
     serde_json::to_writer(&mut file, event)?;
     writeln!(file)?;
     Ok(())
 }
 
-pub fn read_all(path: &Path) -> anyhow::Result<Vec<Command>> {
+pub fn read_all(path: &Path) -> anyhow::Result<Vec<Entry>> {
     let file = std::fs::File::open(path)?;
     let reader = BufReader::new(file);
 
@@ -30,6 +30,7 @@ pub fn read_all(path: &Path) -> anyhow::Result<Vec<Command>> {
         .collect::<anyhow::Result<Vec<_>>>()
 }
 
+// FIXME:
 pub fn events_file(data_dir: &Path, year: i32) -> PathBuf {
     data_dir.join(format!("events-{}.jsonl", year))
 }

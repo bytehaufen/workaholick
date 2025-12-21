@@ -8,16 +8,13 @@ pub enum Command {
         day_type: DayType,
     },
     Out {
-        #[serde(flatten)]
         description: Option<String>,
     },
     Log {
-        #[serde(flatten)]
         description: Option<String>,
     },
     BreakStart,
     BreakEnd {
-        #[serde(flatten)]
         description: Option<String>,
     },
 }
