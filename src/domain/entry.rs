@@ -8,7 +8,6 @@ pub struct Entry {
     version: u16,
     timestamp: DateTime<Local>,
     date: NaiveDate,
-    #[serde(flatten)]
     payload: Command,
 }
 
