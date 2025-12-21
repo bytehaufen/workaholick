@@ -1,12 +1,10 @@
 use std::path::PathBuf;
 
-use workaholick::{App, cli};
+use workaholick::App;
 
 fn main() -> anyhow::Result<()> {
     // TODO: Handle config file / data dir handling and the name
-    let data_dir = "./data-2025.jsonl";
+    let data_dir = "./data";
 
-    let app = App::new(PathBuf::from(data_dir));
-
-    cli::run(&app)
+    App::run(PathBuf::from(data_dir))
 }

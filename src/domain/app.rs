@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::{domain::Command, storage::event_log};
+use crate::{cli, domain::Command, storage::event_log};
 
 #[derive(Debug, Clone, Default)]
 pub struct App {
@@ -8,8 +8,10 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(data_dir: PathBuf) -> Self {
-        App { data_dir }
+    pub fn run(data_dir: PathBuf) -> anyhow::Result<()> {
+        let app = App { data_dir };
+
+        cli::run(&app)
     }
 
     pub fn handle(&self, command: Command) -> anyhow::Result<()> {

@@ -1,5 +1,9 @@
-pub mod app;
-pub mod command;
+mod app;
+mod command;
+mod day_type;
+mod entry;
 
 pub use app::App;
 pub use command::Command;
+pub use day_type::DayType;
+pub use entry::Entry;

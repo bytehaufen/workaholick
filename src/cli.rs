@@ -1,5 +1,5 @@
 mod adapter;
 mod args;
-pub mod run;
+mod run;
 
 pub use run::run;

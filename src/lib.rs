@@ -1,7 +1,7 @@
-pub mod cli;
-pub mod config;
-pub mod domain;
-pub mod storage;
-pub mod web;
+mod cli;
+mod config;
+mod domain;
+mod storage;
+mod web;
 
 pub use crate::domain::App;
