@@ -1,11 +1,10 @@
-use core::fmt;
-use std::str::FromStr;
-
 use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, strum::Display)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, strum::Display, strum::EnumString)]
+#[strum(ascii_case_insensitive)]
+#[serde(rename_all = "lowercase")]
 pub enum DayType {
     Office,
     Home,
@@ -19,23 +18,6 @@ pub enum DayType {
 #[error("invalid day_type '{input}' (expected one of: office, home, travel, vacation, sick)")]
 pub struct ParseDayTypeError {
     input: String,
-}
-
-impl FromStr for DayType {
-    type Err = ParseDayTypeError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "office" => Ok(DayType::Office),
-            "home" => Ok(DayType::Home),
-            "travel" => Ok(DayType::Travel),
-            "vacation" => Ok(DayType::Vacation),
-            "sick" => Ok(DayType::Sick),
-            _ => Err(ParseDayTypeError {
-                input: s.to_string(),
-            }),
-        }
-    }
 }
 
 type Time = DateTime<Local>;
