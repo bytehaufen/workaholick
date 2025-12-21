@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
-use crate::domain::event::Place;
+use crate::domain::event::DayType;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -20,8 +20,8 @@ pub enum CliCommand {
     #[command(visible_alias = "i")]
     In {
         /// Where are you working?
-        #[arg(value_name = "PLACE")]
-        place: Place,
+        #[arg(value_name = "DAY_TYPE")]
+        day_type: DayType,
     },
     /// End the current workday
     #[command(visible_alias = "o")]
@@ -65,20 +65,22 @@ pub enum CliCommand {
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
-enum PlaceArg {
+enum DayTypeArg {
     Office,
     Home,
     Travel,
     Vacation,
+    Sick,
 }
 
-impl From<PlaceArg> for Place {
-    fn from(value: PlaceArg) -> Self {
+impl From<DayTypeArg> for DayType {
+    fn from(value: DayTypeArg) -> Self {
         match value {
-            PlaceArg::Office => Place::Office,
-            PlaceArg::Home => Place::Home,
-            PlaceArg::Travel => Place::Travel,
-            PlaceArg::Vacation => Place::Vacation,
+            DayTypeArg::Office => DayType::Office,
+            DayTypeArg::Home => DayType::Home,
+            DayTypeArg::Travel => DayType::Travel,
+            DayTypeArg::Vacation => DayType::Vacation,
+            DayTypeArg::Sick => DayType::Sick,
         }
     }
 }

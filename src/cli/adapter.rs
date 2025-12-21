@@ -14,7 +14,7 @@ impl TryFrom<CliCommand> for Event {
         let base = EventBase::new(42, 815, timestamp, date);
 
         Ok(match command {
-            CliCommand::In { place } => Event::In { base, place },
+            CliCommand::In { day_type } => Event::In { base, day_type },
             CliCommand::Out { description } => Event::Out { base, description },
             CliCommand::Log { description } => Event::Log { base, description },
             CliCommand::BreakStart => Event::BreakStart { base },

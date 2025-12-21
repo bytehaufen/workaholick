@@ -6,41 +6,44 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-pub enum Place {
+pub enum DayType {
     Office,
     Home,
     Travel,
     Vacation,
+    Sick,
 }
 
-impl fmt::Display for Place {
+impl fmt::Display for DayType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Place::Office => "office",
-            Place::Home => "home",
-            Place::Travel => "travel",
-            Place::Vacation => "vacation",
+            DayType::Office => "office",
+            DayType::Home => "home",
+            DayType::Travel => "travel",
+            DayType::Vacation => "vacation",
+            DayType::Sick => "sick",
         })
     }
 }
 
 // TODO: Customize if moved to config
 #[derive(Debug, Clone, Error)]
-#[error("invalid place '{input}' (expected one of: office, home, travel, vacation)")]
-pub struct ParsePlaceError {
+#[error("invalid day_type '{input}' (expected one of: office, home, travel, vacation, sick)")]
+pub struct ParseDayTypeError {
     input: String,
 }
 
-impl FromStr for Place {
-    type Err = ParsePlaceError;
+impl FromStr for DayType {
+    type Err = ParseDayTypeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_ascii_lowercase().as_str() {
-            "office" => Ok(Place::Office),
-            "home" => Ok(Place::Home),
-            "travel" => Ok(Place::Travel),
-            "vacation" => Ok(Place::Vacation),
-            _ => Err(ParsePlaceError {
+            "office" => Ok(DayType::Office),
+            "home" => Ok(DayType::Home),
+            "travel" => Ok(DayType::Travel),
+            "vacation" => Ok(DayType::Vacation),
+            "sick" => Ok(DayType::Sick),
+            _ => Err(ParseDayTypeError {
                 input: s.to_string(),
             }),
         }
@@ -73,7 +76,7 @@ pub enum Event {
     In {
         #[serde(flatten)]
         base: EventBase,
-        place: Place,
+        day_type: DayType,
     },
     Out {
         #[serde(flatten)]

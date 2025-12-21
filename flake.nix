@@ -56,6 +56,7 @@
         };
       in {
         checks.pre-commit-check = preCommit;
+        formatter = pkgs.alejandra;
 
         devShells.default = pkgs.mkShell {
           name = "workaholick-dev-shell";
