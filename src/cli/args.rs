@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use crate::domain::event::DayType;
+use crate::domain::command::DayType;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]

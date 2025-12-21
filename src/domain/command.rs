@@ -23,16 +23,16 @@ pub struct ParseDayTypeError {
 type Time = DateTime<Local>;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct EventBase {
+pub struct CommandBase {
     id: u64,
     version: u16,
     timestamp: Time,
     date: NaiveDate,
 }
 
-impl EventBase {
-    pub fn new(id: u64, version: u16, timestamp: Time, date: NaiveDate) -> EventBase {
-        EventBase {
+impl CommandBase {
+    pub fn new(id: u64, version: u16, timestamp: Time, date: NaiveDate) -> CommandBase {
+        CommandBase {
             id,
             version,
             timestamp,
@@ -42,29 +42,29 @@ impl EventBase {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum Event {
+pub enum Command {
     In {
         #[serde(flatten)]
-        base: EventBase,
+        base: CommandBase,
         day_type: DayType,
     },
     Out {
         #[serde(flatten)]
-        base: EventBase,
+        base: CommandBase,
         description: Option<String>,
     },
     Log {
         #[serde(flatten)]
-        base: EventBase,
+        base: CommandBase,
         description: Option<String>,
     },
     BreakStart {
         #[serde(flatten)]
-        base: EventBase,
+        base: CommandBase,
     },
     BreakEnd {
         #[serde(flatten)]
-        base: EventBase,
+        base: CommandBase,
         description: Option<String>,
     },
 }

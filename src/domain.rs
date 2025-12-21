@@ -1,5 +1,5 @@
 pub mod app;
-pub mod event;
+pub mod command;
 
 pub use app::App;
-pub use event::Event;
+pub use command::Command;

@@ -13,6 +13,6 @@ pub fn run(app: &App) -> anyhow::Result<()> {
 
     match cli.command {
         CliCommand::Web => web::run(app),
-        other => app.execute(other.try_into()?),
+        other => app.handle(other.try_into()?),
     }
 }

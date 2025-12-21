@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::{domain::Event, storage::event_log};
+use crate::{domain::Command, storage::event_log};
 
 #[derive(Debug, Clone, Default)]
 pub struct App {
@@ -12,11 +12,11 @@ impl App {
         App { data_dir }
     }
 
-    pub fn execute(&self, event: Event) -> anyhow::Result<()> {
+    pub fn handle(&self, command: Command) -> anyhow::Result<()> {
         let path: &Path = &self.data_dir;
 
         println!("hi there the data dir is: {:?}", path);
 
-        event_log::append(path, &event)
+        event_log::append(path, &command)
     }
 }

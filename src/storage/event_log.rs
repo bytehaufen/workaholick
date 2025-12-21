@@ -2,16 +2,16 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::{fs::OpenOptions, path::Path};
 
-use crate::domain::Event;
+use crate::domain::Command;
 
-pub fn append(path: &Path, event: &Event) -> anyhow::Result<()> {
+pub fn append(path: &Path, event: &Command) -> anyhow::Result<()> {
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
     serde_json::to_writer(&mut file, event)?;
     writeln!(file)?;
     Ok(())
 }
 
-pub fn read_all(path: &Path) -> anyhow::Result<Vec<Event>> {
+pub fn read_all(path: &Path) -> anyhow::Result<Vec<Command>> {
     let file = std::fs::File::open(path)?;
     let reader = BufReader::new(file);
 
