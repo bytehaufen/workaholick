@@ -9,8 +9,4 @@ fmt:
   cargo fmt
 
 check:
-  nix fmt . -- --check
-  :
-  cargo fmt --check
-  :
-  cargo check
+  nix flake check
