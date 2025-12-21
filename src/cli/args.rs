@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use crate::domain::event::DayType;
@@ -62,25 +62,4 @@ pub enum CliCommand {
     /// Start in web mode
     #[command()]
     Web, // TODO: Implement more alternative frontends
-}
-
-#[derive(Copy, Clone, Debug, ValueEnum)]
-enum DayTypeArg {
-    Office,
-    Home,
-    Travel,
-    Vacation,
-    Sick,
-}
-
-impl From<DayTypeArg> for DayType {
-    fn from(value: DayTypeArg) -> Self {
-        match value {
-            DayTypeArg::Office => DayType::Office,
-            DayTypeArg::Home => DayType::Home,
-            DayTypeArg::Travel => DayType::Travel,
-            DayTypeArg::Vacation => DayType::Vacation,
-            DayTypeArg::Sick => DayType::Sick,
-        }
-    }
 }

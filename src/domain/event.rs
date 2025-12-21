@@ -5,25 +5,13 @@ use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, strum::Display)]
 pub enum DayType {
     Office,
     Home,
     Travel,
     Vacation,
     Sick,
-}
-
-impl fmt::Display for DayType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            DayType::Office => "office",
-            DayType::Home => "home",
-            DayType::Travel => "travel",
-            DayType::Vacation => "vacation",
-            DayType::Sick => "sick",
-        })
-    }
 }
 
 // TODO: Customize if moved to config
