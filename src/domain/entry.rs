@@ -87,4 +87,35 @@ mod tests {
         let decoded: Entry = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, entry);
     }
+
+    #[test]
+    fn entry_serializes_command_break_start() {
+        let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
+        let command = Command::BreakStart;
+        let entry = Entry::new(1, 1, timestamp, timestamp.date_naive(), command);
+
+        let json = serde_json::to_value(&entry).unwrap();
+
+        let break_start = json["payload"].as_str().unwrap();
+        assert_eq!(break_start, "BreakStart");
+
+        let decoded: Entry = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, entry);
+    }
+
+    #[test]
+    fn entry_serializes_command_break_end() {
+        let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
+        let command = Command::BreakEnd {
+            description: Some("test for Command::BreakEnd".to_string()),
+        };
+        let entry: Entry = Entry::new(42, 24, timestamp, timestamp.date_naive(), command);
+
+        let json = serde_json::to_value(&entry).unwrap();
+        let break_end = json["payload"]["BreakEnd"]["description"].as_str().unwrap();
+        assert_eq!(break_end, "test for Command::BreakEnd");
+
+        let decoded: Entry = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, entry);
+    }
 }
