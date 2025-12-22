@@ -4,8 +4,10 @@ use std::{fs::OpenOptions, path::Path};
 
 use crate::domain::Entry;
 
-pub fn append(path: &Path, event: &Entry) -> anyhow::Result<()> {
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+pub fn append(file: &Path, event: &Entry) -> anyhow::Result<()> {
+    ensure_parent_exists(file)?;
+
+    let mut file = OpenOptions::new().create(true).append(true).open(file)?;
     serde_json::to_writer(&mut file, event)?;
     writeln!(file)?;
     Ok(())
@@ -30,7 +32,14 @@ pub fn read_all(path: &Path) -> anyhow::Result<Vec<Entry>> {
         .collect::<anyhow::Result<Vec<_>>>()
 }
 
-// FIXME:
-pub fn events_file(data_dir: &Path, year: i32) -> PathBuf {
-    data_dir.join(format!("events-{}.jsonl", year))
+pub fn events_file(data_dir: &Path, year: i32) -> anyhow::Result<PathBuf> {
+    std::fs::create_dir_all(data_dir)?;
+
+    Ok(data_dir.join(format!("events-{}.jsonl", year)))
+}
+
+fn ensure_parent_exists(file: &Path) -> anyhow::Result<()> {
+    let parent = file.parent().expect("File should have a parent directory");
+    std::fs::create_dir_all(parent)?;
+    Ok(())
 }

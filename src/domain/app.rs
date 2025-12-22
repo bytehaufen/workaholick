@@ -1,10 +1,10 @@
-use chrono::Local;
-use std::path::{Path, PathBuf};
+use chrono::{Datelike, Local};
+use std::path::PathBuf;
 
 use crate::{
     cli,
     domain::{Command, Entry},
-    storage::event_log,
+    storage,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -19,16 +19,21 @@ impl App {
         cli::run(&app)
     }
 
-    pub fn handle(&self, command: Command) -> anyhow::Result<()> {
-        let path: &Path = &self.data_dir;
+    pub fn write(&self, command: Command) -> anyhow::Result<()> {
+        let path = &self.data_dir;
 
-        println!("hi there the data dir is: {:?}", path);
-
-        // TODO: TryFrom Really the right one here?
         let timestamp = Local::now();
         let date = timestamp.date_naive();
+        let year = date.year();
+
+        let file = storage::events_file(&self.data_dir, year);
+
+        // TODO:
+        // - Rename this method to write
+        // - Create methods: day, report
+
         let entry = Entry::new(42, 815, timestamp, date, command);
 
-        event_log::append(path, &entry)
+        storage::append(path, &entry)
     }
 }
