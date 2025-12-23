@@ -1,6 +1,6 @@
 use std::collections::HashSet;
-use std::fs::{self, File, remove_file};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::{fs::OpenOptions, path::Path};
 
@@ -17,24 +17,27 @@ pub fn append(file: &Path, event: &Entry) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn write_all_atomic(file: &Path, events: &Vec<Entry>) -> anyhow::Result<()> {
+pub fn write_all_atomic(file: &Path, events: &[Entry]) -> anyhow::Result<()> {
     ensure_parent_exists(file)?;
 
     let temp_file = temp_path_for(file);
-    let mut writer = OpenOptions::new().create(true).open(file)?;
+    let writer = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .open(&temp_file)?;
 
     serde_json::to_writer(writer, events)?;
 
     replace_file(&temp_file, file)
 }
 
-fn replace_file(src: &Path, target: &Path) -> anyhow::Result<()> {
+fn replace_file(from: &Path, to: &Path) -> anyhow::Result<()> {
     if cfg!(windows) {
-        fs::remove_file(target).with_context(|| format!("remove original file: {target:?}"))?;
+        fs::remove_file(to).with_context(|| format!("remove original file: {to:?}"))?;
     }
 
-    fs::rename(src, target)
-        .with_context(|| format!("replace log file via rename: {src:?} -> {target:?}"))?;
+    fs::rename(from, to)
+        .with_context(|| format!("replace log file via rename: {from:?} -> {to:?}"))?;
     Ok(())
 }
 
@@ -76,56 +79,17 @@ pub fn read_entries(path: &Path) -> anyhow::Result<(u64, Vec<Entry>)> {
     Ok((max, entries))
 }
 
-pub fn delete_by_id(path: &Path, target_id: u64) -> anyhow::Result<bool> {
-    if !path.exists() {
-        return Ok(false);
+pub fn delete_by_id(file: &Path, target_id: u64) -> anyhow::Result<bool> {
+    let (_max, mut entries) = read_entries(file)?;
+
+    if let Some(position) = entries.iter().position(|entry| entry.id() == target_id) {
+        entries.remove(position);
+
+        write_all_atomic(file, &entries)?;
+        return Ok(true);
     }
 
-    ensure_parent_exists(path)?;
-
-    let temp_path = temp_path_for(path);
-
-    let input = File::open(path).with_context(|| format!("open log file: {path:?}"))?;
-    let mut output = BufWriter::new(
-        File::create(&temp_path).with_context(|| format!("create tmp file {temp_path:?}"))?,
-    );
-    let reader = BufReader::new(input);
-
-    let mut found = false;
-
-    reader
-        .lines()
-        .enumerate()
-        .try_for_each(|(index, line)| -> anyhow::Result<()> {
-            let line = line.with_context(|| format!("read line {}", index + 1))?;
-
-            // Skip empty
-            if line.trim().is_empty() {
-                return Ok(());
-            }
-
-            let entry: Entry = serde_json::from_str(&line)
-                .with_context(|| format!("parse JSON on line {} (file {:?}", index + 1, path))?;
-
-            if entry.id() == target_id {
-                found = true;
-                return Ok(());
-            }
-
-            writeln!(output, "{line}")
-                .with_context(|| format!("write line {} (file {:?}", index + 1, path))?;
-
-            Ok(())
-        })?;
-
-    output.flush()?;
-
-    if !found {
-        let _ = std::fs::remove_file(temp_path);
-        return Ok(false);
-    }
-
-    Ok(true)
+    Ok(false)
 }
 
 pub fn events_file(data_dir: &Path, year: i32) -> anyhow::Result<PathBuf> {

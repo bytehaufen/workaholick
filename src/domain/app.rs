@@ -13,6 +13,8 @@ pub struct App {
 }
 
 impl App {
+    // TODO:
+    // - Create methods: day, report
     pub fn run(data_dir: PathBuf) -> anyhow::Result<()> {
         let app = App { data_dir };
 
@@ -20,18 +22,16 @@ impl App {
     }
 
     pub fn write(&self, command: Command) -> anyhow::Result<()> {
-        // TODO:
-        // - Rename this method to write
-        // - Create methods: day, report
-
         let now = Self::now();
-        let entry = Entry::new(42, 815, now, now.date_naive(), command);
+        let entry = Entry::new(45, 815, now, now.date_naive(), command);
+        // FIXME: Continue here:
+        // - Calc new id append data
 
         storage::append(&self.data_dir, &entry)
     }
 
     pub fn delete(&self, id: u64) -> Result<(), anyhow::Error> {
-        let path = Self::log_path_for(Self::now().date_naive(), &self.data_dir)?;
+        let path = Self::log_path_for(Self::this_year(), &self.data_dir)?;
 
         if !storage::delete_by_id(&path, id)? {
             println!("File {path:?} does not contain ID {id}");
@@ -43,8 +43,11 @@ impl App {
     fn now() -> DateTime<Local> {
         Local::now()
     }
+    fn this_year() -> i32 {
+        Self::now().date_naive().year()
+    }
 
-    fn log_path_for(date: NaiveDate, data_dir: &Path) -> anyhow::Result<PathBuf> {
-        storage::events_file(data_dir, date.year())
+    fn log_path_for(year: i32, data_dir: &Path) -> anyhow::Result<PathBuf> {
+        storage::events_file(data_dir, year)
     }
 }
