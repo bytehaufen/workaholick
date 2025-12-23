@@ -16,50 +16,67 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum CliCommand {
+    /// Start in web mode
+    #[command()]
+    Web,
+    // TODO: Implement more alternative frontends
     /// Start a workday
     #[command(visible_alias = "i")]
     In {
-        /// Where are you working?
+        /// Work location/type for this day
         #[arg(value_name = "DAY_TYPE")]
         day_type: DayType,
     },
     /// End the current workday
     #[command(visible_alias = "o")]
     Out {
-        /// What did you finish with?
+        /// Optional description of what you finished
         description: Option<String>,
     },
     /// Finish a block of work
     #[command(visible_alias = "l")]
     Log {
-        /// What have you finished?
+        /// Optional description of what you finished
         description: Option<String>,
     },
     /// Start a break
     #[command(visible_alias = "bs")]
     BreakStart,
-    // End a break
+    /// End a break
     #[command(visible_alias = "be")]
-    BreakEnd { description: Option<String> },
+    BreakEnd {
+        /// Optional description for the break
+        description: Option<String>,
+    },
+    /// Delete one or more entries
+    #[command(visible_alias = "rm")]
+    Delete {
+        /// ID of the entry to delete
+        id: u64,
+    },
+    /// Edit entry
+    #[command(visible_alias = "e")]
+    Edit {
+        // ID of the entry to edit
+        id: u64,
+
+        /// Print the entry to stdout instead of editing
+        #[arg(long)]
+        print: bool,
+
+        /// Apply a new description
+        #[arg(long, value_name = "TEXT")]
+        description: Option<String>,
+    },
     /// Inspect a day
     #[command(visible_alias = "d")]
-    Day { date: NaiveDate },
+    Day {
+        /// Date to Inspect
+        date: NaiveDate,
+    },
     /// Show summaries
     #[command(visible_alias = "r")]
     Report {
         // TODO: implement
     },
-    /// Edit entry
-    #[command(visible_alias = "e")]
-    Edit {
-        // TODO: implement
-    },
-    /// Delete entry / entries
-    #[command(visible_alias = "rm")]
-    Delete {
-        // TODO: implement
-    },
-    /// Start in web mode
-    #[command()]
-    Web, // TODO: Implement more alternative frontends
 }

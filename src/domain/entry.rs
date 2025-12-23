@@ -27,6 +27,10 @@ impl Entry {
             payload,
         }
     }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
 }
 
 #[cfg(test)]

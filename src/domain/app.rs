@@ -1,5 +1,5 @@
-use chrono::{Datelike, Local};
-use std::path::PathBuf;
+use chrono::{DateTime, Datelike, Local, NaiveDate};
+use std::path::{Path, PathBuf};
 
 use crate::{
     cli,
@@ -20,20 +20,31 @@ impl App {
     }
 
     pub fn write(&self, command: Command) -> anyhow::Result<()> {
-        let path = &self.data_dir;
-
-        let timestamp = Local::now();
-        let date = timestamp.date_naive();
-        let year = date.year();
-
-        let file = storage::events_file(&self.data_dir, year);
-
         // TODO:
         // - Rename this method to write
         // - Create methods: day, report
 
-        let entry = Entry::new(42, 815, timestamp, date, command);
+        let now = Self::now();
+        let entry = Entry::new(42, 815, now, now.date_naive(), command);
 
-        storage::append(path, &entry)
+        storage::append(&self.data_dir, &entry)
+    }
+
+    pub fn delete(&self, id: u64) -> Result<(), anyhow::Error> {
+        let path = Self::log_path_for(Self::now().date_naive(), &self.data_dir)?;
+
+        if !storage::delete_by_id(&path, id)? {
+            println!("File {path:?} does not contain ID {id}");
+        }
+
+        Ok(())
+    }
+
+    fn now() -> DateTime<Local> {
+        Local::now()
+    }
+
+    fn log_path_for(date: NaiveDate, data_dir: &Path) -> anyhow::Result<PathBuf> {
+        storage::events_file(data_dir, date.year())
     }
 }

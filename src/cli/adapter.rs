@@ -15,9 +15,9 @@ impl TryFrom<CliCommand> for Command {
 
             // TODO: Implement informational stuff
             CliCommand::Day { date: _ } => todo!(),
-            CliCommand::Report {} => todo!(),
-            CliCommand::Edit {} => todo!(),
-            CliCommand::Delete {} => todo!(),
+            CliCommand::Report { .. } => todo!(),
+            CliCommand::Edit { .. } => todo!(),
+            CliCommand::Delete { .. } => todo!(),
             CliCommand::Web => {
                 anyhow::bail!("Web is handled by the frontend, not the core adapter.")
             }

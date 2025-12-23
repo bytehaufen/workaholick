@@ -18,9 +18,9 @@ pub fn run(app: &App) -> anyhow::Result<()> {
         CliCommand::Log { .. } => app.write(cli.command.try_into()?),
         CliCommand::BreakStart => app.write(cli.command.try_into()?),
         CliCommand::BreakEnd { .. } => app.write(cli.command.try_into()?),
-        CliCommand::Day { date } => todo!(),
+        CliCommand::Delete { id } => app.delete(id),
+        CliCommand::Edit { .. } => todo!(),
+        CliCommand::Day { .. } => todo!(),
         CliCommand::Report {} => todo!(),
-        CliCommand::Edit {} => todo!(),
-        CliCommand::Delete {} => todo!(),
     }
 }
