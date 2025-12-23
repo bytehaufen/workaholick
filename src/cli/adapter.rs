@@ -12,15 +12,7 @@ impl TryFrom<CliCommand> for Command {
             CliCommand::Log { description } => Command::Log { description },
             CliCommand::BreakStart => Command::BreakStart,
             CliCommand::BreakEnd { description } => Command::BreakEnd { description },
-
-            // TODO: Implement informational stuff
-            CliCommand::Day { date: _ } => todo!(),
-            CliCommand::Report { .. } => todo!(),
-            CliCommand::Edit { .. } => todo!(),
-            CliCommand::Delete { .. } => todo!(),
-            CliCommand::Web => {
-                anyhow::bail!("Web is handled by the frontend, not the core adapter.")
-            }
+            _ => anyhow::bail!("Other commands are handled in app, not the core adapter"),
         })
     }
 }

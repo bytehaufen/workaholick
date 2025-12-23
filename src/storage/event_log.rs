@@ -42,7 +42,11 @@ fn replace_file(from: &Path, to: &Path) -> anyhow::Result<()> {
 }
 
 pub fn read_entries(path: &Path) -> anyhow::Result<(u64, Vec<Entry>)> {
-    let file = std::fs::File::open(path)?;
+    if !std::fs::exists(path).with_context(|| format!("check file {path:?} exists"))? {
+        return Ok((0, Vec::new()));
+    };
+    let file =
+        std::fs::File::open(path).with_context(|| format!("open file {path:?} for reading"))?;
     let reader = BufReader::new(file);
 
     let (seen, entries) = reader

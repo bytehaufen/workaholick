@@ -20,7 +20,8 @@ pub fn run(app: &App) -> anyhow::Result<()> {
         CliCommand::BreakEnd { .. } => app.write(cli.command.try_into()?),
         CliCommand::Delete { id } => app.delete(id),
         CliCommand::Edit { .. } => todo!(),
-        CliCommand::Day { .. } => todo!(),
+        CliCommand::Status { period } => app.status(period),
+        CliCommand::Day { date } => app.day(date),
         CliCommand::Report {} => todo!(),
     }
 }

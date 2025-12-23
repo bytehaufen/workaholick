@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 use crate::domain::DayType;
@@ -19,7 +19,8 @@ pub enum CliCommand {
     /// Start in web mode
     #[command()]
     Web,
-    // TODO: Implement more alternative frontends
+
+    // --- Write commands  ---
     /// Start a workday
     #[command(visible_alias = "i")]
     In {
@@ -27,37 +28,43 @@ pub enum CliCommand {
         #[arg(value_name = "DAY_TYPE")]
         day_type: DayType,
     },
+
     /// End the current workday
     #[command(visible_alias = "o")]
     Out {
         /// Optional description of what you finished
         description: Option<String>,
     },
+
     /// Finish a block of work
     #[command(visible_alias = "l")]
     Log {
         /// Optional description of what you finished
         description: Option<String>,
     },
+
     /// Start a break
     #[command(visible_alias = "bs")]
     BreakStart,
+
     /// End a break
     #[command(visible_alias = "be")]
     BreakEnd {
         /// Optional description for the break
         description: Option<String>,
     },
+
     /// Delete one or more entries
     #[command(visible_alias = "rm")]
     Delete {
         /// ID of the entry to delete
         id: u64,
     },
+
     /// Edit entry
     #[command(visible_alias = "e")]
     Edit {
-        // ID of the entry to edit
+        /// ID of the entry to edit
         id: u64,
 
         /// Print the entry to stdout instead of editing
@@ -68,15 +75,46 @@ pub enum CliCommand {
         #[arg(long, value_name = "TEXT")]
         description: Option<String>,
     },
-    /// Inspect a day
+
+    // --- Query commands ---
+    /// Status summary for common periods (today/yesterday/week/month)
+    #[command(visible_alias = "s")]
+    Status {
+        /// Time period to summarize
+        #[arg(value_enum, default_value_t = Period::Today, value_name = "PERIOD")]
+        period: Period,
+    },
+
+    /// Inspect a day (arbitrary date)
     #[command(visible_alias = "d")]
     Day {
-        /// Date to Inspect
+        /// Date to inspect (YYYY-MM-DD)
         date: NaiveDate,
     },
+
+    // TODO: Check necessity
     /// Show summaries
     #[command(visible_alias = "r")]
     Report {
         // TODO: implement
     },
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+pub enum Period {
+    /// Today (default)
+    #[value(alias = "t")]
+    Today,
+
+    /// Previous logged day
+    #[value(alias = "y")]
+    Prev,
+
+    /// This week
+    #[value(alias = "w")]
+    Week,
+
+    /// This month
+    #[value(alias = "m")]
+    Month,
 }

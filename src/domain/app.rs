@@ -2,7 +2,7 @@ use chrono::{DateTime, Datelike, Local, NaiveDate};
 use std::path::{Path, PathBuf};
 
 use crate::{
-    cli,
+    cli::{self, Period},
     domain::{Command, Entry},
     storage,
 };
@@ -22,12 +22,13 @@ impl App {
     }
 
     pub fn write(&self, command: Command) -> anyhow::Result<()> {
+        let path = Self::log_path_for(Self::this_year(), &self.data_dir)?;
+        let (max, _entries) = storage::read_entries(&path)?;
+        let id = max + 1;
         let now = Self::now();
-        let entry = Entry::new(45, 815, now, now.date_naive(), command);
-        // FIXME: Continue here:
-        // - Calc new id append data
+        let entry = Entry::new(id, 1, now, now.date_naive(), command);
 
-        storage::append(&self.data_dir, &entry)
+        storage::append(&path, &entry)
     }
 
     pub fn delete(&self, id: u64) -> Result<(), anyhow::Error> {
@@ -37,6 +38,20 @@ impl App {
             println!("File {path:?} does not contain ID {id}");
         }
 
+        Ok(())
+    }
+
+    pub fn status(&self, period: Period) -> Result<(), anyhow::Error> {
+        todo!()
+    }
+
+    pub fn day(&self, date: NaiveDate) -> anyhow::Result<()> {
+        let year = date.year();
+        let path = Self::log_path_for(year, &self.data_dir)?;
+        let (_max, entries) = storage::read_entries(&path)?;
+
+        // TODO: Implement
+        println!("{entries:#?}");
         Ok(())
     }
 
