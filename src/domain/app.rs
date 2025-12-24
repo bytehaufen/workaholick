@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::{
     cli::{self, Period},
     domain::{Command, Entry},
-    storage,
+    store,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -23,18 +23,18 @@ impl App {
 
     pub fn write(&self, command: Command) -> anyhow::Result<()> {
         let path = Self::log_path_for(Self::this_year(), &self.data_dir)?;
-        let (max, _entries) = storage::read_entries(&path)?;
+        let (max, _entries) = store::read_entries(&path)?;
         let id = max + 1;
         let now = Self::now();
         let entry = Entry::new(id, 1, now, now.date_naive(), command);
 
-        storage::append(&path, &entry)
+        store::append(&path, &entry)
     }
 
     pub fn delete(&self, id: u64) -> Result<(), anyhow::Error> {
         let path = Self::log_path_for(Self::this_year(), &self.data_dir)?;
 
-        if !storage::delete_by_id(&path, id)? {
+        if !store::delete_by_id(&path, id)? {
             println!("File {path:?} does not contain ID {id}");
         }
 
@@ -48,7 +48,7 @@ impl App {
     pub fn day(&self, date: NaiveDate) -> anyhow::Result<()> {
         let year = date.year();
         let path = Self::log_path_for(year, &self.data_dir)?;
-        let (_max, entries) = storage::read_entries(&path)?;
+        let (_max, entries) = store::read_entries(&path)?;
 
         // TODO: Implement
         println!("{entries:#?}");
@@ -63,6 +63,6 @@ impl App {
     }
 
     fn log_path_for(year: i32, data_dir: &Path) -> anyhow::Result<PathBuf> {
-        storage::events_file(data_dir, year)
+        store::events_file(data_dir, year)
     }
 }
