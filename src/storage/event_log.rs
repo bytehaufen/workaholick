@@ -1,12 +1,14 @@
 use std::collections::HashSet;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 use std::{fs::OpenOptions, path::Path};
 
 use anyhow::Context;
 
 use crate::domain::Entry;
+
+const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
 
 pub fn append(file: &Path, event: &Entry) -> anyhow::Result<()> {
     ensure_parent_exists(file)?;
@@ -17,22 +19,30 @@ pub fn append(file: &Path, event: &Entry) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn write_all_atomic(file: &Path, events: &[Entry]) -> anyhow::Result<()> {
-    ensure_parent_exists(file)?;
-
-    let temp_file = temp_path_for(file);
-    let writer = OpenOptions::new()
+pub fn write_all_atomic(path: &Path, events: &[Entry]) -> anyhow::Result<()> {
+    ensure_parent_exists(path)?;
+    let temp_file = temp_path_for(path);
+    let file = OpenOptions::new()
         .create(true)
         .truncate(true)
+        .write(true)
         .open(&temp_file)?;
 
-    serde_json::to_writer(writer, events)?;
+    let mut writer = BufWriter::with_capacity(BUFFER_SIZE, file);
 
-    replace_file(&temp_file, file)
+    for event in events {
+        serde_json::to_writer(&mut writer, event)?;
+        writeln!(writer)?;
+    }
+
+    writer.flush()?;
+    writer.get_ref().sync_all()?;
+
+    replace_file(&temp_file, path)
 }
 
 fn replace_file(from: &Path, to: &Path) -> anyhow::Result<()> {
-    if cfg!(windows) {
+    if cfg!(windows) && to.exists() {
         fs::remove_file(to).with_context(|| format!("remove original file: {to:?}"))?;
     }
 
@@ -42,12 +52,13 @@ fn replace_file(from: &Path, to: &Path) -> anyhow::Result<()> {
 }
 
 pub fn read_entries(path: &Path) -> anyhow::Result<(u64, Vec<Entry>)> {
-    if !std::fs::exists(path).with_context(|| format!("check file {path:?} exists"))? {
+    if !path.exists() {
         return Ok((0, Vec::new()));
     };
     let file =
         std::fs::File::open(path).with_context(|| format!("open file {path:?} for reading"))?;
-    let reader = BufReader::new(file);
+
+    let reader = BufReader::with_capacity(BUFFER_SIZE, file);
 
     let (seen, entries) = reader
         .lines()
@@ -57,11 +68,14 @@ pub fn read_entries(path: &Path) -> anyhow::Result<(u64, Vec<Entry>)> {
             other => Some((index, other)),
         })
         .try_fold(
-            (HashSet::<u64>::new(), Vec::<Entry>::new()),
+            (
+                HashSet::<u64>::with_capacity(10000),
+                Vec::<Entry>::with_capacity(10000),
+            ),
             |(mut seen, mut out), (index, line)| -> anyhow::Result<(HashSet<u64>, Vec<Entry>)> {
                 let line = line?;
                 let entry: Entry = serde_json::from_str(&line).with_context(|| {
-                    format!("parse JSON on line {} (file {:?}", index + 1, path)
+                    format!("parse JSON on line {} (file {:?})", index + 1, path)
                 })?;
 
                 if !seen.insert(entry.id()) {
