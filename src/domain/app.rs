@@ -1,54 +1,49 @@
 use chrono::{DateTime, Datelike, Local, NaiveDate};
-use std::path::{Path, PathBuf};
 
 use crate::{
     cli::{self, Period},
     domain::{Command, Entry},
-    store,
+    store::EntryStore,
 };
 
 #[derive(Debug, Clone, Default)]
-pub struct App {
-    data_dir: PathBuf,
+pub struct App<S: EntryStore> {
+    store: S,
+    // data_dir: PathBuf,
 }
 
-impl App {
+impl<S: EntryStore> App<S> {
     // TODO:
     // - Create methods: day, report
-    pub fn run(data_dir: PathBuf) -> anyhow::Result<()> {
-        let app = App { data_dir };
+    pub fn run(store: S) -> anyhow::Result<()> {
+        let mut app = App { store };
 
-        cli::run(&app)
+        cli::run(&mut app)
     }
 
-    pub fn write(&self, command: Command) -> anyhow::Result<()> {
-        let path = Self::log_path_for(Self::this_year(), &self.data_dir)?;
-        let (max, _entries) = store::read_entries(&path)?;
+    pub fn write(&mut self, command: Command) -> anyhow::Result<()> {
+        let (max, _entries) = self.store.read_all()?;
         let id = max + 1;
         let now = Self::now();
         let entry = Entry::new(id, 1, now, now.date_naive(), command);
 
-        store::append(&path, &entry)
+        self.store.append(&entry)
     }
 
-    pub fn delete(&self, id: u64) -> Result<(), anyhow::Error> {
-        let path = Self::log_path_for(Self::this_year(), &self.data_dir)?;
-
-        if !store::delete_by_id(&path, id)? {
-            println!("File {path:?} does not contain ID {id}");
+    pub fn delete(&mut self, id: u64) -> Result<(), anyhow::Error> {
+        if !self.store.delete_by_id(id)? {
+            println!("ID {id} does not exist.");
         }
 
         Ok(())
     }
 
-    pub fn status(&self, period: Period) -> Result<(), anyhow::Error> {
+    pub fn status(&self, _period: Period) -> Result<(), anyhow::Error> {
         todo!()
     }
 
-    pub fn day(&self, date: NaiveDate) -> anyhow::Result<()> {
-        let year = date.year();
-        let path = Self::log_path_for(year, &self.data_dir)?;
-        let (_max, entries) = store::read_entries(&path)?;
+    pub fn day(&self, _date: NaiveDate) -> anyhow::Result<()> {
+        let (_max, entries) = self.store.read_all()?;
 
         // TODO: Implement
         println!("{entries:#?}");
@@ -60,9 +55,5 @@ impl App {
     }
     fn this_year() -> i32 {
         Self::now().date_naive().year()
-    }
-
-    fn log_path_for(year: i32, data_dir: &Path) -> anyhow::Result<PathBuf> {
-        store::events_file(data_dir, year)
     }
 }

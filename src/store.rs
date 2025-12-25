@@ -1,3 +1,5 @@
-mod event_log;
+mod entry_store;
+mod jsonl_file_store;
 
-pub use event_log::*;
+pub use entry_store::*;
+pub use jsonl_file_store::*;

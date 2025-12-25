@@ -1,10 +1,10 @@
 use super::args::{Cli, CliCommand};
 use crate::domain::App;
-use crate::web;
+use crate::{EntryStore, web};
 
 use clap::Parser;
 
-pub fn run(app: &App) -> anyhow::Result<()> {
+pub fn run<S: EntryStore>(app: &mut App<S>) -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     if let Some(ref config_path) = cli.config {
@@ -23,5 +23,7 @@ pub fn run(app: &App) -> anyhow::Result<()> {
         CliCommand::Status { period } => app.status(period),
         CliCommand::Day { date } => app.day(date),
         CliCommand::Report {} => todo!(),
+        // TODO: Next steps:
+        // - Make a clear interface for status stuff in app, and wire it here up for hotkeys
     }
 }
