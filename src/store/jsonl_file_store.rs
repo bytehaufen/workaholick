@@ -1,10 +1,10 @@
-use std::collections::HashSet;
-use std::fs;
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 use std::{fs::OpenOptions, path::Path};
 
 use anyhow::Context;
+use chrono::Datelike;
 
 use super::EntryStore;
 use crate::domain::Entry;
@@ -13,33 +13,69 @@ const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
 
 /// JSONL file-based `EntryStore` implementation
 pub struct JsonlFileStore {
-    path: PathBuf,
+    file_path: PathBuf,
+    lock_file: File,
+    lock_path: PathBuf,
+    entries: Vec<Entry>,
+}
+
+impl Drop for JsonlFileStore {
+    fn drop(&mut self) {
+        // Lock-file is auto dropped, so we only remove it
+        let _ = fs::remove_file(&self.lock_path);
+    }
 }
 
 impl JsonlFileStore {
-    // TODO: Check necessity
-    pub fn new(path: PathBuf) -> Self {
-        Self { path }
+    pub fn new(file_path: &str) -> anyhow::Result<Self> {
+        std::fs::create_dir_all(file_path)?;
+        let file_path: &Path = file_path.as_ref();
+        let (lock_file, lock_path) = Self::create_lock_file(file_path)?;
+
+        let entries = Self::read_file(file_path)?;
+
+        Ok(Self {
+            file_path: file_path.into(),
+            lock_file,
+            lock_path,
+            entries,
+        })
     }
 
-    pub fn for_year(data_dir: &Path, year: i32) -> anyhow::Result<Self> {
-        std::fs::create_dir_all(data_dir)?;
-        let path = data_dir.join(format!("events-{}.jsonl", year));
-        Ok(Self { path })
+    fn current_year() -> i32 {
+        chrono::Local::now().year()
     }
 
-    fn ensure_parent_exists(&self) -> anyhow::Result<()> {
-        let parent = self
-            .path
-            .parent()
-            .expect("File should have a parent directory");
-        std::fs::create_dir_all(parent)?;
-        Ok(())
+    fn read_file(path: &Path) -> anyhow::Result<Vec<Entry>> {
+        if !path.exists() {
+            return Ok(Vec::new());
+        };
+
+        let file =
+            std::fs::File::open(path).with_context(|| format!("open file {path:?} for reading"))?;
+
+        let reader = BufReader::with_capacity(BUFFER_SIZE, file);
+
+        reader
+            .lines()
+            .enumerate()
+            .filter_map(|(index, line)| match line {
+                Ok(line) if line.trim().is_empty() => None,
+                other => Some((index, other)),
+            })
+            .map(|(index, line)| {
+                let line = line?;
+                let entry: Entry = serde_json::from_str(&line).with_context(|| {
+                    format!("parse JSON on line {} (file {:?})", index + 1, path)
+                })?;
+
+                Ok(entry)
+            })
+            .collect()
     }
 
     fn replace_file(&self, from: &Path, to: &Path) -> anyhow::Result<()> {
         if cfg!(windows) && to.exists() {
-            // Errors do not matter here
             let _ = fs::remove_file(to);
         }
 
@@ -48,33 +84,14 @@ impl JsonlFileStore {
         Ok(())
     }
 
-    fn temp_path(&self) -> PathBuf {
-        let mut path = self.path.to_path_buf();
-        let file_name = path
-            .file_name()
-            .and_then(|file_name| file_name.to_str())
-            .expect("File name should exist");
-        path.set_file_name(format!("{file_name}.tmp"));
-        path
-    }
-}
-
-impl EntryStore for JsonlFileStore {
-    fn append(&mut self, event: &Entry) -> anyhow::Result<()> {
-        self.ensure_parent_exists()?;
-
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)?;
-        serde_json::to_writer(&mut file, event)?;
-        writeln!(file)?;
-        Ok(())
+    fn temp_file_path(path: &Path) -> PathBuf {
+        path.with_added_extension("tmp")
     }
 
-    fn write_all(&mut self, events: &[Entry]) -> anyhow::Result<()> {
-        self.ensure_parent_exists()?;
-        let temp_file = self.temp_path();
+    fn write_all(&mut self, entries: &[Entry]) -> anyhow::Result<()> {
+        let file_path = &self.file_path;
+        let temp_file = Self::temp_file_path(file_path);
+
         let file = OpenOptions::new()
             .create(true)
             .truncate(true)
@@ -83,70 +100,45 @@ impl EntryStore for JsonlFileStore {
 
         let mut writer = BufWriter::with_capacity(BUFFER_SIZE, file);
 
-        for event in events {
-            serde_json::to_writer(&mut writer, event)?;
+        for entry in entries {
+            serde_json::to_writer(&mut writer, entry)?;
             writeln!(writer)?;
         }
 
         writer.flush()?;
         writer.get_ref().sync_all()?;
 
-        self.replace_file(&temp_file, &self.path)
+        self.replace_file(&temp_file, &self.file_path)
     }
 
-    fn read_all(&self) -> anyhow::Result<(u64, Vec<Entry>)> {
-        let path = &self.path;
+    fn create_lock_file(data_dir: &Path) -> anyhow::Result<(File, PathBuf)> {
+        let path = data_dir.join("entries.lock");
+        let file = File::create_new(&path)?;
 
-        if !path.exists() {
-            return Ok((0, Vec::new()));
-        };
+        Ok((file, path))
+    }
+}
 
-        let file =
-            std::fs::File::open(path).with_context(|| format!("open file {path:?} for reading"))?;
+impl EntryStore for JsonlFileStore {
+    fn append(&mut self, entry: &Entry) -> anyhow::Result<()> {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.file_path)?;
+        serde_json::to_writer(&mut file, entry)?;
+        writeln!(file)?;
 
-        let reader = BufReader::with_capacity(BUFFER_SIZE, file);
+        Ok(())
+    }
 
-        let (seen, entries) = reader
-            .lines()
-            .enumerate()
-            .filter_map(|(index, line)| match line {
-                Ok(line) if line.trim().is_empty() => None,
-                other => Some((index, other)),
-            })
-            .try_fold(
-                (
-                    HashSet::<u64>::with_capacity(10000),
-                    Vec::<Entry>::with_capacity(10000),
-                ),
-                |(mut seen, mut out),
-                 (index, line)|
-                 -> anyhow::Result<(HashSet<u64>, Vec<Entry>)> {
-                    let line = line?;
-                    let entry: Entry = serde_json::from_str(&line).with_context(|| {
-                        format!("parse JSON on line {} (file {:?})", index + 1, path)
-                    })?;
+    fn read_all(&self) -> anyhow::Result<Vec<Entry>> {
+        let path = &self.file_path;
 
-                    if !seen.insert(entry.id()) {
-                        return Err(anyhow::anyhow!(
-                            "line {}: duplicate entry id {}",
-                            index + 1,
-                            entry.id()
-                        ));
-                    }
-
-                    out.push(entry);
-
-                    Ok((seen, out))
-                },
-            )?;
-
-        let max: u64 = *seen.iter().max().unwrap_or(&0);
-
-        Ok((max, entries))
+        Self::read_file(path)
     }
 
     fn delete_by_id(&mut self, target_id: u64) -> anyhow::Result<bool> {
-        let (_max, mut entries) = self.read_all()?;
+        let mut entries = self.read_all()?;
 
         if let Some(position) = entries.iter().position(|entry| entry.id() == target_id) {
             entries.remove(position);
@@ -156,5 +148,9 @@ impl EntryStore for JsonlFileStore {
         }
 
         Ok(false)
+    }
+
+    fn update(&mut self, id: u64, patch: &Entry) -> anyhow::Result<()> {
+        todo!()
     }
 }

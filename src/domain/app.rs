@@ -22,8 +22,7 @@ impl<S: EntryStore> App<S> {
     }
 
     pub fn write(&mut self, command: Command) -> anyhow::Result<()> {
-        let (max, _entries) = self.store.read_all()?;
-        let id = max + 1;
+        let id = todo!("need to move id out here");
         let now = Self::now();
         let entry = Entry::new(id, 1, now, now.date_naive(), command);
 
@@ -43,7 +42,7 @@ impl<S: EntryStore> App<S> {
     }
 
     pub fn day(&self, _date: NaiveDate) -> anyhow::Result<()> {
-        let (_max, entries) = self.store.read_all()?;
+        let entries = self.store.read_all()?;
 
         // TODO: Implement
         println!("{entries:#?}");
