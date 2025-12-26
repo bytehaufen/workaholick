@@ -2,7 +2,7 @@ use chrono::{DateTime, Datelike, Local, NaiveDate};
 
 use crate::{
     cli::{self, Period},
-    domain::{Command, Entry},
+    domain::{Command, NewEntry},
     store::EntryStore,
 };
 
@@ -22,15 +22,14 @@ impl<S: EntryStore> App<S> {
     }
 
     pub fn write(&mut self, command: Command) -> anyhow::Result<()> {
-        let id = todo!("need to move id out here");
         let now = Self::now();
-        let entry = Entry::new(id, 1, now, now.date_naive(), command);
+        let entry = NewEntry::new(now, command);
 
         self.store.append(&entry)
     }
 
     pub fn delete(&mut self, id: u64) -> Result<(), anyhow::Error> {
-        if !self.store.delete_by_id(id)? {
+        if !self.store.delete_by_id(&id.into())? {
             println!("ID {id} does not exist.");
         }
 
@@ -42,7 +41,7 @@ impl<S: EntryStore> App<S> {
     }
 
     pub fn day(&self, _date: NaiveDate) -> anyhow::Result<()> {
-        let entries = self.store.read_all()?;
+        let entries = self.store.entries();
 
         // TODO: Implement
         println!("{entries:#?}");

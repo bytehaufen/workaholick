@@ -7,7 +7,7 @@ use anyhow::Context;
 use chrono::Datelike;
 
 use super::EntryStore;
-use crate::domain::Entry;
+use crate::domain::{Entry, EntryId, NewEntry};
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
 
@@ -17,6 +17,7 @@ pub struct JsonlFileStore {
     lock_file: File,
     lock_path: PathBuf,
     entries: Vec<Entry>,
+    next_id: EntryId,
 }
 
 impl Drop for JsonlFileStore {
@@ -33,12 +34,19 @@ impl JsonlFileStore {
         let (lock_file, lock_path) = Self::create_lock_file(file_path)?;
 
         let entries = Self::read_file(file_path)?;
+        let next_id = if let Some(max) = entries.iter().map(|entry| entry.id()).max() {
+            max.value() + 1
+        } else {
+            0
+        }
+        .into();
 
         Ok(Self {
             file_path: file_path.into(),
             lock_file,
             lock_path,
             entries,
+            next_id,
         })
     }
 
@@ -88,7 +96,7 @@ impl JsonlFileStore {
         path.with_added_extension("tmp")
     }
 
-    fn write_all(&mut self, entries: &[Entry]) -> anyhow::Result<()> {
+    fn persist(&mut self) -> anyhow::Result<()> {
         let file_path = &self.file_path;
         let temp_file = Self::temp_file_path(file_path);
 
@@ -100,7 +108,7 @@ impl JsonlFileStore {
 
         let mut writer = BufWriter::with_capacity(BUFFER_SIZE, file);
 
-        for entry in entries {
+        for entry in &self.entries {
             serde_json::to_writer(&mut writer, entry)?;
             writeln!(writer)?;
         }
@@ -120,7 +128,7 @@ impl JsonlFileStore {
 }
 
 impl EntryStore for JsonlFileStore {
-    fn append(&mut self, entry: &Entry) -> anyhow::Result<()> {
+    fn append(&mut self, entry: &NewEntry) -> anyhow::Result<()> {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -131,26 +139,26 @@ impl EntryStore for JsonlFileStore {
         Ok(())
     }
 
-    fn read_all(&self) -> anyhow::Result<Vec<Entry>> {
-        let path = &self.file_path;
-
-        Self::read_file(path)
+    fn entries(&self) -> &[Entry] {
+        &self.entries
     }
 
-    fn delete_by_id(&mut self, target_id: u64) -> anyhow::Result<bool> {
-        let mut entries = self.read_all()?;
+    fn delete_by_id(&mut self, id: &EntryId) -> anyhow::Result<bool> {
+        if let Some(position) = self.entries.iter().position(|entry| &entry.id() == &id) {
+            self.entries.remove(position);
 
-        if let Some(position) = entries.iter().position(|entry| entry.id() == target_id) {
-            entries.remove(position);
-
-            self.write_all(&entries)?;
+            self.persist()?;
             return Ok(true);
         }
 
         Ok(false)
     }
 
-    fn update(&mut self, id: u64, patch: &Entry) -> anyhow::Result<()> {
+    fn update(&mut self, id: &EntryId, patch: &NewEntry) -> anyhow::Result<()> {
         todo!()
+    }
+
+    fn find_by_id(&self, id: &EntryId) -> Option<&Entry> {
+        self.entries.iter().find(|entry| entry.id() == id)
     }
 }

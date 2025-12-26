@@ -2,19 +2,49 @@ use super::Command;
 use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Serialize, Deserialize)]
+pub struct EntryId(u64);
+
+impl EntryId {
+    pub fn new(id: u64) -> EntryId {
+        EntryId(id)
+    }
+}
+//
+// impl From<EntryId> for u64 {
+//     fn from(id: EntryId) -> Self {
+//         id.0
+//     }
+// }
+
+impl From<u64> for EntryId {
+    fn from(id: u64) -> Self {
+        EntryId(id)
+    }
+}
+
+impl EntryId {
+    pub fn value(&self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct EntryVersion(u64);
+
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Entry {
-    id: u64,
-    version: u16,
+    id: EntryId,
+    version: EntryVersion,
     timestamp: DateTime<Local>,
     date: NaiveDate,
     payload: Command,
 }
 
 impl Entry {
-    pub fn new(
-        id: u64,
-        version: u16,
+    pub(crate) fn new(
+        id: EntryId,
+        version: EntryVersion,
         timestamp: DateTime<Local>,
         date: NaiveDate,
         payload: Command,
@@ -28,8 +58,35 @@ impl Entry {
         }
     }
 
-    pub fn id(&self) -> u64 {
-        self.id
+    pub(crate) fn from_new_entry(id: EntryId, version: EntryVersion, new: NewEntry) -> Entry {
+        Entry {
+            id,
+            version,
+            timestamp: new.timestamp,
+            date: new.date,
+            payload: new.payload,
+        }
+    }
+
+    pub fn id(&self) -> &EntryId {
+        &self.id
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct NewEntry {
+    timestamp: DateTime<Local>,
+    date: NaiveDate,
+    payload: Command,
+}
+
+impl NewEntry {
+    pub fn new(timestamp: DateTime<Local>, payload: Command) -> Self {
+        NewEntry {
+            timestamp,
+            date: timestamp.date_naive(),
+            payload,
+        }
     }
 }
 
@@ -46,7 +103,13 @@ mod tests {
         let command = Command::In {
             day_type: DayType::Office,
         };
-        let entry = Entry::new(1, 1, timestamp, timestamp.date_naive(), command);
+        let entry = Entry::new(
+            EntryId(1),
+            EntryVersion(1),
+            timestamp,
+            timestamp.date_naive(),
+            command,
+        );
 
         let json = serde_json::to_value(&entry).unwrap();
 
@@ -65,7 +128,13 @@ mod tests {
             description: Some("test for Command::Out".to_string()),
         };
 
-        let entry = Entry::new(1, 1, timestamp, timestamp.date_naive(), command);
+        let entry = Entry::new(
+            EntryId(1),
+            EntryVersion(1),
+            timestamp,
+            timestamp.date_naive(),
+            command,
+        );
         let json = serde_json::to_value(&entry).unwrap();
 
         let description = json["payload"]["Out"]["description"].as_str().unwrap();
@@ -81,7 +150,13 @@ mod tests {
         let command = Command::Log {
             description: Some("test for Command::Log".to_string()),
         };
-        let entry = Entry::new(1, 2, timestamp, timestamp.date_naive(), command);
+        let entry = Entry::new(
+            EntryId(1),
+            EntryVersion(1),
+            timestamp,
+            timestamp.date_naive(),
+            command,
+        );
 
         let json = serde_json::to_value(&entry).unwrap();
 
@@ -96,7 +171,13 @@ mod tests {
     fn entry_serializes_command_break_start() {
         let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
         let command = Command::BreakStart;
-        let entry = Entry::new(1, 1, timestamp, timestamp.date_naive(), command);
+        let entry = Entry::new(
+            EntryId(1),
+            EntryVersion(1),
+            timestamp,
+            timestamp.date_naive(),
+            command,
+        );
 
         let json = serde_json::to_value(&entry).unwrap();
 
@@ -113,7 +194,13 @@ mod tests {
         let command = Command::BreakEnd {
             description: Some("test for Command::BreakEnd".to_string()),
         };
-        let entry: Entry = Entry::new(42, 24, timestamp, timestamp.date_naive(), command);
+        let entry: Entry = Entry::new(
+            EntryId(42),
+            EntryVersion(4),
+            timestamp,
+            timestamp.date_naive(),
+            command,
+        );
 
         let json = serde_json::to_value(&entry).unwrap();
         let break_end = json["payload"]["BreakEnd"]["description"].as_str().unwrap();

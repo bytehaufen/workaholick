@@ -6,4 +6,4 @@ mod entry;
 pub use app::App;
 pub use command::Command;
 pub use day_type::DayType;
-pub use entry::Entry;
+pub use entry::*;
