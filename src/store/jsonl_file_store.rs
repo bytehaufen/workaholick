@@ -28,7 +28,7 @@ impl Drop for JsonlFileStore {
 }
 
 impl JsonlFileStore {
-    pub fn new(file_path: &str) -> anyhow::Result<Self> {
+    pub fn new(file_path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let file_path: &Path = file_path.as_ref();
         let parent = file_path.parent().ok_or_else(|| {
             anyhow::anyhow!("Expected parent directory for file path: {:?}", file_path)
@@ -53,16 +53,7 @@ impl JsonlFileStore {
         })
     }
 
-    fn read_file(path: &Path) -> anyhow::Result<Vec<Entry>> {
-        if !path.exists() {
-            return Ok(Vec::new());
-        };
-
-        let file =
-            std::fs::File::open(path).with_context(|| format!("open file {path:?} for reading"))?;
-
-        let reader = BufReader::with_capacity(BUFFER_SIZE, file);
-
+    fn read_from<R: BufRead>(reader: R, path: &Path) -> anyhow::Result<Vec<Entry>> {
         reader
             .lines()
             .enumerate()
@@ -79,6 +70,18 @@ impl JsonlFileStore {
                 Ok(entry)
             })
             .collect()
+    }
+
+    fn read_file(path: &Path) -> anyhow::Result<Vec<Entry>> {
+        if !path.exists() {
+            return Ok(Vec::new());
+        };
+
+        let file =
+            std::fs::File::open(path).with_context(|| format!("open file {path:?} for reading"))?;
+
+        let reader = BufReader::with_capacity(BUFFER_SIZE, file);
+        Self::read_from(reader, path)
     }
 
     fn replace_file(&self, from: &Path, to: &Path) -> anyhow::Result<()> {
@@ -170,7 +173,7 @@ impl EntryStore for JsonlFileStore {
         Ok(false)
     }
 
-    fn update(&mut self, id: EntryId, patch: NewEntry) -> anyhow::Result<()> {
+    fn update(&mut self, _id: EntryId, _patch: NewEntry) -> anyhow::Result<()> {
         todo!()
     }
 
