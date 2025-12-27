@@ -2,7 +2,7 @@ use super::Command;
 use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Copy, PartialOrd, Eq, Ord, Serialize, Deserialize)]
 pub struct EntryId(u64);
 
 impl EntryId {
@@ -29,8 +29,8 @@ impl EntryId {
     }
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct EntryVersion(u64);
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct EntryVersion(pub(crate) u64);
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Entry {

@@ -2,7 +2,7 @@ use workaholick::{App, JsonlFileStore};
 
 fn main() -> anyhow::Result<()> {
     // TODO: Handle config file / data dir handling and the name
-    let data_dir = "./data";
+    let entries_file = "./data/entries.json";
 
-    App::run(JsonlFileStore::new(data_dir)?)
+    App::run(JsonlFileStore::new(entries_file)?)
 }

@@ -25,7 +25,7 @@ impl<S: EntryStore> App<S> {
         let now = Self::now();
         let entry = NewEntry::new(now, command);
 
-        self.store.append(&entry)
+        self.store.append(entry)
     }
 
     pub fn delete(&mut self, id: u64) -> Result<(), anyhow::Error> {

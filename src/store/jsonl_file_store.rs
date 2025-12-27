@@ -4,17 +4,17 @@ use std::path::PathBuf;
 use std::{fs::OpenOptions, path::Path};
 
 use anyhow::Context;
-use chrono::Datelike;
 
 use super::EntryStore;
-use crate::domain::{Entry, EntryId, NewEntry};
+use crate::domain::{Entry, EntryId, EntryVersion, NewEntry};
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
+const VERSION: EntryVersion = EntryVersion(1);
 
 /// JSONL file-based `EntryStore` implementation
 pub struct JsonlFileStore {
     file_path: PathBuf,
-    lock_file: File,
+    _lock_file: File,
     lock_path: PathBuf,
     entries: Vec<Entry>,
     next_id: EntryId,
@@ -29,9 +29,12 @@ impl Drop for JsonlFileStore {
 
 impl JsonlFileStore {
     pub fn new(file_path: &str) -> anyhow::Result<Self> {
-        std::fs::create_dir_all(file_path)?;
         let file_path: &Path = file_path.as_ref();
-        let (lock_file, lock_path) = Self::create_lock_file(file_path)?;
+        let parent = file_path.parent().ok_or_else(|| {
+            anyhow::anyhow!("Expected parent directory for file path: {:?}", file_path)
+        })?;
+        std::fs::create_dir_all(parent)?;
+        let (lock_file, lock_path) = Self::create_lock_file(parent)?;
 
         let entries = Self::read_file(file_path)?;
         let next_id = if let Some(max) = entries.iter().map(|entry| entry.id()).max() {
@@ -43,15 +46,11 @@ impl JsonlFileStore {
 
         Ok(Self {
             file_path: file_path.into(),
-            lock_file,
+            _lock_file: lock_file,
             lock_path,
             entries,
             next_id,
         })
-    }
-
-    fn current_year() -> i32 {
-        chrono::Local::now().year()
     }
 
     fn read_file(path: &Path) -> anyhow::Result<Vec<Entry>> {
@@ -128,13 +127,21 @@ impl JsonlFileStore {
 }
 
 impl EntryStore for JsonlFileStore {
-    fn append(&mut self, entry: &NewEntry) -> anyhow::Result<()> {
-        let mut file = OpenOptions::new()
+    fn append(&mut self, entry: NewEntry) -> anyhow::Result<()> {
+        let file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.file_path)?;
-        serde_json::to_writer(&mut file, entry)?;
-        writeln!(file)?;
+        let entry = Entry::from_new_entry(self.next_id, VERSION, entry);
+
+        let mut writer = BufWriter::with_capacity(BUFFER_SIZE, file);
+        serde_json::to_writer(&mut writer, &entry)?;
+        writeln!(writer)?;
+        writer.flush()?;
+        writer.get_ref().sync_all()?;
+
+        self.entries.push(entry);
+        self.next_id = EntryId::new(self.next_id.value() + 1);
 
         Ok(())
     }
@@ -144,7 +151,7 @@ impl EntryStore for JsonlFileStore {
     }
 
     fn delete_by_id(&mut self, id: &EntryId) -> anyhow::Result<bool> {
-        if let Some(position) = self.entries.iter().position(|entry| &entry.id() == &id) {
+        if let Some(position) = self.entries.iter().position(|entry| entry.id() == id) {
             self.entries.remove(position);
 
             self.persist()?;
@@ -154,11 +161,11 @@ impl EntryStore for JsonlFileStore {
         Ok(false)
     }
 
-    fn update(&mut self, id: &EntryId, patch: &NewEntry) -> anyhow::Result<()> {
+    fn update(&mut self, id: EntryId, patch: NewEntry) -> anyhow::Result<()> {
         todo!()
     }
 
-    fn find_by_id(&self, id: &EntryId) -> Option<&Entry> {
-        self.entries.iter().find(|entry| entry.id() == id)
+    fn find_by_id(&self, id: EntryId) -> Option<&Entry> {
+        self.entries.iter().find(|entry| *entry.id() == id)
     }
 }
