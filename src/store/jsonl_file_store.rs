@@ -12,6 +12,7 @@ const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
 const VERSION: EntryVersion = EntryVersion(1);
 
 /// JSONL file-based `EntryStore` implementation
+#[derive(Debug)]
 pub struct JsonlFileStore {
     file_path: PathBuf,
     _lock_file: File,
@@ -179,5 +180,132 @@ impl EntryStore for JsonlFileStore {
 
     fn find_by_id(&self, id: EntryId) -> Option<&Entry> {
         self.entries.iter().find(|entry| *entry.id() == id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Local, TimeZone};
+
+    use crate::domain::{Command, DayType};
+
+    use super::*;
+
+    #[test]
+    fn append_persists_and_reopen_reads_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+
+        let timestamp1 = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
+        let timestamp2 = Local.with_ymd_and_hms(2026, 2, 3, 4, 5, 6).unwrap();
+
+        let assert_store = |store: &JsonlFileStore| {
+            assert_eq!(store.entries().len(), 2);
+            assert_eq!(store.entries()[0].id().value(), 0);
+            assert_eq!(store.entries()[1].id().value(), 1);
+        };
+
+        {
+            let mut store = JsonlFileStore::new(&file_path).unwrap();
+
+            store
+                .append(NewEntry::new(
+                    timestamp1,
+                    Command::In {
+                        day_type: DayType::Office,
+                    },
+                ))
+                .unwrap();
+            store
+                .append(NewEntry::new(
+                    timestamp2,
+                    Command::Out {
+                        description: Some("did some stuff".to_string()),
+                    },
+                ))
+                .unwrap();
+
+            assert_store(&store);
+        }
+        {
+            let store = JsonlFileStore::new(&file_path).unwrap();
+
+            assert_store(&store);
+        }
+    }
+
+    #[test]
+    fn delete_by_id_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+
+        let timestamp1 = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
+        let timestamp2 = Local.with_ymd_and_hms(2026, 2, 3, 4, 5, 6).unwrap();
+        let timestamp3 = Local.with_ymd_and_hms(2027, 3, 4, 5, 6, 7).unwrap();
+
+        let assert_store = |store: &JsonlFileStore| {
+            let entries = store.entries();
+            assert_eq!(entries.len(), 2);
+            assert_eq!(entries[0].id().value(), 0);
+            assert_eq!(entries[1].id().value(), 2);
+            match entries[0].payload() {
+                Command::Log { description } => assert_eq!(*description, Some("a".into())),
+                _other => panic!("expected Command::Log"),
+            }
+            match entries[1].payload() {
+                Command::Log { description } => assert_eq!(*description, Some("c".into())),
+                _other => panic!("expected Command::Log"),
+            }
+        };
+
+        {
+            let mut store = JsonlFileStore::new(&file_path).unwrap();
+            store
+                .append(NewEntry::new(
+                    timestamp1,
+                    Command::Log {
+                        description: Some("a".to_string()),
+                    },
+                ))
+                .unwrap();
+            store
+                .append(NewEntry::new(
+                    timestamp2,
+                    Command::Log {
+                        description: Some("b".to_string()),
+                    },
+                ))
+                .unwrap();
+            store
+                .append(NewEntry::new(
+                    timestamp3,
+                    Command::Log {
+                        description: Some("c".to_string()),
+                    },
+                ))
+                .unwrap();
+
+            let deleted = store.delete_by_id(&EntryId::new(1)).unwrap();
+            assert!(deleted);
+            assert_store(&store);
+        }
+        {
+            let store = JsonlFileStore::new(&file_path).unwrap();
+            assert_store(&store);
+        }
+    }
+
+    #[test]
+    fn lock_file_prevents_second_instance() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+
+        let _store1 = JsonlFileStore::new(&file_path).unwrap();
+        let err = JsonlFileStore::new(&file_path).unwrap_err();
+
+        assert!(
+            err.to_string().contains("lock file exists"),
+            "unexpected error: {err:?}"
+        );
     }
 }

@@ -71,6 +71,10 @@ impl Entry {
     pub fn id(&self) -> &EntryId {
         &self.id
     }
+
+    pub fn payload(&self) -> &Command {
+        &self.payload
+    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
