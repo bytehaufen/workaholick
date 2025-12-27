@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Write};
 use std::path::PathBuf;
 use std::{fs::OpenOptions, path::Path};
 
@@ -34,7 +34,7 @@ impl JsonlFileStore {
             anyhow::anyhow!("Expected parent directory for file path: {:?}", file_path)
         })?;
         std::fs::create_dir_all(parent)?;
-        let (lock_file, lock_path) = Self::create_lock_file(parent)?;
+        let (lock_file, lock_path) = Self::create_lock_file(file_path)?;
 
         let entries = Self::read_file(file_path)?;
         let next_id = if let Some(max) = entries.iter().map(|entry| entry.id()).max() {
@@ -118,9 +118,18 @@ impl JsonlFileStore {
         self.replace_file(&temp_file, &self.file_path)
     }
 
-    fn create_lock_file(data_dir: &Path) -> anyhow::Result<(File, PathBuf)> {
-        let path = data_dir.join("entries.lock");
-        let file = File::create_new(&path)?;
+    fn create_lock_file(file_path: &Path) -> anyhow::Result<(File, PathBuf)> {
+        let path = file_path.with_added_extension("lock");
+        let file = File::create_new(&path).map_err(|error| {
+            if error.kind() == ErrorKind::AlreadyExists {
+                anyhow::anyhow!(
+                    "store is already in use (lock file exists): {path:?}\n\
+                    If no other instance is running, remove the lock file."
+                )
+            } else {
+                anyhow::anyhow!(error).context(format!("create lock file {path:?}"))
+            }
+        })?;
 
         Ok((file, path))
     }
