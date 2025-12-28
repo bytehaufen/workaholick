@@ -174,8 +174,20 @@ impl EntryStore for JsonlFileStore {
         Ok(false)
     }
 
-    fn update(&mut self, _id: EntryId, _patch: NewEntry) -> anyhow::Result<()> {
-        todo!()
+    fn update(&mut self, id: EntryId, patch: NewEntry) -> anyhow::Result<()> {
+        let position = self
+            .entries
+            .iter_mut()
+            .position(|entry| *entry.id() == id)
+            .with_context(|| format!("cannot find entry with ID {id:?}"))?;
+
+        let existing = &self.entries[position];
+        let updated = Entry::from_new_entry(id, *existing.version(), patch);
+
+        self.entries[position] = updated;
+        self.persist()?;
+
+        Ok(())
     }
 
     fn find_by_id(&self, id: EntryId) -> Option<&Entry> {
@@ -185,7 +197,7 @@ impl EntryStore for JsonlFileStore {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Local, TimeZone};
+    use chrono::{Local, TimeZone, Timelike};
 
     use crate::domain::{Command, DayType};
 
@@ -307,5 +319,78 @@ mod tests {
             err.to_string().contains("lock file exists"),
             "unexpected error: {err:?}"
         );
+    }
+
+    #[test]
+    fn update_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+
+        let assert_store = |store: &JsonlFileStore| {
+            assert_eq!(store.entries().len(), 3);
+            assert_eq!(store.entries()[0].id().value(), 0);
+            assert_eq!(store.entries()[1].id().value(), 1);
+            assert_eq!(store.entries()[2].id().value(), 2);
+        };
+
+        {
+            let mut store = JsonlFileStore::new(&file_path).unwrap();
+            let timestamp1 = Local.with_ymd_and_hms(2025, 12, 24, 17, 0, 0).unwrap();
+            let timestamp2 = Local.with_ymd_and_hms(2025, 12, 24, 14, 0, 0).unwrap();
+            let timestamp3 = Local.with_ymd_and_hms(2025, 12, 24, 20, 0, 0).unwrap();
+
+            store
+                .append(NewEntry::new(
+                    timestamp1,
+                    Command::In {
+                        day_type: DayType::Vacation,
+                    },
+                ))
+                .unwrap();
+
+            store
+                .append(NewEntry::new(
+                    timestamp2,
+                    Command::Log {
+                        description: Some("eating potato salad".into()),
+                    },
+                ))
+                .unwrap();
+
+            store
+                .append(NewEntry::new(
+                    timestamp3,
+                    Command::Out {
+                        description: Some("unwrapping presents".into()),
+                    },
+                ))
+                .unwrap();
+
+            assert_store(&store);
+        }
+        {
+            let mut store = JsonlFileStore::new(&file_path).unwrap();
+            let updated = NewEntry::new(
+                Local.with_ymd_and_hms(2025, 12, 24, 18, 0, 0).unwrap(),
+                Command::Out {
+                    description: Some("un-wrapping presents".into()),
+                },
+            );
+            store.update(1.into(), updated).unwrap();
+
+            assert_store(&store);
+        }
+        {
+            let store = JsonlFileStore::new(&file_path).unwrap();
+
+            assert_store(&store);
+            assert_eq!(store.entries()[1].timestamp().hour(), 18);
+
+            if let Command::Out { description } = store.entries()[1].payload() {
+                assert_eq!(description.as_deref(), Some("un-wrapping presents"));
+            } else {
+                panic!("Wrong command type");
+            }
+        }
     }
 }

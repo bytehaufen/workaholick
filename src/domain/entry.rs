@@ -75,6 +75,14 @@ impl Entry {
     pub fn payload(&self) -> &Command {
         &self.payload
     }
+
+    pub fn version(&self) -> &EntryVersion {
+        &self.version
+    }
+
+    pub fn timestamp(&self) -> &DateTime<Local> {
+        &self.timestamp
+    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
