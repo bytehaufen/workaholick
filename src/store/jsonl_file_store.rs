@@ -261,11 +261,11 @@ mod tests {
             assert_eq!(entries[0].id().value(), 0);
             assert_eq!(entries[1].id().value(), 2);
             match entries[0].payload() {
-                Command::Log { description } => assert_eq!(*description, Some("a".into())),
+                Command::Log { description } => assert_eq!(description.as_deref(), Some("a")),
                 _other => panic!("expected Command::Log"),
             }
             match entries[1].payload() {
-                Command::Log { description } => assert_eq!(*description, Some("c".into())),
+                Command::Log { description } => assert_eq!(description.as_deref(), Some("c")),
                 _other => panic!("expected Command::Log"),
             }
         };
@@ -392,5 +392,161 @@ mod tests {
                 panic!("Wrong command type");
             }
         }
+    }
+
+    #[test]
+    fn update_missing_id_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+
+        let mut store = JsonlFileStore::new(&file_path).unwrap();
+
+        store
+            .append(NewEntry::new(
+                Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
+                Command::Log {
+                    description: Some("a".into()),
+                },
+            ))
+            .unwrap();
+
+        let patch = NewEntry::new(
+            Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
+            Command::Log {
+                description: Some("b".into()),
+            },
+        );
+
+        let err = store.update(999.into(), patch).unwrap_err();
+        assert!(
+            err.to_string().contains("cannot find entry with ID"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn delete_missing_id_returns_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+
+        let mut store = JsonlFileStore::new(&file_path).unwrap();
+
+        store
+            .append(NewEntry::new(
+                Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
+                Command::Log {
+                    description: Some("a".into()),
+                },
+            ))
+            .unwrap();
+
+        let deleted = store.delete_by_id(&EntryId::new(123)).unwrap();
+        assert!(!deleted);
+        assert_eq!(store.entries().len(), 1);
+        assert_eq!(store.entries()[0].id().value(), 0);
+    }
+
+    #[test]
+    fn append_after_reopen_continues_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+
+        {
+            let mut store = JsonlFileStore::new(&file_path).unwrap();
+            store
+                .append(NewEntry::new(
+                    Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
+                    Command::Log {
+                        description: Some("a".into()),
+                    },
+                ))
+                .unwrap();
+            store
+                .append(NewEntry::new(
+                    Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
+                    Command::Log {
+                        description: Some("b".into()),
+                    },
+                ))
+                .unwrap();
+        }
+
+        {
+            let mut store = JsonlFileStore::new(&file_path).unwrap();
+            store
+                .append(NewEntry::new(
+                    Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
+                    Command::Log {
+                        description: Some("c".into()),
+                    },
+                ))
+                .unwrap();
+
+            assert_eq!(store.entries().len(), 3);
+            assert_eq!(store.entries()[0].id().value(), 0);
+            assert_eq!(store.entries()[1].id().value(), 1);
+            assert_eq!(store.entries()[2].id().value(), 2);
+        }
+    }
+
+    #[test]
+    fn lock_file_is_removed_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+
+        {
+            let _store = JsonlFileStore::new(&file_path).unwrap();
+        }
+
+        // Should succeed because Drop removed the lock
+        let _store2 = JsonlFileStore::new(&file_path).unwrap();
+    }
+
+    #[test]
+    fn read_file_ignores_blank_lines() {
+        use std::io::Write as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+
+        let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
+        let entry = Entry::from_new_entry(
+            EntryId::new(0),
+            super::VERSION,
+            NewEntry::new(
+                timestamp,
+                Command::Log {
+                    description: Some("a".into()),
+                },
+            ),
+        );
+
+        let mut file = std::fs::File::create(&file_path).unwrap();
+        writeln!(file).unwrap();
+        serde_json::to_writer(&mut file, &entry).unwrap();
+        writeln!(file).unwrap();
+        writeln!(file).unwrap();
+
+        let store = JsonlFileStore::new(&file_path).unwrap();
+        assert_eq!(store.entries().len(), 1);
+        assert_eq!(store.entries()[0].id().value(), 0);
+    }
+
+    #[test]
+    fn read_file_reports_line_number_on_invalid_json() {
+        use std::io::Write as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+
+        let mut file = std::fs::File::create(&file_path).unwrap();
+        writeln!(file, "{{ this is not json }}").unwrap();
+
+        let err = JsonlFileStore::new(&file_path).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("parse JSON on line 1"),
+            "unexpected error: {msg}"
+        );
     }
 }
