@@ -1,7 +1,6 @@
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Write};
-use std::path::PathBuf;
-use std::{fs::OpenOptions, path::Path};
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
@@ -34,10 +33,18 @@ impl JsonlFileStore {
         let parent = file_path.parent().ok_or_else(|| {
             anyhow::anyhow!("Expected parent directory for file path: {:?}", file_path)
         })?;
-        std::fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent)?;
+
         let (lock_file, lock_path) = Self::create_lock_file(file_path)?;
 
-        let entries = Self::read_file(file_path)?;
+        let entries = match Self::read_file(file_path) {
+            Ok(entries) => entries,
+            Err(error) => {
+                let _ = fs::remove_file(&lock_path);
+                return Err(error);
+            }
+        };
+
         let next_id = if let Some(max) = entries.iter().map(|entry| entry.id()).max() {
             max.value() + 1
         } else {
@@ -78,8 +85,7 @@ impl JsonlFileStore {
             return Ok(Vec::new());
         };
 
-        let file =
-            std::fs::File::open(path).with_context(|| format!("open file {path:?} for reading"))?;
+        let file = File::open(path).with_context(|| format!("open file {path:?} for reading"))?;
 
         let reader = BufReader::with_capacity(BUFFER_SIZE, file);
         Self::read_from(reader, path)
@@ -232,6 +238,7 @@ mod tests {
                 .append(NewEntry::new(
                     timestamp2,
                     Command::Out {
+                        title: "The main thing".into(),
                         description: Some("did some stuff".to_string()),
                     },
                 ))
@@ -261,11 +268,17 @@ mod tests {
             assert_eq!(entries[0].id().value(), 0);
             assert_eq!(entries[1].id().value(), 2);
             match entries[0].payload() {
-                Command::Log { description } => assert_eq!(description.as_deref(), Some("a")),
+                Command::Log {
+                    title: _,
+                    description,
+                } => assert_eq!(description.as_deref(), Some("a")),
                 _other => panic!("expected Command::Log"),
             }
             match entries[1].payload() {
-                Command::Log { description } => assert_eq!(description.as_deref(), Some("c")),
+                Command::Log {
+                    title: _,
+                    description,
+                } => assert_eq!(description.as_deref(), Some("c")),
                 _other => panic!("expected Command::Log"),
             }
         };
@@ -276,6 +289,7 @@ mod tests {
                 .append(NewEntry::new(
                     timestamp1,
                     Command::Log {
+                        title: "the a thing".into(),
                         description: Some("a".to_string()),
                     },
                 ))
@@ -284,6 +298,7 @@ mod tests {
                 .append(NewEntry::new(
                     timestamp2,
                     Command::Log {
+                        title: "the b thing".into(),
                         description: Some("b".to_string()),
                     },
                 ))
@@ -292,6 +307,7 @@ mod tests {
                 .append(NewEntry::new(
                     timestamp3,
                     Command::Log {
+                        title: "the c thing".into(),
                         description: Some("c".to_string()),
                     },
                 ))
@@ -352,6 +368,7 @@ mod tests {
                 .append(NewEntry::new(
                     timestamp2,
                     Command::Log {
+                        title: "So hungry".into(),
                         description: Some("eating potato salad".into()),
                     },
                 ))
@@ -361,6 +378,7 @@ mod tests {
                 .append(NewEntry::new(
                     timestamp3,
                     Command::Out {
+                        title: "So excited".into(),
                         description: Some("unwrapping presents".into()),
                     },
                 ))
@@ -373,6 +391,7 @@ mod tests {
             let updated = NewEntry::new(
                 Local.with_ymd_and_hms(2025, 12, 24, 18, 0, 0).unwrap(),
                 Command::Out {
+                    title: "So excited".into(),
                     description: Some("un-wrapping presents".into()),
                 },
             );
@@ -386,7 +405,11 @@ mod tests {
             assert_store(&store);
             assert_eq!(store.entries()[1].timestamp().hour(), 18);
 
-            if let Command::Out { description } = store.entries()[1].payload() {
+            if let Command::Out {
+                title: _,
+                description,
+            } = store.entries()[1].payload()
+            {
                 assert_eq!(description.as_deref(), Some("un-wrapping presents"));
             } else {
                 panic!("Wrong command type");
@@ -405,6 +428,7 @@ mod tests {
             .append(NewEntry::new(
                 Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
                 Command::Log {
+                    title: "the a thing".into(),
                     description: Some("a".into()),
                 },
             ))
@@ -413,6 +437,7 @@ mod tests {
         let patch = NewEntry::new(
             Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
             Command::Log {
+                title: "the b thing".into(),
                 description: Some("b".into()),
             },
         );
@@ -435,6 +460,7 @@ mod tests {
             .append(NewEntry::new(
                 Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
                 Command::Log {
+                    title: "the a thing".into(),
                     description: Some("a".into()),
                 },
             ))
@@ -457,6 +483,7 @@ mod tests {
                 .append(NewEntry::new(
                     Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
                     Command::Log {
+                        title: "the a thing".into(),
                         description: Some("a".into()),
                     },
                 ))
@@ -465,6 +492,7 @@ mod tests {
                 .append(NewEntry::new(
                     Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
                     Command::Log {
+                        title: "the b thing".into(),
                         description: Some("b".into()),
                     },
                 ))
@@ -477,6 +505,7 @@ mod tests {
                 .append(NewEntry::new(
                     Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
                     Command::Log {
+                        title: "the c thing".into(),
                         description: Some("c".into()),
                     },
                 ))
@@ -503,9 +532,31 @@ mod tests {
     }
 
     #[test]
-    fn read_file_ignores_blank_lines() {
-        use std::io::Write as _;
+    fn lock_file_is_removed_in_new_if_err() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_file_path = dir.path().join("entries.jsonl");
+        let lock_file_path = store_file_path.with_added_extension("lock");
 
+        {
+            let _store = JsonlFileStore::new(&store_file_path).unwrap();
+            assert!(
+                fs::exists(&lock_file_path).unwrap(),
+                "Lock file does not exist"
+            );
+        }
+
+        let mut store_file = fs::File::create_new(&store_file_path).unwrap();
+        store_file
+            .write_all("not parsable data".as_bytes())
+            .unwrap();
+
+        let _ = JsonlFileStore::new(&store_file_path).unwrap_err();
+
+        assert!(!fs::exists(&lock_file_path).unwrap(), "Lock file exists");
+    }
+
+    #[test]
+    fn read_file_ignores_blank_lines() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
 
@@ -516,6 +567,7 @@ mod tests {
             NewEntry::new(
                 timestamp,
                 Command::Log {
+                    title: "the a thing".into(),
                     description: Some("a".into()),
                 },
             ),
@@ -534,12 +586,10 @@ mod tests {
 
     #[test]
     fn read_file_reports_line_number_on_invalid_json() {
-        use std::io::Write as _;
-
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
 
-        let mut file = std::fs::File::create(&file_path).unwrap();
+        let mut file = File::create(&file_path).unwrap();
         writeln!(file, "{{ this is not json }}").unwrap();
 
         let err = JsonlFileStore::new(&file_path).unwrap_err();

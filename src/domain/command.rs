@@ -3,9 +3,19 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
-    In { day_type: DayType },
-    Out { description: Option<String> },
-    Log { description: Option<String> },
+    In {
+        day_type: DayType,
+    },
+    Out {
+        title: String,
+        description: Option<String>,
+    },
+    Log {
+        title: String,
+        description: Option<String>,
+    },
     BreakStart,
-    BreakEnd { description: Option<String> },
+    BreakEnd {
+        description: Option<String>,
+    },
 }

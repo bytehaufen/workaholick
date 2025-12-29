@@ -8,8 +8,8 @@ impl TryFrom<CliCommand> for Command {
     fn try_from(command: CliCommand) -> Result<Self, Self::Error> {
         Ok(match command {
             CliCommand::In { day_type } => Command::In { day_type },
-            CliCommand::Out { description } => Command::Out { description },
-            CliCommand::Log { description } => Command::Log { description },
+            CliCommand::Out { title, description } => Command::Out { title, description },
+            CliCommand::Log { title, description } => Command::Log { title, description },
             CliCommand::BreakStart => Command::BreakStart,
             CliCommand::BreakEnd { description } => Command::BreakEnd { description },
             _ => anyhow::bail!("Other commands are handled in app, not the core adapter"),

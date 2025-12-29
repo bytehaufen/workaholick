@@ -32,6 +32,8 @@ pub enum CliCommand {
     /// End the current workday
     #[command(visible_alias = "o")]
     Out {
+        // Title of what you finished
+        title: String,
         /// Optional description of what you finished
         description: Option<String>,
     },
@@ -39,6 +41,8 @@ pub enum CliCommand {
     /// Finish a block of work
     #[command(visible_alias = "l")]
     Log {
+        // Title of what you finished
+        title: String,
         /// Optional description of what you finished
         description: Option<String>,
     },

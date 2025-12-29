@@ -137,6 +137,7 @@ mod tests {
         let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
 
         let command = Command::Out {
+            title: "Out test".into(),
             description: Some("test for Command::Out".to_string()),
         };
 
@@ -160,6 +161,7 @@ mod tests {
     fn entry_serializes_command_log() {
         let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
         let command = Command::Log {
+            title: "Log test".into(),
             description: Some("test for Command::Log".to_string()),
         };
         let entry = Entry::new(
