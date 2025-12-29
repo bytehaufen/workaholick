@@ -2,7 +2,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
+use anyhow::{Context, Result, anyhow};
 
 use super::EntryStore;
 use crate::domain::{Entry, EntryId, EntryVersion, NewEntry};
@@ -28,11 +28,11 @@ impl Drop for JsonlFileStore {
 }
 
 impl JsonlFileStore {
-    pub fn new(file_path: impl AsRef<Path>) -> anyhow::Result<Self> {
+    pub fn new(file_path: impl AsRef<Path>) -> Result<Self> {
         let file_path: &Path = file_path.as_ref();
-        let parent = file_path.parent().ok_or_else(|| {
-            anyhow::anyhow!("Expected parent directory for file path: {:?}", file_path)
-        })?;
+        let parent = file_path
+            .parent()
+            .ok_or_else(|| anyhow!("Expected parent directory for file path: {:?}", file_path))?;
         fs::create_dir_all(parent)?;
 
         let (lock_file, lock_path) = Self::create_lock_file(file_path)?;
@@ -61,7 +61,7 @@ impl JsonlFileStore {
         })
     }
 
-    fn read_from<R: BufRead>(reader: R, path: &Path) -> anyhow::Result<Vec<Entry>> {
+    fn read_from<R: BufRead>(reader: R, path: &Path) -> Result<Vec<Entry>> {
         reader
             .lines()
             .enumerate()
@@ -80,7 +80,7 @@ impl JsonlFileStore {
             .collect()
     }
 
-    fn read_file(path: &Path) -> anyhow::Result<Vec<Entry>> {
+    fn read_file(path: &Path) -> Result<Vec<Entry>> {
         if !path.exists() {
             return Ok(Vec::new());
         };
@@ -91,7 +91,7 @@ impl JsonlFileStore {
         Self::read_from(reader, path)
     }
 
-    fn replace_file(&self, from: &Path, to: &Path) -> anyhow::Result<()> {
+    fn replace_file(&self, from: &Path, to: &Path) -> Result<()> {
         if cfg!(windows) && to.exists() {
             let _ = fs::remove_file(to);
         }
@@ -105,7 +105,7 @@ impl JsonlFileStore {
         path.with_added_extension("tmp")
     }
 
-    fn persist(&mut self) -> anyhow::Result<()> {
+    fn persist(&mut self) -> Result<()> {
         let file_path = &self.file_path;
         let temp_file = Self::temp_file_path(file_path);
 
@@ -128,16 +128,16 @@ impl JsonlFileStore {
         self.replace_file(&temp_file, &self.file_path)
     }
 
-    fn create_lock_file(file_path: &Path) -> anyhow::Result<(File, PathBuf)> {
+    fn create_lock_file(file_path: &Path) -> Result<(File, PathBuf)> {
         let path = file_path.with_added_extension("lock");
         let file = File::create_new(&path).map_err(|error| {
             if error.kind() == ErrorKind::AlreadyExists {
-                anyhow::anyhow!(
+                anyhow!(
                     "store is already in use (lock file exists): {path:?}\n\
                     If no other instance is running, remove the lock file."
                 )
             } else {
-                anyhow::anyhow!(error).context(format!("create lock file {path:?}"))
+                anyhow!(error).context(format!("create lock file {path:?}"))
             }
         })?;
 
@@ -146,7 +146,7 @@ impl JsonlFileStore {
 }
 
 impl EntryStore for JsonlFileStore {
-    fn append(&mut self, entry: NewEntry) -> anyhow::Result<()> {
+    fn append(&mut self, entry: NewEntry) -> Result<()> {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -169,7 +169,7 @@ impl EntryStore for JsonlFileStore {
         &self.entries
     }
 
-    fn delete_by_id(&mut self, id: &EntryId) -> anyhow::Result<bool> {
+    fn delete_by_id(&mut self, id: &EntryId) -> Result<bool> {
         if let Some(position) = self.entries.iter().position(|entry| entry.id() == id) {
             self.entries.remove(position);
 
@@ -180,7 +180,7 @@ impl EntryStore for JsonlFileStore {
         Ok(false)
     }
 
-    fn update(&mut self, id: EntryId, patch: NewEntry) -> anyhow::Result<()> {
+    fn update(&mut self, id: EntryId, patch: NewEntry) -> Result<()> {
         let position = self
             .entries
             .iter_mut()

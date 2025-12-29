@@ -2,9 +2,10 @@ use super::args::{Cli, CliCommand};
 use crate::domain::App;
 use crate::{EntryStore, web};
 
+use anyhow::Result;
 use clap::Parser;
 
-pub fn run<S: EntryStore>(app: &mut App<S>) -> anyhow::Result<()> {
+pub fn run<S: EntryStore>(app: &mut App<S>) -> Result<()> {
     let cli = Cli::parse();
 
     if let Some(ref config_path) = cli.config {

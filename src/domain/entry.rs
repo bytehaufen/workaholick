@@ -10,12 +10,6 @@ impl EntryId {
         EntryId(id)
     }
 }
-//
-// impl From<EntryId> for u64 {
-//     fn from(id: EntryId) -> Self {
-//         id.0
-//     }
-// }
 
 impl From<u64> for EntryId {
     fn from(id: u64) -> Self {
@@ -59,13 +53,7 @@ impl Entry {
     }
 
     pub(crate) fn from_new_entry(id: EntryId, version: EntryVersion, new: NewEntry) -> Entry {
-        Entry {
-            id,
-            version,
-            timestamp: new.timestamp,
-            date: new.date,
-            payload: new.payload,
-        }
+        Self::new(id, version, new.timestamp, new.date, new.payload)
     }
 
     pub fn id(&self) -> &EntryId {

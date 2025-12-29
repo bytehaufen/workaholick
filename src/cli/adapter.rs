@@ -1,9 +1,11 @@
+use anyhow::{Error, bail};
+
 use super::args::CliCommand;
 use crate::domain::Command;
 
 // TODO: TryFrom Really the right one here?
 impl TryFrom<CliCommand> for Command {
-    type Error = anyhow::Error;
+    type Error = Error;
 
     fn try_from(command: CliCommand) -> Result<Self, Self::Error> {
         Ok(match command {
@@ -12,7 +14,7 @@ impl TryFrom<CliCommand> for Command {
             CliCommand::Log { title, description } => Command::Log { title, description },
             CliCommand::BreakStart => Command::BreakStart,
             CliCommand::BreakEnd { description } => Command::BreakEnd { description },
-            _ => anyhow::bail!("Other commands are handled in app, not the core adapter"),
+            _ => bail!("Other commands are handled in app, not the core adapter"),
         })
     }
 }
