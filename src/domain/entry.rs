@@ -80,6 +80,18 @@ pub struct NewEntry {
     payload: Command,
 }
 
+impl From<&Entry> for NewEntry {
+    fn from(entry: &Entry) -> Self {
+        let timestamp = entry.timestamp;
+
+        Self {
+            timestamp,
+            date: timestamp.date_naive(),
+            payload: entry.payload.clone(),
+        }
+    }
+}
+
 impl NewEntry {
     pub fn new(timestamp: DateTime<Local>, payload: Command) -> Self {
         NewEntry {

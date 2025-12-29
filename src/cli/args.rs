@@ -70,14 +70,6 @@ pub enum CliCommand {
     Edit {
         /// ID of the entry to edit
         id: u64,
-
-        /// Print the entry to stdout instead of editing
-        #[arg(long)]
-        print: bool,
-
-        /// Apply a new description
-        #[arg(long, value_name = "TEXT")]
-        description: Option<String>,
     },
 
     // --- Query commands ---
