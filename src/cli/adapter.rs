@@ -1,7 +1,7 @@
 use anyhow::{Error, bail};
 
-use super::args::CliCommand;
-use crate::domain::Command;
+use super::args::{CliCommand, PeriodArg};
+use crate::domain::{Command, Period};
 
 // TODO: TryFrom Really the right one here?
 impl TryFrom<CliCommand> for Command {
@@ -16,5 +16,16 @@ impl TryFrom<CliCommand> for Command {
             CliCommand::BreakEnd { description } => Command::BreakEnd { description },
             _ => bail!("Other commands are handled in app, not the core adapter"),
         })
+    }
+}
+
+impl From<PeriodArg> for Period {
+    fn from(p: PeriodArg) -> Self {
+        match p {
+            PeriodArg::Today => Period::Today,
+            PeriodArg::Prev => Period::Prev,
+            PeriodArg::Week => Period::Week,
+            PeriodArg::Month => Period::Month,
+        }
     }
 }

@@ -4,8 +4,8 @@ use std::{fs, io::Write, path::Path};
 use tempfile::NamedTempFile;
 
 use crate::{
-    cli::{self, Period},
-    domain::{Command, NewEntry},
+    cli,
+    domain::{Command, NewEntry, Period},
     store::EntryStore,
 };
 

@@ -20,8 +20,8 @@ pub fn run<S: EntryStore>(app: &mut App<S>) -> Result<()> {
         CliCommand::BreakStart => app.write(cli.command.try_into()?),
         CliCommand::BreakEnd { .. } => app.write(cli.command.try_into()?),
         CliCommand::Delete { id } => app.delete(id),
-        CliCommand::Status { period } => app.status(period),
         CliCommand::Edit { id } => app.edit(id),
+        CliCommand::Status { period } => app.status(period.into()),
         CliCommand::Day { date } => app.day(date),
         CliCommand::Report {} => todo!(),
         // TODO: Next steps:

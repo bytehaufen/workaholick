@@ -77,8 +77,8 @@ pub enum CliCommand {
     #[command(visible_alias = "s")]
     Status {
         /// Time period to summarize
-        #[arg(value_enum, default_value_t = Period::Today, value_name = "PERIOD")]
-        period: Period,
+        #[arg(value_enum, default_value_t = PeriodArg::Today, value_name = "PERIOD")]
+        period: PeriodArg,
     },
 
     /// Inspect a day (arbitrary date)
@@ -97,7 +97,7 @@ pub enum CliCommand {
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
-pub enum Period {
+pub enum PeriodArg {
     /// Today (default)
     #[value(alias = "t")]
     Today,
