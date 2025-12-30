@@ -1,4 +1,4 @@
-use super::Command;
+use super::{Command, date_time_codec};
 use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +30,7 @@ pub struct EntryVersion(pub(crate) u64);
 pub struct Entry {
     id: EntryId,
     version: EntryVersion,
+    #[serde(with = "date_time_codec")]
     timestamp: DateTime<Local>,
     date: NaiveDate,
     payload: Command,
@@ -75,6 +76,7 @@ impl Entry {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct NewEntry {
+    #[serde(with = "date_time_codec")]
     timestamp: DateTime<Local>,
     date: NaiveDate,
     payload: Command,
