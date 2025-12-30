@@ -1,5 +1,5 @@
 use super::args::{Cli, CliCommand};
-use crate::domain::App;
+use crate::App;
 use crate::{EntryStore, web};
 
 use anyhow::Result;
