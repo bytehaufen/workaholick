@@ -1,26 +1,24 @@
 use chrono::{DateTime, Local, NaiveDate};
-use std::process::Command as ProcCommand;
-use std::{fs, io::Write, path::Path};
-use tempfile::NamedTempFile;
 
 use crate::{
     cli,
-    domain::{Command, NewEntry, Period},
+    domain::{Command, Editor, NewEntry, Period},
     store::EntryStore,
 };
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result};
 
 #[derive(Debug, Clone, Default)]
-pub struct App<S: EntryStore> {
+pub struct App<S: EntryStore, E: Editor> {
     store: S,
+    editor: E,
 }
 
-impl<S: EntryStore> App<S> {
+impl<S: EntryStore, E: Editor> App<S, E> {
     // TODO:
     // - Create methods: day, report
-    pub fn run(store: S) -> Result<()> {
-        let mut app = App { store };
+    pub fn run(store: S, editor: E) -> Result<()> {
+        let mut app = App { store, editor };
 
         cli::run(&mut app)
     }
@@ -63,59 +61,10 @@ impl<S: EntryStore> App<S> {
             .with_context(|| format!("find ID {id}"))?
             .into();
 
-        edit_entry_in_editor(&mut entry)?;
+        self.editor.edit(&mut entry)?;
 
         self.store.update(id.into(), entry)?;
 
         Ok(())
     }
-}
-
-fn edit_entry_in_editor(entry: &mut NewEntry) -> Result<()> {
-    let mut file = NamedTempFile::new().context("creating temp file for editor")?;
-
-    let toml_text = toml::to_string_pretty(&entry).context("serializing entry to TOML")?;
-
-    file.write_all(toml_text.as_bytes())
-        .context("writing initial entry to temp file")?;
-    file.flush()?;
-
-    open_editor(file.path())?;
-
-    let edited_text = fs::read_to_string(file.path())?;
-    let edited_entry: NewEntry =
-        toml::from_str(&edited_text).context("parsing edited TOML (did you break the syntax?)")?;
-
-    *entry = edited_entry;
-
-    Ok(())
-}
-
-fn open_editor(path: &Path) -> Result<()> {
-    let editor = std::env::var("VISUAL")
-        .ok()
-        .filter(|env_var| !env_var.trim().is_empty())
-        .or_else(|| std::env::var("EDITOR").ok())
-        .unwrap_or_else(|| "vi".to_string());
-
-    let mut parts =
-        shlex::split(&editor).ok_or_else(|| anyhow!("Could not parse EDITOR: {editor:?}"))?;
-
-    if parts.is_empty() {
-        parts.push("vi".into());
-    }
-
-    let cmd = parts.remove(0);
-
-    let status = ProcCommand::new(cmd)
-        .args(parts)
-        .arg(path)
-        .status()
-        .context("failed to launch editor")?;
-
-    if !status.success() {
-        bail!("editor exited with {}", status);
-    }
-
-    Ok(())
 }
