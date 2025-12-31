@@ -19,7 +19,7 @@ impl Default for ShellEditor {
 }
 
 impl Editor for ShellEditor {
-    fn edit(&self, entry: &mut NewEntry) -> anyhow::Result<()> {
+    fn edit(&mut self, entry: &mut NewEntry) -> anyhow::Result<()> {
         let mut file = Builder::new()
             .suffix(".toml")
             .tempfile()

@@ -5,12 +5,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, PartialEq, Clone, Copy, PartialOrd, Eq, Ord, Serialize, Deserialize)]
 pub struct EntryId(u64);
 
-impl EntryId {
-    pub fn new(id: u64) -> EntryId {
-        EntryId(id)
-    }
-}
-
 impl From<u64> for EntryId {
     fn from(id: u64) -> Self {
         EntryId(id)
@@ -24,7 +18,13 @@ impl EntryId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct EntryVersion(pub(crate) u64);
+pub struct EntryVersion(u8);
+
+impl From<u8> for EntryVersion {
+    fn from(id: u8) -> Self {
+        EntryVersion(id)
+    }
+}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Entry {

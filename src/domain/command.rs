@@ -19,3 +19,12 @@ pub enum Command {
         description: Option<String>,
     },
 }
+
+impl Default for Command {
+    fn default() -> Self {
+        Self::Log {
+            title: "title".into(),
+            description: None,
+        }
+    }
+}

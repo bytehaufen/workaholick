@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 // TODO: Remove hardcoded variants
+
 #[derive(Debug, Clone, Error)]
 #[error("invalid day_type '{input}' (expected one of: office, home, travel, vacation, sick)")]
 pub struct ParseDayTypeError {

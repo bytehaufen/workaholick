@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 
 use super::EntryStore;
-use crate::domain::{Entry, EntryId, EntryVersion, NewEntry};
+use crate::domain::{Entry, EntryId, NewEntry};
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
-const VERSION: EntryVersion = EntryVersion(1);
+const VERSION: u8 = 1;
 
 /// JSONL file-based `EntryStore` implementation
 #[derive(Debug)]
@@ -151,7 +151,7 @@ impl EntryStore for JsonlFileStore {
             .create(true)
             .append(true)
             .open(&self.file_path)?;
-        let entry = Entry::from_new_entry(self.next_id, VERSION, entry);
+        let entry = Entry::from_new_entry(self.next_id, VERSION.into(), entry);
 
         let mut writer = BufWriter::with_capacity(BUFFER_SIZE, file);
         serde_json::to_writer(&mut writer, &entry)?;
@@ -160,7 +160,7 @@ impl EntryStore for JsonlFileStore {
         writer.get_ref().sync_all()?;
 
         self.entries.push(entry);
-        self.next_id = EntryId::new(self.next_id.value() + 1);
+        self.next_id = EntryId::from(self.next_id.value() + 1);
 
         Ok(())
     }
@@ -313,7 +313,7 @@ mod tests {
                 ))
                 .unwrap();
 
-            let deleted = store.delete_by_id(&EntryId::new(1)).unwrap();
+            let deleted = store.delete_by_id(&EntryId::from(1)).unwrap();
             assert!(deleted);
             assert_store(&store);
         }
@@ -466,7 +466,7 @@ mod tests {
             ))
             .unwrap();
 
-        let deleted = store.delete_by_id(&EntryId::new(123)).unwrap();
+        let deleted = store.delete_by_id(&EntryId::from(123)).unwrap();
         assert!(!deleted);
         assert_eq!(store.entries().len(), 1);
         assert_eq!(store.entries()[0].id().value(), 0);
@@ -562,8 +562,8 @@ mod tests {
 
         let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
         let entry = Entry::from_new_entry(
-            EntryId::new(0),
-            super::VERSION,
+            EntryId::from(0),
+            super::VERSION.into(),
             NewEntry::new(
                 timestamp,
                 Command::Log {

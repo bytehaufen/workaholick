@@ -15,12 +15,14 @@ pub struct App<S: EntryStore, E: Editor> {
 }
 
 impl<S: EntryStore, E: Editor> App<S, E> {
+    pub fn new(store: S, editor: E) -> Self {
+        Self { store, editor }
+    }
+
     // TODO:
     // - Create methods: day, report
-    pub fn run(store: S, editor: E) -> Result<()> {
-        let mut app = App { store, editor };
-
-        cli::run(&mut app)
+    pub fn run(&mut self) -> Result<()> {
+        cli::run(self)
     }
 
     pub fn write(&mut self, command: Command) -> Result<()> {

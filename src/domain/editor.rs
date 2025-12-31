@@ -2,5 +2,5 @@ use super::NewEntry;
 use anyhow::Result;
 
 pub trait Editor {
-    fn edit(&self, entry: &mut NewEntry) -> Result<()>;
+    fn edit(&mut self, entry: &mut NewEntry) -> Result<()>;
 }
