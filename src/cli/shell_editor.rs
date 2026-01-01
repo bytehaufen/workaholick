@@ -1,79 +1,58 @@
-use crate::domain::{Editor, NewEntry};
+use crate::editor;
+use crate::editor::command::parse_editor_command;
+use crate::editor::system::{
+    Editor, Env, Fs, Process, StdEnv, StdFs, StdProcess, Temp, TempFileTemp,
+};
 
-use anyhow::{Context, Result, anyhow, bail};
-use std::{fs, io::Write, path::Path, process::Command};
-use tempfile::Builder;
+use anyhow::{Context, Result};
+use std::fs;
 
-pub struct ShellEditor;
-
-impl ShellEditor {
-    pub fn new() -> Self {
-        Self
-    }
+pub struct ShellEditor<E, F, T, P> {
+    env: E,
+    fs: F,
+    temp: T,
+    proc: P,
 }
 
-impl Default for ShellEditor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Editor for ShellEditor {
-    fn edit(&mut self, entry: &mut NewEntry) -> anyhow::Result<()> {
-        let mut file = Builder::new()
-            .suffix(".toml")
-            .tempfile()
-            .context("creating temp file for editor")?;
-
-        let toml_text = toml::to_string_pretty(&entry).context("serializing entry to TOML")?;
-
-        file.write_all(toml_text.as_bytes())
-            .context("writing initial entry to temp file")?;
-        file.flush()?;
-
-        open_editor(file.path())?;
-
-        let edited_text = fs::read_to_string(file.path())?;
-        if edited_text == toml_text {
-            println!("No changes made to the entry");
-            return Ok(());
+impl<E, F, T, P> ShellEditor<E, F, T, P> {
+    pub fn new(env: E, fs: F, temp: T, proc: P) -> Self {
+        Self {
+            env,
+            fs,
+            temp,
+            proc,
         }
-
-        let edited_entry: NewEntry = toml::from_str(&edited_text)
-            .context("parsing edited TOML (did you break the syntax?)")?;
-
-        *entry = edited_entry;
-
-        Ok(())
     }
 }
 
-// TODO: Accept Editor from config file
-fn open_editor(path: &Path) -> Result<()> {
-    let editor = std::env::var("VISUAL")
-        .ok()
-        .filter(|env_var| !env_var.trim().is_empty())
-        .or_else(|| std::env::var("EDITOR").ok())
-        .unwrap_or_else(|| "vi".to_string());
-
-    let mut parts =
-        shlex::split(&editor).ok_or_else(|| anyhow!("Could not parse EDITOR: {editor:?}"))?;
-
-    if parts.is_empty() {
-        parts.push("vi".into());
+impl ShellEditor<StdEnv, StdFs, TempFileTemp, StdProcess> {
+    pub fn real() -> Self {
+        Self::new(StdEnv, StdFs, TempFileTemp, StdProcess)
     }
+}
 
-    let cmd = parts.remove(0);
+impl<E: Env, F: Fs, T: Temp, P: Process> Editor for ShellEditor<E, F, T, P> {
+    fn edit(&self, initial: &str) -> Result<String> {
+        let path = self.temp.temp_file("toml").context("creating temp file")?;
 
-    let status = Command::new(cmd)
-        .args(parts)
-        .arg(path)
-        .status()
-        .context("failed to launch editor")?;
+        self.fs
+            .write_string(&path, initial)
+            .context("writing temp file")?;
 
-    if !status.success() {
-        bail!("editor exited with {}", status);
+        let cmd = editor::command::choose_editor(self.env.var("VISUAL"), self.env.var("EDITOR"));
+        let mut cmd = parse_editor_command(&cmd)?;
+
+        // Final arg is file path
+        cmd.args.push(path.to_string_lossy().into());
+
+        self.proc
+            .run(&cmd.program, &cmd.args)
+            .context("running editor")?;
+
+        let edited = self.fs.read_string(&path).context("reading edited file")?;
+
+        let _ = fs::remove_file(&path);
+
+        Ok(edited)
     }
-
-    Ok(())
 }

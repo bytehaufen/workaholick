@@ -1,8 +1,12 @@
+mod edit_format;
+
 use chrono::{DateTime, Local, NaiveDate};
 
 use crate::{
+    app::edit_format::{parse_edited, render_for_edit},
     cli,
-    domain::{Command, Editor, NewEntry, Period},
+    domain::{Command, NewEntry, Period},
+    editor::Editor,
     store::EntryStore,
 };
 
@@ -57,15 +61,16 @@ impl<S: EntryStore, E: Editor> App<S, E> {
     }
 
     pub fn edit(&mut self, id: u64) -> Result<()> {
-        let mut entry: NewEntry = self
+        let entry: NewEntry = self
             .store
             .find_by_id(id.into())
             .with_context(|| format!("find ID {id}"))?
             .into();
 
-        self.editor.edit(&mut entry)?;
-
-        self.store.update(id.into(), entry)?;
+        let initial = render_for_edit(&entry)?;
+        let edited = self.editor.edit(&initial)?;
+        let patch = parse_edited(&edited)?;
+        self.store.update(id.into(), patch)?;
 
         Ok(())
     }

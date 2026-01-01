@@ -1,6 +1,6 @@
 use super::args::{Cli, CliCommand};
 use crate::App;
-use crate::domain::Editor;
+use crate::editor::Editor;
 use crate::{EntryStore, web};
 
 use anyhow::Result;

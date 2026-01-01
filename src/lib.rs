@@ -2,6 +2,7 @@ mod app;
 mod cli;
 mod config;
 mod domain;
+mod editor;
 mod store;
 mod web;
 
