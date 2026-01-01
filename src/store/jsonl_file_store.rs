@@ -267,14 +267,14 @@ mod tests {
             assert_eq!(entries.len(), 2);
             assert_eq!(entries[0].id().value(), 0);
             assert_eq!(entries[1].id().value(), 2);
-            match entries[0].payload() {
+            match entries[0].command() {
                 Command::Log {
                     title: _,
                     description,
                 } => assert_eq!(description.as_deref(), Some("a")),
                 _other => panic!("expected Command::Log"),
             }
-            match entries[1].payload() {
+            match entries[1].command() {
                 Command::Log {
                     title: _,
                     description,
@@ -408,7 +408,7 @@ mod tests {
             if let Command::Out {
                 title: _,
                 description,
-            } = store.entries()[1].payload()
+            } = store.entries()[1].command()
             {
                 assert_eq!(description.as_deref(), Some("un-wrapping presents"));
             } else {

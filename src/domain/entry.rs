@@ -33,7 +33,7 @@ pub struct Entry {
     #[serde(with = "date_time_codec")]
     timestamp: DateTime<Local>,
     date: NaiveDate,
-    payload: Command,
+    command: Command,
 }
 
 impl Entry {
@@ -42,27 +42,27 @@ impl Entry {
         version: EntryVersion,
         timestamp: DateTime<Local>,
         date: NaiveDate,
-        payload: Command,
+        command: Command,
     ) -> Entry {
         Entry {
             id,
             version,
             timestamp,
             date,
-            payload,
+            command,
         }
     }
 
     pub(crate) fn from_new_entry(id: EntryId, version: EntryVersion, new: NewEntry) -> Entry {
-        Self::new(id, version, new.timestamp, new.date, new.payload)
+        Self::new(id, version, new.timestamp, new.date, new.command)
     }
 
     pub fn id(&self) -> &EntryId {
         &self.id
     }
 
-    pub fn payload(&self) -> &Command {
-        &self.payload
+    pub fn command(&self) -> &Command {
+        &self.command
     }
 
     pub fn version(&self) -> &EntryVersion {
@@ -79,7 +79,7 @@ pub struct NewEntry {
     #[serde(with = "date_time_codec")]
     timestamp: DateTime<Local>,
     date: NaiveDate,
-    payload: Command,
+    command: Command,
 }
 
 impl From<&Entry> for NewEntry {
@@ -89,17 +89,17 @@ impl From<&Entry> for NewEntry {
         Self {
             timestamp,
             date: timestamp.date_naive(),
-            payload: entry.payload.clone(),
+            command: entry.command.clone(),
         }
     }
 }
 
 impl NewEntry {
-    pub fn new(timestamp: DateTime<Local>, payload: Command) -> Self {
+    pub fn new(timestamp: DateTime<Local>, command: Command) -> Self {
         NewEntry {
             timestamp,
             date: timestamp.date_naive(),
-            payload,
+            command,
         }
     }
 }
@@ -126,9 +126,8 @@ mod tests {
         );
 
         let json = serde_json::to_value(&entry).unwrap();
-
-        let day_type = json["payload"]["In"]["day_type"].as_str().unwrap();
-        assert_eq!(day_type, "office");
+        assert_eq!(json["command"]["type"].as_str().unwrap(), "In");
+        assert_eq!(json["command"]["day_type"].as_str().unwrap(), "office");
 
         let decoded: Entry = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, entry);
@@ -152,8 +151,11 @@ mod tests {
         );
         let json = serde_json::to_value(&entry).unwrap();
 
-        let description = json["payload"]["Out"]["description"].as_str().unwrap();
-        assert_eq!(description, "test for Command::Out");
+        assert_eq!(json["command"]["type"].as_str().unwrap(), "Out");
+        assert_eq!(
+            json["command"]["description"].as_str().unwrap(),
+            "test for Command::Out"
+        );
 
         let decoded: Entry = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, entry);
@@ -176,8 +178,11 @@ mod tests {
 
         let json = serde_json::to_value(&entry).unwrap();
 
-        let description = json["payload"]["Log"]["description"].as_str().unwrap();
-        assert_eq!(description, "test for Command::Log");
+        assert_eq!(json["command"]["type"].as_str().unwrap(), "Log");
+        assert_eq!(
+            json["command"]["description"].as_str().unwrap(),
+            "test for Command::Log"
+        );
 
         let decoded: Entry = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, entry);
@@ -197,8 +202,7 @@ mod tests {
 
         let json = serde_json::to_value(&entry).unwrap();
 
-        let break_start = json["payload"].as_str().unwrap();
-        assert_eq!(break_start, "BreakStart");
+        assert_eq!(json["command"]["type"].as_str().unwrap(), "BreakStart");
 
         let decoded: Entry = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, entry);
@@ -219,8 +223,12 @@ mod tests {
         );
 
         let json = serde_json::to_value(&entry).unwrap();
-        let break_end = json["payload"]["BreakEnd"]["description"].as_str().unwrap();
-        assert_eq!(break_end, "test for Command::BreakEnd");
+
+        assert_eq!(json["command"]["type"].as_str().unwrap(), "BreakEnd");
+        assert_eq!(
+            json["command"]["description"].as_str().unwrap(),
+            "test for Command::BreakEnd"
+        );
 
         let decoded: Entry = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, entry);

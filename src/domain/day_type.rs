@@ -10,12 +10,21 @@ pub struct ParseDayTypeError {
 }
 
 #[derive(
-    Copy, Clone, Debug, PartialEq, Serialize, Deserialize, strum::Display, strum::EnumString,
+    Default,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
 )]
 #[strum(ascii_case_insensitive)]
 #[serde(rename_all = "lowercase")]
 pub enum DayType {
     Office,
+    #[default]
     Home,
     Travel,
     Vacation,
