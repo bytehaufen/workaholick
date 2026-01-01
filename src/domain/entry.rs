@@ -32,7 +32,7 @@ pub struct Entry {
     version: EntryVersion,
     #[serde(with = "date_time_codec")]
     timestamp: DateTime<Local>,
-    date: NaiveDate,
+    date: NaiveDate, // TODO: Benchmark necessity
     command: Command,
 }
 

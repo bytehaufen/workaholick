@@ -33,7 +33,7 @@ impl ShellEditor<StdEnv, StdFs, TempFileTemp, StdProcess> {
 
 impl<E: Env, F: Fs, T: Temp, P: Process> Editor for ShellEditor<E, F, T, P> {
     fn edit(&self, initial: &str) -> Result<String> {
-        let path = self.temp.temp_file("toml").context("creating temp file")?;
+        let path = self.temp.temp_file("ron").context("creating temp file")?;
 
         self.fs
             .write_string(&path, initial)

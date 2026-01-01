@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use strum::EnumIter;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EnumIter)]
-#[serde(tag = "type")]
 pub enum Command {
     In {
         day_type: DayType,
