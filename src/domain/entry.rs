@@ -126,8 +126,10 @@ mod tests {
         );
 
         let json = serde_json::to_value(&entry).unwrap();
-        assert_eq!(json["command"]["type"].as_str().unwrap(), "In");
-        assert_eq!(json["command"]["day_type"].as_str().unwrap(), "office");
+        assert_eq!(
+            json["command"]["In"]["day_type"].as_str().unwrap(),
+            "office"
+        );
 
         let decoded: Entry = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, entry);
@@ -151,9 +153,8 @@ mod tests {
         );
         let json = serde_json::to_value(&entry).unwrap();
 
-        assert_eq!(json["command"]["type"].as_str().unwrap(), "Out");
         assert_eq!(
-            json["command"]["description"].as_str().unwrap(),
+            json["command"]["Out"]["description"].as_str().unwrap(),
             "test for Command::Out"
         );
 
@@ -178,9 +179,8 @@ mod tests {
 
         let json = serde_json::to_value(&entry).unwrap();
 
-        assert_eq!(json["command"]["type"].as_str().unwrap(), "Log");
         assert_eq!(
-            json["command"]["description"].as_str().unwrap(),
+            json["command"]["Log"]["description"].as_str().unwrap(),
             "test for Command::Log"
         );
 
@@ -202,7 +202,7 @@ mod tests {
 
         let json = serde_json::to_value(&entry).unwrap();
 
-        assert_eq!(json["command"]["type"].as_str().unwrap(), "BreakStart");
+        assert_eq!(json["command"].as_str().unwrap(), "BreakStart");
 
         let decoded: Entry = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, entry);
@@ -224,9 +224,8 @@ mod tests {
 
         let json = serde_json::to_value(&entry).unwrap();
 
-        assert_eq!(json["command"]["type"].as_str().unwrap(), "BreakEnd");
         assert_eq!(
-            json["command"]["description"].as_str().unwrap(),
+            json["command"]["BreakEnd"]["description"].as_str().unwrap(),
             "test for Command::BreakEnd"
         );
 
