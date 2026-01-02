@@ -63,3 +63,71 @@ impl Process for StdProcess {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn std_env_var_gets_set_and_unset() {
+        let key = "WORKAHOLICK_TEST_STDENV_VAR";
+
+        unsafe { env::remove_var(key) };
+        assert_eq!(StdEnv.var(key), None);
+
+        unsafe { env::set_var(key, "value") };
+        assert_eq!(StdEnv.var(key).as_deref(), Some("value"));
+
+        unsafe { env::remove_var(key) };
+        assert_eq!(StdEnv.var(key), None);
+    }
+
+    #[test]
+    fn std_fs_write_then_read_roundtrip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("file.txt");
+
+        StdFs.write_string(&path, "hello").unwrap();
+        let read = StdFs.read_string(&path).unwrap();
+
+        assert_eq!(read, "hello");
+    }
+
+    #[test]
+    fn std_fs_read_missing_file_errors() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("missing.txt");
+
+        assert!(StdFs.read_string(&path).is_err());
+    }
+
+    #[test]
+    fn temp_file_temp_creates_file_with_suffix() {
+        let path = TempFileTemp.temp_file("md").unwrap();
+        assert!(path.exists());
+        assert!(path.to_string_lossy().ends_with(".md"));
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn std_process_run_success_is_ok() {
+        StdProcess.run("true", &[]).unwrap();
+    }
+
+    #[test]
+    fn std_process_run_failure_is_err() {
+        let err = StdProcess.run("false", &[]).unwrap_err();
+        assert!(err.to_string().contains("editor exited with"));
+    }
+
+    #[test]
+    fn std_process_run_missing_program_is_err() {
+        assert!(
+            StdProcess
+                .run("definitely-not-a-real-program", &[])
+                .is_err()
+        );
+    }
+}
