@@ -29,10 +29,24 @@ pub fn render_for_edit(entry: &NewEntry) -> Result<String> {
 }
 
 pub fn parse_edited(text: &str) -> Result<NewEntry> {
-    let entry: NewEntry =
-        ron::from_str(text).context("parsing edited RON (did you break the syntax?)")?;
-
-    Ok(entry)
+    ron::from_str(text).context("parsing edited RON (did you break the syntax?)")
 }
 
-// TODO: Test this
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Local, TimeZone};
+
+    #[test]
+    fn render_output_parses() {
+        let entry = NewEntry::new(
+            Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap(),
+            Command::default(),
+        );
+
+        let rendered = render_for_edit(&entry).unwrap();
+        let parsed = parse_edited(&rendered).unwrap();
+
+        assert_eq!(parsed, entry);
+    }
+}
