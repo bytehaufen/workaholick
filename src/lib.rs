@@ -1,12 +1,11 @@
 mod app;
-mod cli;
-mod config;
+pub mod cli;
+pub mod config;
 mod domain;
 mod editor;
 mod store;
 mod web;
 
 pub use crate::app::App;
-pub use crate::cli::ShellEditor;
 pub use crate::store::EntryStore;
 pub use crate::store::JsonlFileStore;

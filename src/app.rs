@@ -4,9 +4,9 @@ use chrono::{DateTime, Local, NaiveDate};
 
 use crate::{
     app::edit_format::{parse_edited, render_for_edit},
-    cli,
+    config::Config,
     domain::{Command, Entry, NewEntry, Summary, SummaryRequest, summary},
-    editor::Editor,
+    editor::{Editor, system::FileType},
     store::EntryStore,
 };
 
@@ -14,21 +14,22 @@ use anyhow::{Context, Result, anyhow};
 
 #[derive(Debug, Clone, Default)]
 pub struct App<S: EntryStore, E: Editor> {
+    config: Config,
     store: S,
     editor: E,
 }
 
 impl<S: EntryStore, E: Editor> App<S, E> {
-    pub fn new(store: S, editor: E) -> Self {
-        Self { store, editor }
+    pub fn new(config: Config, store: S, editor: E) -> Result<Self> {
+        Ok(Self {
+            config,
+            store,
+            editor,
+        })
     }
 
     // TODO:
     // - Implement methods: day, status, report
-    pub fn run(&mut self) -> Result<()> {
-        cli::run(self)
-    }
-
     pub fn write(&mut self, command: Command) -> Result<()> {
         let now = now();
         let entry = NewEntry::new(now, command);
@@ -71,7 +72,7 @@ impl<S: EntryStore, E: Editor> App<S, E> {
             .into();
 
         let initial = render_for_edit(&entry)?;
-        let edited = self.editor.edit(&initial)?;
+        let edited = self.editor.edit(&initial, FileType::Ron)?;
         let patch = parse_edited(&edited)?;
         self.store.update(id.into(), patch)?;
 

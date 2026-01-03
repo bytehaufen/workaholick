@@ -20,6 +20,12 @@ pub enum CliCommand {
     #[command()]
     Web,
 
+    /// Get and set config
+    Config {
+        #[command(subcommand)]
+        command: Option<ConfigCommand>,
+    },
+
     // --- Write commands  ---
     /// Start a workday
     #[command(visible_alias = "i")]
@@ -92,6 +98,18 @@ pub enum CliCommand {
     },
 }
 
+#[derive(Subcommand, Debug)]
+pub enum ConfigCommand {
+    /// Show current config
+    Show,
+
+    /// Edit config file in $VISUAL/$EDITOR
+    Edit,
+
+    /// Create config file if missing
+    Init,
+}
+
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum PeriodArg {
     /// Today (default)
@@ -109,4 +127,8 @@ pub enum PeriodArg {
     /// This month
     #[value(alias = "m")]
     Month,
+}
+
+pub fn parse() -> Cli {
+    Cli::parse()
 }

@@ -1,13 +1,30 @@
 use anyhow::{Result, bail};
 use std::{
-    env, fs,
+    env,
+    fmt::Display,
+    fs,
     path::{Path, PathBuf},
     process::Command,
 };
 use tempfile::Builder;
 
+#[derive(Debug, Clone, Copy)]
+pub enum FileType {
+    Ron,
+    Toml,
+}
+impl Display for FileType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let string = match self {
+            Self::Ron => "ron",
+            Self::Toml => "toml",
+        };
+        f.write_str(string)
+    }
+}
+
 pub trait Editor {
-    fn edit(&self, initial: &str) -> Result<String>;
+    fn edit(&self, initial: &str, file_type: FileType) -> Result<String>;
 }
 
 pub trait Env {

@@ -1,7 +1,7 @@
 use crate::editor;
 use crate::editor::command::parse_editor_command;
 use crate::editor::system::{
-    Editor, Env, Fs, Process, StdEnv, StdFs, StdProcess, Temp, TempFileTemp,
+    Editor, Env, FileType, Fs, Process, StdEnv, StdFs, StdProcess, Temp, TempFileTemp,
 };
 
 use anyhow::{Context, Result};
@@ -32,8 +32,11 @@ impl ShellEditor<StdEnv, StdFs, TempFileTemp, StdProcess> {
 }
 
 impl<E: Env, F: Fs, T: Temp, P: Process> Editor for ShellEditor<E, F, T, P> {
-    fn edit(&self, initial: &str) -> Result<String> {
-        let path = self.temp.temp_file("ron").context("creating temp file")?;
+    fn edit(&self, initial: &str, file_type: FileType) -> Result<String> {
+        let path = self
+            .temp
+            .temp_file(&file_type.to_string())
+            .context("creating temp file")?;
 
         self.fs
             .write_string(&path, initial)
@@ -159,7 +162,7 @@ mod tests {
 
         let editor = ShellEditor::new(env, fs, temp, proc);
 
-        let out = editor.edit("initial").unwrap();
+        let out = editor.edit("initial", FileType::Ron).unwrap();
         assert_eq!(out, "edited");
 
         let calls = editor.proc.calls.borrow();
@@ -190,7 +193,7 @@ mod tests {
             .write_string(&temp_path, "edited")
             .expect("seed edited content");
 
-        let _ = editor.edit("initial").unwrap();
+        let _ = editor.edit("initial", FileType::Toml).unwrap();
 
         let calls = editor.proc.calls.borrow();
         assert_eq!(calls.len(), 1);
@@ -213,7 +216,7 @@ mod tests {
         };
         let editor = ShellEditor::new(env, fs, temp, proc);
 
-        let err = editor.edit("initial").unwrap_err();
+        let err = editor.edit("initial", FileType::Ron).unwrap_err();
         assert!(err.to_string().contains("running editor"));
     }
 }

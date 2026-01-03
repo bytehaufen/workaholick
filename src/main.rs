@@ -1,9 +1,36 @@
 use anyhow::Result;
-use workaholick::{App, JsonlFileStore, ShellEditor};
+use workaholick::{
+    App, JsonlFileStore,
+    cli::{self, CliCommand, ConfigCommand, ShellEditor},
+    config,
+};
 
 fn main() -> Result<()> {
-    // TODO: Handle config file / data dir handling and the name
-    let entries_file = "./data/entries.jsonl";
+    let cli = cli::parse();
 
-    App::new(JsonlFileStore::new(entries_file)?, ShellEditor::real()).run()
+    let editor = ShellEditor::real();
+
+    if let CliCommand::Config { command } = cli.command {
+        match command.unwrap_or(ConfigCommand::Show) {
+            ConfigCommand::Show => {
+                println!("{}", config::show()?);
+                return Ok(());
+            }
+            ConfigCommand::Edit => {
+                config::edit(&editor)?;
+                return Ok(());
+            }
+            ConfigCommand::Init => {
+                config::init()?;
+                return Ok(());
+            }
+        }
+    }
+
+    let cfg = config::load()?;
+    let store = JsonlFileStore::new(&cfg.store_path)?;
+
+    let mut app = App::new(cfg, store, editor)?;
+
+    cli::run(&mut app, cli)
 }
