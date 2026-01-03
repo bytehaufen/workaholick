@@ -73,13 +73,9 @@ pub enum CliCommand {
     },
 
     // --- Query commands ---
-    /// Status summary for common periods (today/yesterday/week/month)
+    /// Status summary for today
     #[command(visible_alias = "s")]
-    Status {
-        /// Time period to summarize
-        #[arg(value_enum, default_value_t = PeriodArg::Today, value_name = "PERIOD")]
-        period: PeriodArg,
-    },
+    Status,
 
     /// Inspect a day (arbitrary date)
     #[command(visible_alias = "d")]

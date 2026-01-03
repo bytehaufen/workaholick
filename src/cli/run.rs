@@ -22,7 +22,14 @@ pub fn run<S: EntryStore, E: Editor>(app: &mut App<S, E>) -> Result<()> {
         CliCommand::BreakEnd { .. } => app.write(cli.command.try_into()?),
         CliCommand::Delete { id } => app.delete(id),
         CliCommand::Edit { id } => app.edit(id),
-        CliCommand::Status { period } => app.status(period.into()),
+        CliCommand::Status => {
+            match app.status() {
+                Some(summary) => println!("{:#?}", summary),
+                None => println!("No status for today"),
+            };
+
+            Ok(())
+        }
         CliCommand::Day { date } => app.day(date),
         CliCommand::Report {} => todo!(),
         // TODO: Next steps:

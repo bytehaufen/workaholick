@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
-use super::EntryStore;
+use crate::EntryStore;
 use crate::domain::{Entry, EntryId, NewEntry};
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB

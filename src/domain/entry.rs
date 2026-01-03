@@ -72,6 +72,10 @@ impl Entry {
     pub fn timestamp(&self) -> &DateTime<Local> {
         &self.timestamp
     }
+
+    pub fn date(&self) -> &NaiveDate {
+        &self.date
+    }
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
