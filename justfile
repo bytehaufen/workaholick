@@ -9,4 +9,7 @@ fmt:
   cargo fmt
 
 check:
-  nix flake check
+  nix flake check -L
+
+build:
+  nix build "#workaholick" -L

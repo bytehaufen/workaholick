@@ -32,7 +32,3 @@ pub fn run<S: EntryStore, E: Editor>(app: &mut App<S, E>, cli: Cli) -> Result<()
         CliCommand::Report {} => todo!(),
     }
 }
-
-fn show_config(config: &str) {
-    println!("{config}")
-}

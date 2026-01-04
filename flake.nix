@@ -17,6 +17,7 @@
     flake-utils,
     rust-overlay,
     pre-commit-hooks,
+    self,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (
@@ -26,9 +27,17 @@
           overlays = [(import rust-overlay)];
         };
 
-        rustToolchain = pkgs.rust-bin.nightly.latest.default.override {
+        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = ["rust-src" "rustfmt" "clippy"];
         };
+
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        };
+        rev = self.shortRev or self.dirtyShortRev or "dirty";
+        date = self.lastModifiedDate or self.lastModified or "19700101";
+        version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version + "pre${builtins.substring 0 8 date}_${rev}";
 
         preCommit = pre-commit-hooks.lib.${system}.run {
           src = ./.;
@@ -36,12 +45,6 @@
 
           hooks = {
             alejandra.enable = true;
-
-            clippy = {
-              enable = true;
-              package = rustToolchain;
-              settings.allFeatures = true;
-            };
 
             rustfmt.enable = true;
 
@@ -52,33 +55,26 @@
                 configPath = "./.typos.toml";
               };
             };
+
+            markdownlint.enable = true;
           };
         };
       in {
         checks.pre-commit-check = preCommit;
+
         formatter = pkgs.alejandra;
 
-        devShells.default = pkgs.mkShell {
-          name = "workaholick-dev-shell";
+        devShells = {
+          default = pkgs.callPackage ./nix/shell.nix {
+            inherit rustToolchain preCommit;
+            inherit (self.packages.${system}) workaholick;
+          };
+        };
 
-          inherit (preCommit) shellHook enabledPackages;
-
-          buildInputs = with pkgs;
-            [
-              rustToolchain
-              rust-analyzer
-              pkg-config
-              openssl
-              cmake
-              gcc
-              just
-              cargo-watch
-              pre-commit
-              simple-http-server
-            ]
-            ++ preCommit.enabledPackages;
-
-          RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
+        packages = {
+          workaholick = pkgs.callPackage ./nix/workaholick.nix {
+            inherit version rev date rustPlatform;
+          };
         };
       }
     );
