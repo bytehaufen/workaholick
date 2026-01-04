@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate};
 
 use crate::domain::{Command, DayType, Entry};
@@ -37,9 +38,30 @@ pub enum SummaryRequest {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Totals {
-    pub worked: Duration,
-    pub breaks: Duration,
-    pub net: Duration,
+    total_time: Duration,
+    break_time: Duration,
+    work_time: Duration,
+}
+impl Totals {
+    fn new(entries: &[&Entry]) -> Self {
+        // let total_time = entries.
+
+        // TODO: Calculate
+        Self {
+            total_time: Duration::new(42, 42).unwrap(),
+            break_time: Duration::new(42, 42).unwrap(),
+            work_time: Duration::new(42, 42).unwrap(),
+        }
+    }
+    pub fn total_time(&self) -> Duration {
+        self.total_time
+    }
+    pub fn break_time(&self) -> Duration {
+        self.break_time
+    }
+    pub fn work_time(&self) -> Duration {
+        self.work_time
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,13 +94,9 @@ pub fn summary<'a>(entries: &[&'a Entry], request: SummaryRequest) -> Option<Sum
             });
 
             Some(Summary::Day {
+                totals: Some(Totals::new(&entries)),
                 entries,
                 day_type,
-                totals: Some(Totals {
-                    worked: Duration::new(42, 42).unwrap(),
-                    breaks: Duration::new(42, 42).unwrap(),
-                    net: Duration::new(42, 42).unwrap(),
-                }),
             })
         }
 
@@ -96,14 +114,118 @@ pub fn summary<'a>(entries: &[&'a Entry], request: SummaryRequest) -> Option<Sum
                 });
 
             match kind {
-                RangeKind::Day => println!("{date_entries:#?}"),
-                RangeKind::Week => todo!(),
-                RangeKind::Month => todo!(),
-                RangeKind::Year => todo!(),
-                RangeKind::All => todo!(),
-            }
+                RangeKind::Day => anyhow::anyhow!("SummaryRequest::Range not implemented yet"),
+                RangeKind::Week => anyhow::anyhow!("SummaryRequest::Range not implemented yet"),
+                RangeKind::Month => anyhow::anyhow!("SummaryRequest::Range not implemented yet"),
+                RangeKind::Year => anyhow::anyhow!("SummaryRequest::Range not implemented yet"),
+                RangeKind::All => anyhow::anyhow!("SummaryRequest::Range not implemented yet"),
+            };
 
             todo!()
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use chrono::{Local, TimeZone};
+
+    use crate::domain::{Command, DayType, Entry};
+
+    #[test]
+    fn calculates_totals() {
+        let entries = create_entries();
+        let entries: Vec<&Entry> = entries.iter().collect();
+
+        let totals = Totals::new(&entries);
+        // FIXME: Continue here with implementing test & function -> use `DayEntries` / `partition_by_date`
+
+        assert_eq!(totals.total_time().num_hours(), 9);
+        assert_eq!(totals.work_time().num_hours(), 8);
+        assert_eq!(totals.break_time().num_hours(), 1);
+    }
+
+    fn create_entries() -> Vec<Entry> {
+        let mut entries: Vec<Entry> = Vec::new();
+
+        let ts1 = Local.with_ymd_and_hms(2026, 1, 4, 8, 0, 0).unwrap();
+        entries.push(Entry::new(
+            1.into(),
+            1.into(),
+            ts1,
+            ts1.date_naive(),
+            Command::In {
+                day_type: DayType::Office,
+            },
+        ));
+
+        let ts2 = Local.with_ymd_and_hms(2026, 1, 4, 9, 0, 0).unwrap();
+        entries.push(Entry::new(
+            2.into(),
+            1.into(),
+            ts2,
+            ts2.date_naive(),
+            Command::Log {
+                title: "log 1".into(),
+                description: None,
+            },
+        ));
+
+        let ts3 = Local.with_ymd_and_hms(2026, 1, 4, 10, 0, 0).unwrap();
+        entries.push(Entry::new(
+            2.into(),
+            1.into(),
+            ts3,
+            ts3.date_naive(),
+            Command::Log {
+                title: "log 2".into(),
+                description: None,
+            },
+        ));
+
+        let ts4 = Local.with_ymd_and_hms(2026, 1, 4, 12, 0, 0).unwrap();
+        entries.push(Entry::new(
+            2.into(),
+            1.into(),
+            ts4,
+            ts4.date_naive(),
+            Command::BreakStart,
+        ));
+
+        let ts5 = Local.with_ymd_and_hms(2026, 1, 4, 13, 0, 0).unwrap();
+        entries.push(Entry::new(
+            2.into(),
+            1.into(),
+            ts5,
+            ts5.date_naive(),
+            Command::BreakEnd { description: None },
+        ));
+
+        let ts5 = Local.with_ymd_and_hms(2026, 1, 4, 14, 0, 0).unwrap();
+        entries.push(Entry::new(
+            2.into(),
+            1.into(),
+            ts5,
+            ts5.date_naive(),
+            Command::Log {
+                title: "log 3".into(),
+                description: None,
+            },
+        ));
+
+        let ts6 = Local.with_ymd_and_hms(2026, 1, 4, 17, 0, 0).unwrap();
+        entries.push(Entry::new(
+            2.into(),
+            1.into(),
+            ts6,
+            ts6.date_naive(),
+            Command::Out {
+                title: "out".into(),
+                description: None,
+            },
+        ));
+
+        entries
     }
 }

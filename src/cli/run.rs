@@ -22,7 +22,7 @@ pub fn run<S: EntryStore, E: Editor>(app: &mut App<S, E>, cli: Cli) -> Result<()
         CliCommand::Edit { id } => app.edit(id),
         CliCommand::Status => {
             match app.status() {
-                Some(summary) => println!("{:#?}", summary),
+                Some(summary) => println!("{:?}", summary),
                 None => println!("No status for today"),
             };
 
