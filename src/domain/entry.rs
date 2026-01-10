@@ -1,9 +1,7 @@
 use std::collections::BTreeMap;
 
-use crate::domain::entry;
-
 use super::{Command, date_time_codec};
-use chrono::{DateTime, Local, NaiveDate};
+use chrono::{DateTime, Duration, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Clone, Copy, PartialOrd, Eq, Ord, Serialize, Deserialize)]
@@ -118,7 +116,7 @@ impl NewEntry {
 /// - `entries` is non-empty
 /// - all entries have the same `NaiveDate` (`Entry::date()`)
 /// - entries are sorted by `Entry::timestamp()` ascending
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DayEntries<'a>(Vec<&'a Entry>);
 
 impl<'a> DayEntries<'a> {
@@ -144,6 +142,21 @@ impl<'a> DayEntries<'a> {
 
     pub fn as_slice(&self) -> &[&'a Entry] {
         &self.0
+    }
+}
+
+impl<'a> TryFrom<&'a Vec<Entry>> for DayEntries<'a> {
+    type Error = anyhow::Error;
+
+    fn try_from(entries: &'a Vec<Entry>) -> anyhow::Result<Self> {
+        Self::try_new(entries.iter().collect())
+    }
+}
+
+impl<'a> TryFrom<Vec<&'a Entry>> for DayEntries<'a> {
+    type Error = anyhow::Error;
+    fn try_from(entries: Vec<&'a Entry>) -> anyhow::Result<Self> {
+        Self::try_new(entries)
     }
 }
 

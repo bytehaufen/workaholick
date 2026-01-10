@@ -21,7 +21,8 @@ pub fn run<S: EntryStore, E: Editor>(app: &mut App<S, E>, cli: Cli) -> Result<()
         CliCommand::Delete { id } => app.delete(id),
         CliCommand::Edit { id } => app.edit(id),
         CliCommand::Status => {
-            match app.status() {
+            // FIXME: Handle errors
+            match app.status()? {
                 Some(summary) => println!("{:?}", summary),
                 None => println!("No status for today"),
             };

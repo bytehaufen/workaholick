@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 
-use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate};
 
-use crate::domain::{Command, DayType, Entry};
+use crate::domain::{Command, DayEntries, DayType, Entry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveKind {
@@ -27,25 +26,13 @@ pub enum RangeKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SummaryRequest {
-    Day(NaiveDate),
-    Range {
-        kind: RangeKind,
-        start: NaiveDate,
-        end: Option<NaiveDate>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct Totals {
     total_time: Duration,
     break_time: Duration,
     work_time: Duration,
 }
 impl Totals {
-    fn new(entries: &[&Entry]) -> Self {
-        // let total_time = entries.
-
+    fn new(entries: &DayEntries) -> Self {
         // TODO: Calculate
         Self {
             total_time: Duration::new(42, 42).unwrap(),
@@ -65,17 +52,29 @@ impl Totals {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum SummaryRequest {
+    Day(NaiveDate),
+    Range {
+        kind: RangeKind,
+        start: NaiveDate,
+        end: Option<NaiveDate>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Summary<'a> {
     Day {
-        entries: Vec<&'a Entry>,
-        day_type: Option<DayType>,
+        day_entries: DayEntries<'a>,
         totals: Option<Totals>,
     },
     // TODO: Fill range type
     Range,
 }
 
-pub fn summary<'a>(entries: &[&'a Entry], request: SummaryRequest) -> Option<Summary<'a>> {
+pub fn summary<'a>(
+    entries: &[&'a Entry],
+    request: SummaryRequest,
+) -> anyhow::Result<Option<Summary<'a>>> {
     match request {
         SummaryRequest::Day(date) => {
             let entries: Vec<&Entry> = entries
@@ -85,7 +84,7 @@ pub fn summary<'a>(entries: &[&'a Entry], request: SummaryRequest) -> Option<Sum
                 .collect();
 
             if entries.is_empty() {
-                return None;
+                return Ok(None);
             }
 
             let day_type = entries.iter().find_map(|entry| match entry.command() {
@@ -93,13 +92,16 @@ pub fn summary<'a>(entries: &[&'a Entry], request: SummaryRequest) -> Option<Sum
                 _ => None,
             });
 
-            Some(Summary::Day {
-                totals: Some(Totals::new(&entries)),
-                entries,
-                day_type,
-            })
+            let day_entries = DayEntries::try_from(entries.clone())?;
+            let totals = Totals::new(&day_entries);
+
+            Ok(Some(Summary::Day {
+                totals: Some(totals),
+                day_entries,
+            }))
         }
 
+        // TODO: implement
         SummaryRequest::Range { kind, start, end } => {
             let in_range_inclusive = |entry_date: NaiveDate| {
                 start <= entry_date && end.is_none_or(|date_end| entry_date <= date_end)
@@ -131,15 +133,15 @@ mod test {
     use super::*;
     use chrono::{Local, TimeZone};
 
-    use crate::domain::{Command, DayType, Entry};
+    use crate::domain::{Command, DayEntries, DayType, Entry};
 
+    #[ignore]
     #[test]
     fn calculates_totals() {
-        let entries = create_entries();
-        let entries: Vec<&Entry> = entries.iter().collect();
+        let entries = &create_entries();
+        let day_entries: DayEntries = entries.try_into().unwrap();
 
-        let totals = Totals::new(&entries);
-        // FIXME: Continue here with implementing test & function -> use `DayEntries` / `partition_by_date`
+        let totals = Totals::new(&day_entries);
 
         //assert_eq!(totals.total_time().num_hours(), 9);
         //assert_eq!(totals.work_time().num_hours(), 8);

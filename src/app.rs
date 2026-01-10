@@ -45,7 +45,7 @@ impl<S: EntryStore, E: Editor> App<S, E> {
         Ok(())
     }
 
-    pub fn status(&self) -> Option<Summary<'_>> {
+    pub fn status(&self) -> anyhow::Result<Option<Summary<'_>>> {
         let entries = self
             .store
             .entries()
