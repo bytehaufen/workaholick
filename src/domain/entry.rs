@@ -438,17 +438,131 @@ mod tests {
         #[test]
         fn accepts_valid_full_day() {
             #[rustfmt::skip]
-            let entries: Vec<Entry> = vec![
+            let entries = [
                 make_entry( 1, 0, Command::In { day_type: DayType::Office }),
                 make_entry( 2, 5, Command::Log { title: "doing stuff".into(), description: None }),
-                make_entry(3, 10, Command::BreakStart),
-                make_entry(4, 15, Command::BreakEnd { description: None }),
+                make_entry( 3, 10, Command::BreakStart),
+                make_entry( 4, 15, Command::BreakEnd { description: None }),
                 make_entry( 5, 20, Command::Log { title: "doing other stuff".into(), description: None }),
                 make_entry( 6, 25, Command::Out { title: "done with all stuff".into(), description: None }),
             ];
 
             let refs: Vec<&Entry> = entries.iter().collect();
             assert!(validate_day_entries(&refs).is_ok());
+        }
+
+        #[test]
+        fn accepts_multiple_checkin_checkout_cycles() {
+            #[rustfmt::skip]
+            let entries  = [
+                make_entry( 1, 0, Command::In { day_type: DayType::Office }),
+                make_entry( 2, 5, Command::Out { title: "id 2".into(), description: None }),
+                make_entry( 3, 10, Command::In { day_type: DayType::Travel }),
+                make_entry( 4, 15, Command::Out { title: "id 4".into(), description: None }),
+                make_entry( 5, 20, Command::In { day_type: DayType::Home }),
+                make_entry( 6, 25, Command::Out { title: "id 6".into(), description: None }),
+            ];
+
+            let refs: Vec<&Entry> = entries.iter().collect();
+            assert!(validate_day_entries(&refs).is_ok());
+        }
+
+        #[test]
+        fn rejects_checkin_when_checked_in() {
+            #[rustfmt::skip]
+            let entries = [
+                make_entry(1, 0, Command::In { day_type: DayType::Office }),
+                make_entry(2, 10, Command::In { day_type: DayType::Home })
+            ];
+            let refs: Vec<&Entry> = entries.iter().collect();
+
+            let err = validate_day_entries(&refs).unwrap_err();
+            assert!(
+                err.to_string()
+                    .starts_with("cannot check in when checked in")
+            );
+        }
+
+        #[test]
+        fn rejects_checkout_when_not_checked_in() {
+            #[rustfmt::skip]
+            let entries = [ make_entry(1, 0, Command::Out { title: "".into(), description: None }) ];
+
+            let refs: Vec<&Entry> = entries.iter().collect();
+            let err = validate_day_entries(&refs).unwrap_err();
+            assert!(
+                err.to_string()
+                    .starts_with("cannot check out when checked out")
+            );
+        }
+
+        #[test]
+        fn rejects_log_when_not_checked_in() {
+            #[rustfmt::skip]
+            let entries = [ make_entry(1, 0, Command::Log { title: "".into(), description: None }) ];
+
+            let refs: Vec<&Entry> = entries.iter().collect();
+            let err = validate_day_entries(&refs).unwrap_err();
+            assert!(err.to_string().starts_with("cannot log when checked out"))
+        }
+
+        #[test]
+        fn rejects_break_start_when_not_checked_in() {
+            let entries = [make_entry(1, 0, Command::BreakStart)];
+
+            let refs: Vec<&Entry> = entries.iter().collect();
+            let err = validate_day_entries(&refs).unwrap_err();
+            assert!(
+                err.to_string()
+                    .starts_with("cannot start break when checked out")
+            );
+        }
+
+        #[test]
+        fn rejects_break_end_when_not_on_break() {
+            #[rustfmt::skip]
+            let entries = [
+                make_entry(1, 0, Command::In { day_type: DayType::Office }),
+                make_entry(2, 10, Command::BreakEnd { description: None }),
+            ];
+            let refs: Vec<&Entry> = entries.iter().collect();
+
+            let err = validate_day_entries(&refs).unwrap_err();
+            assert!(
+                err.to_string()
+                    .starts_with("cannot end break when checked in")
+            );
+        }
+
+        #[test]
+        fn rejects_checkout_while_on_break() {
+            #[rustfmt::skip]
+            let entries = [
+                make_entry(1, 0, Command::In { day_type: DayType::Office }),
+                make_entry(2, 10, Command::BreakStart),
+                make_entry(3, 20, Command::Out { title: "".into(), description: None }),
+            ];
+            let refs: Vec<&Entry> = entries.iter().collect();
+
+            let err = validate_day_entries(&refs).unwrap_err();
+            assert!(
+                err.to_string()
+                    .starts_with("cannot check out when on break")
+            );
+        }
+
+        #[test]
+        fn rejects_log_while_on_break() {
+            #[rustfmt::skip]
+            let entries = [
+                make_entry(1, 0, Command::In { day_type: DayType::Office }),
+                make_entry(2, 10, Command::BreakStart),
+                make_entry(3, 20, Command::Log { title: "".into(), description: None }),
+            ];
+            let refs: Vec<&Entry> = entries.iter().collect();
+
+            let err = validate_day_entries(&refs).unwrap_err();
+            assert!(err.to_string().starts_with("cannot log when on break"));
         }
     }
 }
