@@ -1,11 +1,16 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Display};
 
 use super::{Command, date_time_codec};
-use chrono::{DateTime, Duration, Local, NaiveDate};
+use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Clone, Copy, PartialOrd, Eq, Ord, Serialize, Deserialize)]
 pub struct EntryId(u64);
+impl Display for EntryId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0.to_string())
+    }
+}
 
 impl From<u64> for EntryId {
     fn from(id: u64) -> Self {
@@ -115,12 +120,11 @@ impl NewEntry {
 /// Invariants guaranteed by `try_new`:
 /// - `entries` is non-empty
 /// - all entries have the same `NaiveDate` (`Entry::date()`)
-/// - entries are sorted by `Entry::timestamp()` ascending
 #[derive(Debug, Clone, PartialEq)]
 pub struct DayEntries<'a>(Vec<&'a Entry>);
 
 impl<'a> DayEntries<'a> {
-    fn try_new(mut entries: Vec<&'a Entry>) -> anyhow::Result<Self> {
+    fn try_new(entries: Vec<&'a Entry>) -> anyhow::Result<Self> {
         if entries.is_empty() {
             anyhow::bail!("entries must not be empty");
         }
@@ -131,7 +135,7 @@ impl<'a> DayEntries<'a> {
             anyhow::bail!("entries must all be of the same date");
         }
 
-        entries.sort_by(|a, b| a.timestamp().cmp(b.timestamp()));
+        validate_day_entries(&entries)?;
 
         Ok(Self(entries))
     }
@@ -143,6 +147,73 @@ impl<'a> DayEntries<'a> {
     pub fn as_slice(&self) -> &[&'a Entry] {
         &self.0
     }
+}
+
+fn validate_day_entries(entries: &[&Entry]) -> anyhow::Result<()> {
+    #[derive(Debug, Clone, Copy)]
+    enum WorkState {
+        CheckedIn,
+        CheckedOut,
+        OnBreak,
+    }
+    impl Display for WorkState {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(match self {
+                CheckedIn => "checked in",
+                CheckedOut => "checked out",
+                OnBreak => "on break",
+            })
+        }
+        // add code here
+    }
+    use WorkState::*;
+
+    entries
+        .iter()
+        .try_fold(CheckedOut, |state, entry| match (state, entry.command()) {
+            (CheckedOut, Command::In { .. }) => Ok(CheckedIn),
+            (CheckedIn, Command::Out { .. }) => Ok(CheckedOut),
+            (CheckedIn, Command::Log { .. }) => Ok(CheckedIn),
+            (CheckedIn, Command::BreakStart) => Ok(OnBreak),
+            (OnBreak, Command::BreakEnd { .. }) => Ok(CheckedIn),
+
+            (CheckedIn | OnBreak, Command::In { .. }) => {
+                anyhow::bail!(
+                    "cannot check in when {state} (entry #{},, timestamp: {}",
+                    entry.id,
+                    entry.timestamp
+                )
+            }
+            (CheckedOut | OnBreak, Command::Out { .. }) => {
+                anyhow::bail!(
+                    "cannot check out when {state} (entry #{},, timestamp: {}",
+                    entry.id,
+                    entry.timestamp
+                )
+            }
+            (CheckedOut | OnBreak, Command::Log { .. }) => {
+                anyhow::bail!(
+                    "cannot log when {state} (entry #{},, timestamp: {}",
+                    entry.id,
+                    entry.timestamp
+                )
+            }
+            (CheckedOut | OnBreak, Command::BreakStart) => {
+                anyhow::bail!(
+                    "cannot start break when {state} (entry #{},, timestamp: {}",
+                    entry.id,
+                    entry.timestamp
+                )
+            }
+            (CheckedIn | CheckedOut, Command::BreakEnd { .. }) => {
+                anyhow::bail!(
+                    "cannot end break when {state} (entry #{},, timestamp: {}",
+                    entry.id,
+                    entry.timestamp
+                )
+            }
+        })?;
+    Ok(())
 }
 
 impl<'a> TryFrom<&'a Vec<Entry>> for DayEntries<'a> {
@@ -191,13 +262,8 @@ mod tests {
             let command = Command::In {
                 day_type: DayType::Office,
             };
-            let entry = Entry::new(
-                EntryId(1),
-                EntryVersion(1),
-                timestamp,
-                timestamp.date_naive(),
-                command,
-            );
+            #[rustfmt::skip]
+            let entry = Entry::new( EntryId(1), EntryVersion(1), timestamp, timestamp.date_naive(), command);
 
             let json = serde_json::to_value(&entry).unwrap();
             assert_eq!(
@@ -218,13 +284,8 @@ mod tests {
                 description: Some("test for Command::Out".to_string()),
             };
 
-            let entry = Entry::new(
-                EntryId(1),
-                EntryVersion(1),
-                timestamp,
-                timestamp.date_naive(),
-                command,
-            );
+            #[rustfmt::skip]
+            let entry = Entry::new( EntryId(1), EntryVersion(1), timestamp, timestamp.date_naive(), command);
             let json = serde_json::to_value(&entry).unwrap();
 
             assert_eq!(
@@ -243,13 +304,8 @@ mod tests {
                 title: "Log test".into(),
                 description: Some("test for Command::Log".to_string()),
             };
-            let entry = Entry::new(
-                EntryId(1),
-                EntryVersion(1),
-                timestamp,
-                timestamp.date_naive(),
-                command,
-            );
+            #[rustfmt::skip]
+            let entry = Entry::new( EntryId(1), EntryVersion(1), timestamp, timestamp.date_naive(), command);
 
             let json = serde_json::to_value(&entry).unwrap();
 
@@ -266,13 +322,8 @@ mod tests {
         fn serializes_command_break_start() {
             let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
             let command = Command::BreakStart;
-            let entry = Entry::new(
-                EntryId(1),
-                EntryVersion(1),
-                timestamp,
-                timestamp.date_naive(),
-                command,
-            );
+            #[rustfmt::skip]
+            let entry = Entry::new( EntryId(1), EntryVersion(1), timestamp, timestamp.date_naive(), command);
 
             let json = serde_json::to_value(&entry).unwrap();
 
@@ -288,13 +339,8 @@ mod tests {
             let command = Command::BreakEnd {
                 description: Some("test for Command::BreakEnd".to_string()),
             };
-            let entry: Entry = Entry::new(
-                EntryId(42),
-                EntryVersion(4),
-                timestamp,
-                timestamp.date_naive(),
-                command,
-            );
+            #[rustfmt::skip]
+            let entry: Entry = Entry::new( EntryId(42), EntryVersion(4), timestamp, timestamp.date_naive(), command);
 
             let json = serde_json::to_value(&entry).unwrap();
 
@@ -321,93 +367,36 @@ mod tests {
         #[test]
         fn try_new_rejects_not_unique_date() {
             let ts1 = Local.with_ymd_and_hms(2025, 1, 4, 16, 8, 0).unwrap();
-            let entry1 = Entry::new(
-                0.into(),
-                1.into(),
-                ts1,
-                ts1.date_naive(),
-                Command::default(),
-            );
+            #[rustfmt::skip]
+            let entry1 = Entry::new( 0.into(), 1.into(), ts1, ts1.date_naive(), Command::default());
             let ts2 = Local.with_ymd_and_hms(4025, 1, 4, 16, 9, 0).unwrap();
-            let entry2 = Entry::new(
-                1.into(),
-                1.into(),
-                ts2,
-                ts2.date_naive(),
-                Command::default(),
-            );
+            #[rustfmt::skip]
+            let entry2 = Entry::new( 1.into(), 1.into(), ts2, ts2.date_naive(), Command::default());
 
             let err = DayEntries::try_new(vec![&entry1, &entry2]).unwrap_err();
             assert_eq!(err.to_string(), "entries must all be of the same date");
         }
-
-        #[test]
-        fn try_new_sorts_entries_by_timestamp() {
-            let ts1 = Local.with_ymd_and_hms(2025, 1, 4, 16, 13, 0).unwrap();
-            let entry1 = Entry::new(
-                0.into(),
-                1.into(),
-                ts1,
-                ts1.date_naive(),
-                Command::default(),
-            );
-            let ts2 = Local.with_ymd_and_hms(2025, 1, 4, 16, 9, 0).unwrap();
-            let entry2 = Entry::new(
-                1.into(),
-                1.into(),
-                ts2,
-                ts2.date_naive(),
-                Command::default(),
-            );
-            let ts3 = Local.with_ymd_and_hms(2025, 1, 4, 16, 8, 0).unwrap();
-            let entry3 = Entry::new(
-                2.into(),
-                1.into(),
-                ts3,
-                ts3.date_naive(),
-                Command::default(),
-            );
-
-            let day_entries = DayEntries::try_new(vec![&entry1, &entry2, &entry3]).unwrap();
-
-            let timestamps: Vec<DateTime<Local>> =
-                day_entries.iter().map(|entry| *entry.timestamp()).collect();
-            assert_eq!(timestamps, vec![ts3, ts2, ts1]);
-        }
     }
 
     mod partition_by_date {
+        use crate::domain::DayType;
+
         use super::super::*;
         use chrono::TimeZone;
 
         #[test]
         fn partitions_entries_into_multiple_days() {
             let ts1 = Local.with_ymd_and_hms(2026, 1, 4, 8, 0, 0).unwrap();
-            let entry1 = Entry::new(
-                1.into(),
-                1.into(),
-                ts1,
-                ts1.date_naive(),
-                Command::default(),
-            );
+            #[rustfmt::skip]
+            let entry1 = Entry::new( 0.into(), 1.into(), ts1, ts1.date_naive(), Command::In { day_type: DayType::Travel });
 
-            let ts2 = Local.with_ymd_and_hms(2026, 1, 5, 9, 0, 0).unwrap();
-            let entry2 = Entry::new(
-                2.into(),
-                1.into(),
-                ts2,
-                ts2.date_naive(),
-                Command::default(),
-            );
+            let ts2 = Local.with_ymd_and_hms(2026, 1, 4, 9, 0, 0).unwrap();
+            #[rustfmt::skip]
+            let entry2 = Entry::new( 1.into(), 1.into(), ts2, ts2.date_naive(), Command::BreakStart);
 
-            let ts3 = Local.with_ymd_and_hms(2026, 1, 4, 10, 0, 0).unwrap();
-            let entry3 = Entry::new(
-                3.into(),
-                1.into(),
-                ts3,
-                ts3.date_naive(),
-                Command::default(),
-            );
+            let ts3 = Local.with_ymd_and_hms(2026, 1, 5, 10, 0, 0).unwrap();
+            #[rustfmt::skip]
+            let entry3 = Entry::new( 2.into(), 1.into(), ts3, ts3.date_naive(), Command::In { day_type: DayType::Home });
 
             let input: Vec<&Entry> = vec![&entry1, &entry2, &entry3];
 
@@ -419,11 +408,11 @@ mod tests {
 
             let day1 = by_date.get(&ts1.date_naive()).unwrap();
             let day1_timestamps: Vec<_> = day1.iter().map(|e| *e.timestamp()).collect();
-            assert_eq!(day1_timestamps, vec![ts1, ts3]);
+            assert_eq!(day1_timestamps, vec![ts1, ts2]);
 
-            let day2 = by_date.get(&ts2.date_naive()).unwrap();
+            let day2 = by_date.get(&ts3.date_naive()).unwrap();
             let day2_timestamps: Vec<_> = day2.iter().map(|e| *e.timestamp()).collect();
-            assert_eq!(day2_timestamps, vec![ts2]);
+            assert_eq!(day2_timestamps, vec![ts3]);
         }
 
         #[test]
@@ -431,6 +420,35 @@ mod tests {
             let input: Vec<&Entry> = Vec::new();
             let by_date = partition_by_date(&input).unwrap();
             assert!(by_date.is_empty());
+        }
+    }
+
+    mod validate_day_entries_tests {
+        use chrono::TimeZone;
+
+        use crate::domain::DayType;
+
+        use super::super::*;
+
+        fn make_entry(id: u64, mins: u32, cmd: Command) -> Entry {
+            let ts = Local.with_ymd_and_hms(2025, 1, 10, 16, mins, 0).unwrap();
+            Entry::new(id.into(), 1.into(), ts, ts.date_naive(), cmd)
+        }
+
+        #[test]
+        fn accepts_valid_full_day() {
+            #[rustfmt::skip]
+            let entries: Vec<Entry> = vec![
+                make_entry( 1, 0, Command::In { day_type: DayType::Office }),
+                make_entry( 2, 5, Command::Log { title: "doing stuff".into(), description: None }),
+                make_entry(3, 10, Command::BreakStart),
+                make_entry(4, 15, Command::BreakEnd { description: None }),
+                make_entry( 5, 20, Command::Log { title: "doing other stuff".into(), description: None }),
+                make_entry( 6, 25, Command::Out { title: "done with all stuff".into(), description: None }),
+            ];
+
+            let refs: Vec<&Entry> = entries.iter().collect();
+            assert!(validate_day_entries(&refs).is_ok());
         }
     }
 }
