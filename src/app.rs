@@ -30,7 +30,7 @@ impl<S: EntryStore, E: Editor> App<S, E> {
 
     // TODO:
     // - Implement methods: day, status, report
-    pub fn write(&mut self, command: Command) -> Result<()> {
+    pub fn add(&mut self, command: Command) -> Result<()> {
         let now = now();
         let entry = NewEntry::new(now, command);
 
@@ -60,7 +60,7 @@ impl<S: EntryStore, E: Editor> App<S, E> {
     pub fn day(&self, _date: NaiveDate) -> Result<()> {
         let entries = self.store.entries();
 
-        println!("{entries:#?}");
+        println!("{entries:?}");
         Ok(())
     }
 
