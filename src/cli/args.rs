@@ -31,7 +31,7 @@ pub enum CliCommand {
     #[command(visible_alias = "i")]
     In {
         /// Work location/type for this day
-        #[arg(value_name = "DAY_TYPE")]
+        #[arg(value_enum, value_name = "DAY_TYPE")]
         day_type: DayType,
     },
 
