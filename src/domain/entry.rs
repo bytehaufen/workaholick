@@ -251,7 +251,7 @@ mod tests {
     use chrono::TimeZone;
 
     mod entry {
-        use crate::domain::{Command, DayType};
+        use crate::domain::{Command, TimeKind};
 
         use super::super::*;
         use super::*;
@@ -260,14 +260,14 @@ mod tests {
         fn serializes_command_in() {
             let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
             let command = Command::In {
-                day_type: DayType::Office,
+                time_kind: TimeKind::Office,
             };
             #[rustfmt::skip]
             let entry = Entry::new( EntryId(1), EntryVersion(1), timestamp, timestamp.date_naive(), command);
 
             let json = serde_json::to_value(&entry).unwrap();
             assert_eq!(
-                json["command"]["In"]["day_type"].as_str().unwrap(),
+                json["command"]["In"]["time_kind"].as_str().unwrap(),
                 "office"
             );
 
@@ -379,7 +379,7 @@ mod tests {
     }
 
     mod partition_by_date {
-        use crate::domain::DayType;
+        use crate::domain::TimeKind;
 
         use super::super::*;
         use chrono::TimeZone;
@@ -388,7 +388,7 @@ mod tests {
         fn partitions_entries_into_multiple_days() {
             let ts1 = Local.with_ymd_and_hms(2026, 1, 4, 8, 0, 0).unwrap();
             #[rustfmt::skip]
-            let entry1 = Entry::new( 0.into(), 1.into(), ts1, ts1.date_naive(), Command::In { day_type: DayType::Travel });
+            let entry1 = Entry::new( 0.into(), 1.into(), ts1, ts1.date_naive(), Command::In { time_kind: TimeKind::Travel });
 
             let ts2 = Local.with_ymd_and_hms(2026, 1, 4, 9, 0, 0).unwrap();
             #[rustfmt::skip]
@@ -396,7 +396,7 @@ mod tests {
 
             let ts3 = Local.with_ymd_and_hms(2026, 1, 5, 10, 0, 0).unwrap();
             #[rustfmt::skip]
-            let entry3 = Entry::new( 2.into(), 1.into(), ts3, ts3.date_naive(), Command::In { day_type: DayType::Home });
+            let entry3 = Entry::new( 2.into(), 1.into(), ts3, ts3.date_naive(), Command::In { time_kind: TimeKind::Home });
 
             let input: Vec<&Entry> = vec![&entry1, &entry2, &entry3];
 
@@ -426,7 +426,7 @@ mod tests {
     mod validate_day_entries_tests {
         use chrono::TimeZone;
 
-        use crate::domain::DayType;
+        use crate::domain::TimeKind;
 
         use super::super::*;
 
@@ -439,7 +439,7 @@ mod tests {
         fn accepts_valid_full_day() {
             #[rustfmt::skip]
             let entries = [
-                make_entry( 1, 0, Command::In { day_type: DayType::Office }),
+                make_entry( 1, 0, Command::In { time_kind: TimeKind::Office }),
                 make_entry( 2, 5, Command::Log { title: "doing stuff".into(), description: None }),
                 make_entry( 3, 10, Command::BreakStart),
                 make_entry( 4, 15, Command::BreakEnd { description: None }),
@@ -455,11 +455,11 @@ mod tests {
         fn accepts_multiple_checkin_checkout_cycles() {
             #[rustfmt::skip]
             let entries  = [
-                make_entry( 1, 0, Command::In { day_type: DayType::Office }),
+                make_entry( 1, 0, Command::In { time_kind: TimeKind::Office }),
                 make_entry( 2, 5, Command::Out { title: "id 2".into(), description: None }),
-                make_entry( 3, 10, Command::In { day_type: DayType::Travel }),
+                make_entry( 3, 10, Command::In { time_kind: TimeKind::Travel }),
                 make_entry( 4, 15, Command::Out { title: "id 4".into(), description: None }),
-                make_entry( 5, 20, Command::In { day_type: DayType::Home }),
+                make_entry( 5, 20, Command::In { time_kind: TimeKind::Home }),
                 make_entry( 6, 25, Command::Out { title: "id 6".into(), description: None }),
             ];
 
@@ -471,8 +471,8 @@ mod tests {
         fn rejects_checkin_when_checked_in() {
             #[rustfmt::skip]
             let entries = [
-                make_entry(1, 0, Command::In { day_type: DayType::Office }),
-                make_entry(2, 10, Command::In { day_type: DayType::Home })
+                make_entry(1, 0, Command::In { time_kind: TimeKind::Office }),
+                make_entry(2, 10, Command::In { time_kind: TimeKind::Home })
             ];
             let refs: Vec<&Entry> = entries.iter().collect();
 
@@ -522,7 +522,7 @@ mod tests {
         fn rejects_break_end_when_not_on_break() {
             #[rustfmt::skip]
             let entries = [
-                make_entry(1, 0, Command::In { day_type: DayType::Office }),
+                make_entry(1, 0, Command::In { time_kind: TimeKind::Office }),
                 make_entry(2, 10, Command::BreakEnd { description: None }),
             ];
             let refs: Vec<&Entry> = entries.iter().collect();
@@ -538,7 +538,7 @@ mod tests {
         fn rejects_checkout_while_on_break() {
             #[rustfmt::skip]
             let entries = [
-                make_entry(1, 0, Command::In { day_type: DayType::Office }),
+                make_entry(1, 0, Command::In { time_kind: TimeKind::Office }),
                 make_entry(2, 10, Command::BreakStart),
                 make_entry(3, 20, Command::Out { title: "".into(), description: None }),
             ];
@@ -555,7 +555,7 @@ mod tests {
         fn rejects_log_while_on_break() {
             #[rustfmt::skip]
             let entries = [
-                make_entry(1, 0, Command::In { day_type: DayType::Office }),
+                make_entry(1, 0, Command::In { time_kind: TimeKind::Office }),
                 make_entry(2, 10, Command::BreakStart),
                 make_entry(3, 20, Command::Log { title: "".into(), description: None }),
             ];

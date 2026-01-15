@@ -1,11 +1,11 @@
-use super::DayType;
+use super::TimeKind;
 use serde::{Deserialize, Serialize};
 use strum::EnumIter;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EnumIter)]
 pub enum Command {
     In {
-        day_type: DayType,
+        time_kind: TimeKind,
     },
     Out {
         title: String,

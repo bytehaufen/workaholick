@@ -205,7 +205,7 @@ impl EntryStore for JsonlFileStore {
 mod tests {
     use chrono::{Local, TimeZone, Timelike};
 
-    use crate::domain::{Command, DayType};
+    use crate::domain::{Command, TimeKind};
 
     use super::*;
 
@@ -230,7 +230,7 @@ mod tests {
                 .append(NewEntry::new(
                     timestamp1,
                     Command::In {
-                        day_type: DayType::Office,
+                        time_kind: TimeKind::Office,
                     },
                 ))
                 .unwrap();
@@ -359,7 +359,7 @@ mod tests {
                 .append(NewEntry::new(
                     timestamp1,
                     Command::In {
-                        day_type: DayType::Vacation,
+                        time_kind: TimeKind::Vacation,
                     },
                 ))
                 .unwrap();

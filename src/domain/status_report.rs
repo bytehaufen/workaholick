@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate};
 
-use crate::domain::{Command, DayEntries, DayType, Entry};
+use crate::domain::{Command, DayEntries, TimeKind, Entry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveKind {
@@ -87,8 +87,8 @@ pub fn summary<'a>(
                 return Ok(None);
             }
 
-            let day_type = entries.iter().find_map(|entry| match entry.command() {
-                Command::In { day_type } => Some(*day_type),
+            let time_kind = entries.iter().find_map(|entry| match entry.command() {
+                Command::In { time_kind } => Some(*time_kind),
                 _ => None,
             });
 
@@ -133,7 +133,7 @@ mod test {
     use super::*;
     use chrono::{Local, TimeZone};
 
-    use crate::domain::{Command, DayEntries, DayType, Entry};
+    use crate::domain::{Command, DayEntries, TimeKind, Entry};
 
     #[ignore]
     #[test]
@@ -158,7 +158,7 @@ mod test {
             ts1,
             ts1.date_naive(),
             Command::In {
-                day_type: DayType::Office,
+                time_kind: TimeKind::Office,
             },
         ));
 

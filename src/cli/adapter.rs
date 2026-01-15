@@ -9,7 +9,7 @@ impl TryFrom<CliCommand> for Command {
 
     fn try_from(command: CliCommand) -> Result<Self, Self::Error> {
         Ok(match command {
-            CliCommand::In { day_type } => Command::In { day_type },
+            CliCommand::In { time_kind } => Command::In { time_kind },
             CliCommand::Out { title, description } => Command::Out { title, description },
             CliCommand::Log { title, description } => Command::Log { title, description },
             CliCommand::BreakStart => Command::BreakStart,

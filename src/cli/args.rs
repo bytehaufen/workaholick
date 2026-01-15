@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
-use crate::domain::DayType;
+use crate::domain::TimeKind;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -31,8 +31,8 @@ pub enum CliCommand {
     #[command(visible_alias = "i")]
     In {
         /// Work location/type for this day
-        #[arg(value_enum, value_name = "DAY_TYPE")]
-        day_type: DayType,
+        #[arg(value_enum, value_name = "TIME_KIND")]
+        time_kind: TimeKind,
     },
 
     /// End the current workday

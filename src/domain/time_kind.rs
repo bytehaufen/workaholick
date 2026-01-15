@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 )]
 #[strum(ascii_case_insensitive)]
 #[serde(rename_all = "lowercase")]
-pub enum DayType {
+pub enum TimeKind {
     Office,
     #[default]
     Home,
