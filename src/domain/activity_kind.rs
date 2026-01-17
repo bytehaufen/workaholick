@@ -1,26 +1,24 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(
-    Default,
     Copy,
     Clone,
     Debug,
     PartialEq,
     Serialize,
     Deserialize,
+    Default,
     strum::Display,
     strum::EnumString,
     strum::VariantNames,
-    clap::ValueEnum,
 )]
-#[strum(ascii_case_insensitive)]
+#[strum(serialize_all = "kebab-case")]
 #[serde(rename_all = "lowercase")]
-pub enum TimeKind {
-    Office,
+pub enum ActivityKind {
     #[default]
-    Home,
-    Travel,
+    Work,
     Vacation,
-    Sick,
     Holiday,
+    Sick,
+    ChildSick,
 }

@@ -1,20 +1,8 @@
 use std::collections::HashMap;
 
-use chrono::{DateTime, Duration, FixedOffset, NaiveDate};
+use chrono::{Duration, NaiveDate};
 
-use crate::domain::{Command, DayEntries, TimeKind, Entry};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActiveKind {
-    Working,
-    Break,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ActiveState {
-    pub kind: ActiveKind,
-    pub since: DateTime<FixedOffset>,
-}
+use crate::domain::{Command, DayEntries, Entry};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RangeKind {
@@ -88,7 +76,10 @@ pub fn summary<'a>(
             }
 
             let time_kind = entries.iter().find_map(|entry| match entry.command() {
-                Command::In { time_kind } => Some(*time_kind),
+                Command::Start {
+                    kind: time_kind,
+                    context: _,
+                } => Some(*time_kind),
                 _ => None,
             });
 
@@ -133,7 +124,7 @@ mod test {
     use super::*;
     use chrono::{Local, TimeZone};
 
-    use crate::domain::{Command, DayEntries, TimeKind, Entry};
+    use crate::domain::{ActivityKind, Command, DayEntries, Entry};
 
     #[ignore]
     #[test]
@@ -157,8 +148,9 @@ mod test {
             1.into(),
             ts1,
             ts1.date_naive(),
-            Command::In {
-                time_kind: TimeKind::Office,
+            Command::Start {
+                kind: ActivityKind::Work,
+                context: None,
             },
         ));
 
@@ -201,7 +193,10 @@ mod test {
             1.into(),
             ts5,
             ts5.date_naive(),
-            Command::BreakEnd { description: None },
+            Command::End {
+                title: "".into(),
+                description: None,
+            },
         ));
 
         let ts5 = Local.with_ymd_and_hms(2026, 1, 4, 14, 0, 0).unwrap();
@@ -222,7 +217,7 @@ mod test {
             1.into(),
             ts6,
             ts6.date_naive(),
-            Command::Out {
+            Command::End {
                 title: "out".into(),
                 description: None,
             },

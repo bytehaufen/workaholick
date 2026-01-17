@@ -205,7 +205,7 @@ impl EntryStore for JsonlFileStore {
 mod tests {
     use chrono::{Local, TimeZone, Timelike};
 
-    use crate::domain::{Command, TimeKind};
+    use crate::domain::{ActivityKind, Command, WorkContext};
 
     use super::*;
 
@@ -229,15 +229,16 @@ mod tests {
             store
                 .append(NewEntry::new(
                     timestamp1,
-                    Command::In {
-                        time_kind: TimeKind::Office,
+                    Command::Start {
+                        kind: ActivityKind::Work,
+                        context: Some(WorkContext::Office),
                     },
                 ))
                 .unwrap();
             store
                 .append(NewEntry::new(
                     timestamp2,
-                    Command::Out {
+                    Command::End {
                         title: "The main thing".into(),
                         description: Some("did some stuff".to_string()),
                     },
@@ -358,8 +359,9 @@ mod tests {
             store
                 .append(NewEntry::new(
                     timestamp1,
-                    Command::In {
-                        time_kind: TimeKind::Vacation,
+                    Command::Start {
+                        kind: ActivityKind::Vacation,
+                        context: None,
                     },
                 ))
                 .unwrap();
@@ -377,7 +379,7 @@ mod tests {
             store
                 .append(NewEntry::new(
                     timestamp3,
-                    Command::Out {
+                    Command::End {
                         title: "So excited".into(),
                         description: Some("unwrapping presents".into()),
                     },
@@ -390,7 +392,7 @@ mod tests {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
             let updated = NewEntry::new(
                 Local.with_ymd_and_hms(2025, 12, 24, 18, 0, 0).unwrap(),
-                Command::Out {
+                Command::End {
                     title: "So excited".into(),
                     description: Some("un-wrapping presents".into()),
                 },
@@ -405,7 +407,7 @@ mod tests {
             assert_store(&store);
             assert_eq!(store.entries()[1].timestamp().hour(), 18);
 
-            if let Command::Out {
+            if let Command::End {
                 title: _,
                 description,
             } = store.entries()[1].command()

@@ -1,6 +1,9 @@
 use std::{collections::BTreeMap, fmt::Display};
 
+use crate::domain::ActivityKind;
+
 use super::{Command, date_time_codec};
+use anyhow::Ok;
 use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
@@ -149,70 +152,45 @@ impl<'a> DayEntries<'a> {
     }
 }
 
+// TODO: Move to separate file
 fn validate_day_entries(entries: &[&Entry]) -> anyhow::Result<()> {
-    #[derive(Debug, Clone, Copy)]
-    enum WorkState {
-        CheckedIn,
-        CheckedOut,
-        OnBreak,
+    #[derive(Clone, Copy)]
+    enum State {
+        Idle,
+        Active(ActivityKind),
+        Breaking(ActivityKind),
     }
-    impl Display for WorkState {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str(match self {
-                CheckedIn => "checked in",
-                CheckedOut => "checked out",
-                OnBreak => "on break",
-            })
+
+    use State::*;
+
+    let validate_transition = |state: State, entry: &&Entry| match (state, entry.command()) {
+        (Idle, Command::Start { kind, .. }) => Ok(Active(*kind)),
+        (Idle, command) => anyhow::bail!("cannot {command} while idle"),
+
+        (Active(_), Command::Log { .. }) => Ok(state),
+
+        (Active(kind), Command::BreakStart) => Ok(Breaking(kind)),
+        (Breaking(kind), Command::BreakEnd { .. }) => Ok(Active(kind)),
+
+        (Active(_), Command::End { .. }) => Ok(Idle),
+
+        (Active(activity_kind), Command::Start { kind, .. }) => {
+            anyhow::bail!("cannot start {kind} while already active ({activity_kind})")
         }
-        // add code here
-    }
-    use WorkState::*;
+        (Active(_), Command::BreakEnd { .. }) => {
+            anyhow::bail!("cannot end break when not on break")
+        }
 
-    entries
-        .iter()
-        .try_fold(CheckedOut, |state, entry| match (state, entry.command()) {
-            (CheckedOut, Command::In { .. }) => Ok(CheckedIn),
-            (CheckedIn, Command::Out { .. }) => Ok(CheckedOut),
-            (CheckedIn, Command::Log { .. }) => Ok(CheckedIn),
-            (CheckedIn, Command::BreakStart) => Ok(OnBreak),
-            (OnBreak, Command::BreakEnd { .. }) => Ok(CheckedIn),
+        (Breaking(kind), Command::Start { .. } | Command::End { .. } | Command::Log { .. }) => {
+            anyhow::bail!("cannot perform activity commands while on break ({kind})")
+        }
 
-            (CheckedIn | OnBreak, Command::In { .. }) => {
-                anyhow::bail!(
-                    "cannot check in when {state} (entry #{},, timestamp: {}",
-                    entry.id,
-                    entry.timestamp
-                )
-            }
-            (CheckedOut | OnBreak, Command::Out { .. }) => {
-                anyhow::bail!(
-                    "cannot check out when {state} (entry #{},, timestamp: {}",
-                    entry.id,
-                    entry.timestamp
-                )
-            }
-            (CheckedOut | OnBreak, Command::Log { .. }) => {
-                anyhow::bail!(
-                    "cannot log when {state} (entry #{},, timestamp: {}",
-                    entry.id,
-                    entry.timestamp
-                )
-            }
-            (CheckedOut | OnBreak, Command::BreakStart) => {
-                anyhow::bail!(
-                    "cannot start break when {state} (entry #{},, timestamp: {}",
-                    entry.id,
-                    entry.timestamp
-                )
-            }
-            (CheckedIn | CheckedOut, Command::BreakEnd { .. }) => {
-                anyhow::bail!(
-                    "cannot end break when {state} (entry #{},, timestamp: {}",
-                    entry.id,
-                    entry.timestamp
-                )
-            }
-        })?;
+        (Breaking(_), Command::BreakStart) => {
+            anyhow::bail!("cannot start break while already on break")
+        }
+    };
+
+    entries.iter().try_fold(Idle, validate_transition)?;
     Ok(())
 }
 
@@ -251,7 +229,8 @@ mod tests {
     use chrono::TimeZone;
 
     mod entry {
-        use crate::domain::{Command, TimeKind};
+        use crate::domain::WorkContext;
+        use crate::domain::{ActivityKind, Command};
 
         use super::super::*;
         use super::*;
@@ -259,15 +238,17 @@ mod tests {
         #[test]
         fn serializes_command_in() {
             let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
-            let command = Command::In {
-                time_kind: TimeKind::Office,
+            let command = Command::Start {
+                kind: ActivityKind::Work,
+                context: Some(WorkContext::Office),
             };
             #[rustfmt::skip]
             let entry = Entry::new( EntryId(1), EntryVersion(1), timestamp, timestamp.date_naive(), command);
 
             let json = serde_json::to_value(&entry).unwrap();
+            assert_eq!(json["command"]["Start"]["kind"].as_str().unwrap(), "work");
             assert_eq!(
-                json["command"]["In"]["time_kind"].as_str().unwrap(),
+                json["command"]["Start"]["context"].as_str().unwrap(),
                 "office"
             );
 
@@ -279,9 +260,9 @@ mod tests {
         fn serializes_command_out() {
             let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
 
-            let command = Command::Out {
+            let command = Command::End {
                 title: "Out test".into(),
-                description: Some("test for Command::Out".to_string()),
+                description: Some("test for Command::End".to_string()),
             };
 
             #[rustfmt::skip]
@@ -289,8 +270,8 @@ mod tests {
             let json = serde_json::to_value(&entry).unwrap();
 
             assert_eq!(
-                json["command"]["Out"]["description"].as_str().unwrap(),
-                "test for Command::Out"
+                json["command"]["End"]["description"].as_str().unwrap(),
+                "test for Command::End"
             );
 
             let decoded: Entry = serde_json::from_value(json).unwrap();
@@ -379,7 +360,7 @@ mod tests {
     }
 
     mod partition_by_date {
-        use crate::domain::TimeKind;
+        use crate::domain::{ActivityKind, WorkContext};
 
         use super::super::*;
         use chrono::TimeZone;
@@ -388,15 +369,23 @@ mod tests {
         fn partitions_entries_into_multiple_days() {
             let ts1 = Local.with_ymd_and_hms(2026, 1, 4, 8, 0, 0).unwrap();
             #[rustfmt::skip]
-            let entry1 = Entry::new( 0.into(), 1.into(), ts1, ts1.date_naive(), Command::In { time_kind: TimeKind::Travel });
+            let entry1 = Entry::new( 0.into(), 1.into(), ts1, ts1.date_naive(), Command::Start { kind: ActivityKind::Work, context: Some(WorkContext::Office) });
 
             let ts2 = Local.with_ymd_and_hms(2026, 1, 4, 9, 0, 0).unwrap();
             #[rustfmt::skip]
             let entry2 = Entry::new( 1.into(), 1.into(), ts2, ts2.date_naive(), Command::BreakStart);
 
             let ts3 = Local.with_ymd_and_hms(2026, 1, 5, 10, 0, 0).unwrap();
-            #[rustfmt::skip]
-            let entry3 = Entry::new( 2.into(), 1.into(), ts3, ts3.date_naive(), Command::In { time_kind: TimeKind::Home });
+            let entry3 = Entry::new(
+                2.into(),
+                1.into(),
+                ts3,
+                ts3.date_naive(),
+                Command::Start {
+                    kind: ActivityKind::Work,
+                    context: Some(WorkContext::Office),
+                },
+            );
 
             let input: Vec<&Entry> = vec![&entry1, &entry2, &entry3];
 
@@ -426,7 +415,7 @@ mod tests {
     mod validate_day_entries_tests {
         use chrono::TimeZone;
 
-        use crate::domain::TimeKind;
+        use crate::domain::{ActivityKind, WorkContext};
 
         use super::super::*;
 
@@ -439,12 +428,12 @@ mod tests {
         fn accepts_valid_full_day() {
             #[rustfmt::skip]
             let entries = [
-                make_entry( 1, 0, Command::In { time_kind: TimeKind::Office }),
+                make_entry( 1, 0, Command::Start { kind: ActivityKind::Work, context: Some(WorkContext::Office) }),
                 make_entry( 2, 5, Command::Log { title: "doing stuff".into(), description: None }),
                 make_entry( 3, 10, Command::BreakStart),
                 make_entry( 4, 15, Command::BreakEnd { description: None }),
                 make_entry( 5, 20, Command::Log { title: "doing other stuff".into(), description: None }),
-                make_entry( 6, 25, Command::Out { title: "done with all stuff".into(), description: None }),
+                make_entry( 6, 25, Command::End { title: "done with all stuff".into(), description: None }),
             ];
 
             let refs: Vec<&Entry> = entries.iter().collect();
@@ -455,12 +444,12 @@ mod tests {
         fn accepts_multiple_checkin_checkout_cycles() {
             #[rustfmt::skip]
             let entries  = [
-                make_entry( 1, 0, Command::In { time_kind: TimeKind::Office }),
-                make_entry( 2, 5, Command::Out { title: "id 2".into(), description: None }),
-                make_entry( 3, 10, Command::In { time_kind: TimeKind::Travel }),
-                make_entry( 4, 15, Command::Out { title: "id 4".into(), description: None }),
-                make_entry( 5, 20, Command::In { time_kind: TimeKind::Home }),
-                make_entry( 6, 25, Command::Out { title: "id 6".into(), description: None }),
+                make_entry( 1, 0, Command::Start { kind: ActivityKind::Work, context: Some(WorkContext::Office) }),
+                make_entry( 2, 5, Command::End { title: "id 2".into(), description: None }),
+                make_entry( 3, 10, Command::Start { kind: ActivityKind::Work, context: Some(WorkContext::Office) }),
+                make_entry( 4, 15, Command::End { title: "id 4".into(), description: None }),
+                make_entry( 5, 20, Command::Start { kind: ActivityKind::Work, context: Some(WorkContext::Office) }),
+                make_entry( 6, 25, Command::End { title: "id 6".into(), description: None }),
             ];
 
             let refs: Vec<&Entry> = entries.iter().collect();
@@ -471,29 +460,26 @@ mod tests {
         fn rejects_checkin_when_checked_in() {
             #[rustfmt::skip]
             let entries = [
-                make_entry(1, 0, Command::In { time_kind: TimeKind::Office }),
-                make_entry(2, 10, Command::In { time_kind: TimeKind::Home })
+                make_entry(1, 0, Command::Start { kind: ActivityKind::Work, context: Some(WorkContext::Office) }),
+                make_entry(2, 10, Command::Start { kind: ActivityKind::Work, context: Some(WorkContext::Office) })
             ];
             let refs: Vec<&Entry> = entries.iter().collect();
 
             let err = validate_day_entries(&refs).unwrap_err();
-            assert!(
-                err.to_string()
-                    .starts_with("cannot check in when checked in")
-            );
+            assert_eq!(
+                err.to_string(),
+                "cannot start work while already active (work)"
+            )
         }
 
         #[test]
         fn rejects_checkout_when_not_checked_in() {
             #[rustfmt::skip]
-            let entries = [ make_entry(1, 0, Command::Out { title: "".into(), description: None }) ];
+            let entries = [ make_entry(1, 0, Command::End { title: "".into(), description: None }) ];
 
             let refs: Vec<&Entry> = entries.iter().collect();
             let err = validate_day_entries(&refs).unwrap_err();
-            assert!(
-                err.to_string()
-                    .starts_with("cannot check out when checked out")
-            );
+            assert_eq!(err.to_string(), "cannot end while idle");
         }
 
         #[test]
@@ -503,7 +489,7 @@ mod tests {
 
             let refs: Vec<&Entry> = entries.iter().collect();
             let err = validate_day_entries(&refs).unwrap_err();
-            assert!(err.to_string().starts_with("cannot log when checked out"))
+            assert_eq!(err.to_string(), "cannot log while idle")
         }
 
         #[test]
@@ -512,42 +498,36 @@ mod tests {
 
             let refs: Vec<&Entry> = entries.iter().collect();
             let err = validate_day_entries(&refs).unwrap_err();
-            assert!(
-                err.to_string()
-                    .starts_with("cannot start break when checked out")
-            );
+            assert_eq!(err.to_string(), "cannot start break while idle");
         }
 
         #[test]
         fn rejects_break_end_when_not_on_break() {
             #[rustfmt::skip]
             let entries = [
-                make_entry(1, 0, Command::In { time_kind: TimeKind::Office }),
+                make_entry(1, 0, Command::Start { kind: ActivityKind::Work, context: Some(WorkContext::Office) }),
                 make_entry(2, 10, Command::BreakEnd { description: None }),
             ];
             let refs: Vec<&Entry> = entries.iter().collect();
 
             let err = validate_day_entries(&refs).unwrap_err();
-            assert!(
-                err.to_string()
-                    .starts_with("cannot end break when checked in")
-            );
+            assert_eq!(err.to_string(), "cannot end break when not on break");
         }
 
         #[test]
         fn rejects_checkout_while_on_break() {
             #[rustfmt::skip]
             let entries = [
-                make_entry(1, 0, Command::In { time_kind: TimeKind::Office }),
+                make_entry(1, 0, Command::Start { kind: ActivityKind::Work, context: Some(WorkContext::Office) }),
                 make_entry(2, 10, Command::BreakStart),
-                make_entry(3, 20, Command::Out { title: "".into(), description: None }),
+                make_entry(3, 20, Command::End { title: "".into(), description: None }),
             ];
             let refs: Vec<&Entry> = entries.iter().collect();
 
             let err = validate_day_entries(&refs).unwrap_err();
-            assert!(
-                err.to_string()
-                    .starts_with("cannot check out when on break")
+            assert_eq!(
+                err.to_string(),
+                "cannot perform activity commands while on break (work)"
             );
         }
 
@@ -555,14 +535,17 @@ mod tests {
         fn rejects_log_while_on_break() {
             #[rustfmt::skip]
             let entries = [
-                make_entry(1, 0, Command::In { time_kind: TimeKind::Office }),
+                make_entry(1, 0, Command::Start { kind: ActivityKind::Work, context: Some(WorkContext::Office) }),
                 make_entry(2, 10, Command::BreakStart),
                 make_entry(3, 20, Command::Log { title: "".into(), description: None }),
             ];
             let refs: Vec<&Entry> = entries.iter().collect();
 
             let err = validate_day_entries(&refs).unwrap_err();
-            assert!(err.to_string().starts_with("cannot log when on break"));
+            assert_eq!(
+                err.to_string(),
+                "cannot perform activity commands while on break (work)"
+            );
         }
     }
 }

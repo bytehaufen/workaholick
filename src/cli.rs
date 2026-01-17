@@ -1,4 +1,3 @@
-mod adapter;
 mod args;
 mod run;
 mod shell_editor;

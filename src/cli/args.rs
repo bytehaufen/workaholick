@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
-use crate::domain::TimeKind;
+use crate::domain::{ActivityKind, Command, Period, WorkContext};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -14,7 +14,8 @@ pub struct Cli {
     pub command: CliCommand,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, strum::Display)]
+#[strum(serialize_all = "kebab-case")]
 pub enum CliCommand {
     /// Start in web mode
     #[command()]
@@ -27,17 +28,21 @@ pub enum CliCommand {
     },
 
     // --- Write commands  ---
-    /// Start a workday
-    #[command(visible_alias = "i")]
-    In {
-        /// Work location/type for this day
-        #[arg(value_enum, value_name = "TIME_KIND")]
-        time_kind: TimeKind,
+    /// Start tracking a time segment
+    #[command(visible_alias = "start")]
+    Start {
+        // Start tracking a time segment
+        #[arg(value_enum, value_name = "KIND")]
+        kind: ActivityKindArg,
+
+        /// Set the place of work (only valid when KIND=work)
+        #[arg(long, value_enum, value_name = "CONTEXT")]
+        context: Option<WorkContextArg>,
     },
 
-    /// End the current workday
-    #[command(visible_alias = "o")]
-    Out {
+    /// End the current active segment
+    #[command(visible_alias = "end")]
+    End {
         // Title of what you finished
         title: String,
         /// Optional description of what you finished
@@ -50,17 +55,6 @@ pub enum CliCommand {
         // Title of what you finished
         title: String,
         /// Optional description of what you finished
-        description: Option<String>,
-    },
-
-    /// Start a break
-    #[command(visible_alias = "bs")]
-    BreakStart,
-
-    /// End a break
-    #[command(visible_alias = "be")]
-    BreakEnd {
-        /// Optional description for the break
         description: Option<String>,
     },
 
@@ -98,6 +92,90 @@ pub enum CliCommand {
     },
 }
 
+impl CliCommand {
+    fn validate(&self) -> anyhow::Result<()> {
+        match self {
+            CliCommand::Start { kind, context } => {
+                if *kind != ActivityKindArg::Work && context.is_some() {
+                    anyhow::bail!("--context is only valid when KIND=work")
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+impl TryFrom<CliCommand> for Command {
+    type Error = anyhow::Error;
+
+    fn try_from(cli_command: CliCommand) -> anyhow::Result<Self> {
+        let command = match cli_command {
+            CliCommand::Start { kind, context } => Command::Start {
+                kind: kind.into(),
+                context: context.map(Into::into),
+            },
+            CliCommand::End { title, description } => Command::End { title, description },
+            CliCommand::Log { title, description } => Command::Log { title, description },
+
+            CliCommand::Web
+            | CliCommand::Config { .. }
+            | CliCommand::Delete { .. }
+            | CliCommand::Edit { .. }
+            | CliCommand::Status
+            | CliCommand::Day { .. }
+            | CliCommand::Report {} => anyhow::bail!("'{cli_command}' is not a domain command"),
+        };
+
+        #[rustfmt::skip]
+        let validate_all_variants_covered = |command: &Command| match *command {
+            Command::Start { .. } | Command::End { .. } | Command::Log { .. } | Command::BreakStart | Command::BreakEnd { .. } => {}
+        };
+
+        validate_all_variants_covered(&command);
+
+        Ok(command)
+    }
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum, PartialEq)]
+pub enum ActivityKindArg {
+    Work,
+    Vacation,
+    Holiday,
+    Sick,
+    ChildSick,
+}
+
+impl From<ActivityKindArg> for ActivityKind {
+    fn from(time_kind_arg: ActivityKindArg) -> Self {
+        match time_kind_arg {
+            ActivityKindArg::Work => Self::Work,
+            ActivityKindArg::Vacation => Self::Vacation,
+            ActivityKindArg::Sick => Self::Sick,
+            ActivityKindArg::ChildSick => Self::ChildSick,
+            ActivityKindArg::Holiday => Self::Holiday,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq)]
+pub enum WorkContextArg {
+    Home,
+    Office,
+    Travel,
+}
+
+impl From<WorkContextArg> for WorkContext {
+    fn from(work_context_arg: WorkContextArg) -> Self {
+        match work_context_arg {
+            WorkContextArg::Home => Self::Home,
+            WorkContextArg::Office => Self::Office,
+            WorkContextArg::Travel => Self::Travel,
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum ConfigCommand {
     /// Show current config
@@ -129,6 +207,43 @@ pub enum PeriodArg {
     Month,
 }
 
+impl From<PeriodArg> for Period {
+    fn from(p: PeriodArg) -> Self {
+        match p {
+            PeriodArg::Today => Period::Today,
+            PeriodArg::Prev => Period::Prev,
+            PeriodArg::Week => Period::Week,
+            PeriodArg::Month => Period::Month,
+        }
+    }
+}
+
 pub fn parse() -> Cli {
     Cli::parse()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_command_to_command_conversion_errors() {
+        // Test Web command
+        let cli_web = CliCommand::Web;
+        let result = Command::try_from(cli_web);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "'web' is not a domain command"
+        );
+
+        // Test Config command
+        let cli_config = CliCommand::Config { command: None };
+        let result = Command::try_from(cli_config);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "'config' is not a domain command"
+        );
+    }
 }
