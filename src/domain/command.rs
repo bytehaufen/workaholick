@@ -1,16 +1,11 @@
-use crate::domain::WorkContext;
-
 use super::ActivityKind;
 use serde::{Deserialize, Serialize};
-use strum::EnumIter;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EnumIter, strum::Display)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, strum::Display, strum::EnumIter)]
+#[serde(rename_all = "snake_case")]
 pub enum Command {
     #[strum(to_string = "start")]
-    Start {
-        kind: ActivityKind,
-        context: Option<WorkContext>,
-    },
+    Start { kind: ActivityKind },
     #[strum(to_string = "end")]
     End {
         title: String,

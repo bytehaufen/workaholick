@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::{Duration, NaiveDate};
 
-use crate::domain::{Command, DayEntries, Entry};
+use super::{Command, DayEntries, Entry};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RangeKind {
@@ -76,10 +76,7 @@ pub fn summary<'a>(
             }
 
             let time_kind = entries.iter().find_map(|entry| match entry.command() {
-                Command::Start {
-                    kind: time_kind,
-                    context: _,
-                } => Some(*time_kind),
+                Command::Start { kind: time_kind } => Some(*time_kind),
                 _ => None,
             });
 
@@ -124,7 +121,7 @@ mod test {
     use super::*;
     use chrono::{Local, TimeZone};
 
-    use crate::domain::{ActivityKind, Command, DayEntries, Entry};
+    use crate::domain::{ActivityKind, Command, DayEntries, Entry, WorkContext};
 
     #[ignore]
     #[test]
@@ -149,8 +146,9 @@ mod test {
             ts1,
             ts1.date_naive(),
             Command::Start {
-                kind: ActivityKind::Work,
-                context: None,
+                kind: ActivityKind::Work {
+                    context: WorkContext::Office,
+                },
             },
         ));
 

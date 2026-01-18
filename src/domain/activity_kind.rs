@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::WorkContext;
+
 #[derive(
     Copy,
     Clone,
@@ -7,18 +9,24 @@ use serde::{Deserialize, Serialize};
     PartialEq,
     Serialize,
     Deserialize,
-    Default,
     strum::Display,
     strum::EnumString,
     strum::VariantNames,
 )]
 #[strum(serialize_all = "kebab-case")]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ActivityKind {
-    #[default]
-    Work,
+    Work { context: WorkContext },
     Vacation,
     Holiday,
     Sick,
-    ChildSick,
+    SickChild,
+}
+
+impl Default for ActivityKind {
+    fn default() -> Self {
+        Self::Work {
+            context: WorkContext::Office,
+        }
+    }
 }

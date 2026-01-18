@@ -6,3 +6,9 @@ ignore-files = true
 binary = false
 # Words to ignore
 extend-ignore-re = ["workaholick"]
+
+[type.rust]
+extend-ignore-re = [
+  # Ignore everything after `mod tests {`
+  '(?s)mod tests \{.*',
+]

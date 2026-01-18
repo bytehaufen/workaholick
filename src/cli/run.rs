@@ -16,9 +16,11 @@ pub fn run<S: EntryStore, E: Editor>(app: &mut App<S, E>, cli: Cli) -> Result<()
 
         CliCommand::Config { .. } => anyhow::bail!("config handled in main"),
 
-        CliCommand::Start { .. } | CliCommand::End { .. } | CliCommand::Log { .. } => {
-            app.add(Command::try_from(cli.command)?)
-        }
+        CliCommand::Start { kind } => app.add(Command::Start { kind: kind.into() }),
+        CliCommand::End { title, description } => app.add(Command::End { title, description }),
+        CliCommand::Log { title, description } => app.add(Command::Log { title, description }),
+        CliCommand::BreakStart => app.add(Command::BreakStart),
+        CliCommand::BreakEnd { description } => app.add(Command::BreakEnd { description }),
 
         CliCommand::Delete { id } => app.delete(id),
         CliCommand::Edit { id } => app.edit(id),

@@ -71,11 +71,17 @@ impl JsonlFileStore {
             })
             .map(|(index, line)| {
                 let line = line?;
-                let entry: Entry = serde_json::from_str(&line).with_context(|| {
-                    format!("parse JSON on line {} (file {:?})", index + 1, path)
-                })?;
+                let line_num = index + 1;
 
-                Ok(entry)
+                serde_json::from_str::<Entry>(&line).map_err(|e| {
+                    anyhow!(
+                        "parse JSON on line {} (file {:?}): {}\n  | {}",
+                        line_num,
+                        path,
+                        e.to_string().replace(" at line 1", ""), // Remove serde's useless line info
+                        line.trim()
+                    )
+                })
             })
             .collect()
     }
@@ -230,8 +236,9 @@ mod tests {
                 .append(NewEntry::new(
                     timestamp1,
                     Command::Start {
-                        kind: ActivityKind::Work,
-                        context: Some(WorkContext::Office),
+                        kind: ActivityKind::Work {
+                            context: WorkContext::Office,
+                        },
                     },
                 ))
                 .unwrap();
@@ -361,7 +368,6 @@ mod tests {
                     timestamp1,
                     Command::Start {
                         kind: ActivityKind::Vacation,
-                        context: None,
                     },
                 ))
                 .unwrap();
