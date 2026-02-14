@@ -13,3 +13,6 @@ check:
 
 build:
   nix build "#workaholick" -L
+
+test *ARGS:
+  cargo test -- --nocapture {{ARGS}}
