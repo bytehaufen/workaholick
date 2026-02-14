@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use ron::ser::PrettyConfig;
 use strum::IntoEnumIterator;
 
-use crate::domain::{Command, NewEntry};
+use crate::domain::{Command, EntryPatch};
 
-pub fn render_for_edit(entry: &NewEntry) -> Result<String> {
+pub fn render_for_edit(entry: &EntryPatch) -> Result<String> {
     let pretty_config = PrettyConfig::new();
 
     let ron_text = ron::ser::to_string_pretty(&entry, pretty_config.clone())
@@ -28,7 +28,7 @@ pub fn render_for_edit(entry: &NewEntry) -> Result<String> {
     Ok(format!("{header}{templates}\n{ron_text}"))
 }
 
-pub fn parse_edited(text: &str) -> Result<NewEntry> {
+pub fn parse_edited(text: &str) -> Result<EntryPatch> {
     ron::from_str(text).context("parsing edited RON (did you break the syntax?)")
 }
 
@@ -39,7 +39,7 @@ mod tests {
 
     #[test]
     fn render_output_parses() {
-        let entry = NewEntry::new(
+        let entry = EntryPatch::new(
             Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap(),
             Command::default(),
         );

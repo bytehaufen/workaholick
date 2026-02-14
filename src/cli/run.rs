@@ -6,6 +6,15 @@ use crate::{EntryStore, web};
 
 use anyhow::Result;
 
+macro_rules! append_and_print {
+    ($app:expr, $cmd:expr) => {{
+        let id = $app.append($cmd)?;
+        println!("✅ Entry with ID {id} added.");
+
+        Ok(())
+    }};
+}
+
 pub fn run<S: EntryStore, E: Editor>(app: &mut App<S, E>, cli: Cli) -> Result<()> {
     if let Some(ref config_path) = cli.config {
         println!("Value for config: {}", config_path.display());
@@ -16,21 +25,31 @@ pub fn run<S: EntryStore, E: Editor>(app: &mut App<S, E>, cli: Cli) -> Result<()
 
         CliCommand::Config { .. } => anyhow::bail!("config handled in main"),
 
-        CliCommand::Start { kind } => app.add(Command::Start { kind: kind.into() }),
-        CliCommand::End { title, description } => app.add(Command::End { title, description }),
-        CliCommand::Log { title, description } => app.add(Command::Log { title, description }),
-        CliCommand::BreakStart => app.add(Command::BreakStart),
-        CliCommand::BreakEnd { description } => app.add(Command::BreakEnd { description }),
+        CliCommand::Start { kind } => append_and_print!(app, Command::Start { kind: kind.into() }),
+        CliCommand::End { title, description } => {
+            append_and_print!(app, Command::End { title, description })
+        }
+        CliCommand::Log { title, description } => {
+            append_and_print!(app, Command::Log { title, description })
+        }
+        CliCommand::BreakStart => append_and_print!(app, Command::BreakStart),
+        CliCommand::BreakEnd { description } => {
+            append_and_print!(app, Command::BreakEnd { description })
+        }
 
-        CliCommand::Delete { id } => app.delete(id),
+        CliCommand::Delete { id } => {
+            let entry = app.delete(id)?;
+            println!("🗑️ Entry deleted:\n{entry:#?}");
+            Ok(())
+        }
         CliCommand::Edit { id } => app.edit(id),
 
         CliCommand::Status => {
-            // FIXME: Handle errors
-            match app.status()? {
-                Some(summary) => println!("{:?}", summary),
-                None => println!("No status for today"),
-            };
+            // FIXME: implement
+            // match app.status()? {
+            //     Some(summary) => println!("{:?}", summary),
+            //     None => println!("No status for today"),
+            // };
 
             Ok(())
         }

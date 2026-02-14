@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{Command, serde_datetime};
 
-#[derive(Debug, PartialEq, Clone, Copy, PartialOrd, Eq, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, PartialEq, Clone, Copy, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize, Default,
+)]
 pub struct EntryId(u64);
 impl Display for EntryId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -23,10 +25,21 @@ impl EntryId {
     pub fn value(&self) -> u64 {
         self.0
     }
+
+    pub fn incremented(&self) -> Self {
+        Self::from(self.0 + 1)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct EntryVersion(u8);
+
+impl Default for EntryVersion {
+    fn default() -> Self {
+        // TODO: Think over - replace by Constant?
+        Self(1)
+    }
+}
 
 impl From<u8> for EntryVersion {
     fn from(id: u8) -> Self {
@@ -34,13 +47,12 @@ impl From<u8> for EntryVersion {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Entry {
     id: EntryId,
     version: EntryVersion,
     #[serde(with = "serde_datetime")]
     timestamp: DateTime<Local>,
-    date: NaiveDate,
     command: Command,
 }
 
@@ -49,20 +61,18 @@ impl Entry {
         id: EntryId,
         version: EntryVersion,
         timestamp: DateTime<Local>,
-        date: NaiveDate,
         command: Command,
     ) -> Entry {
         Entry {
             id,
             version,
             timestamp,
-            date,
             command,
         }
     }
 
-    pub(crate) fn from_new_entry(id: EntryId, version: EntryVersion, new: NewEntry) -> Entry {
-        Self::new(id, version, new.timestamp, new.date, new.command)
+    pub(crate) fn from_patch(id: EntryId, version: EntryVersion, new: EntryPatch) -> Entry {
+        Self::new(id, version, new.timestamp, new.command)
     }
 
     pub fn id(&self) -> &EntryId {
@@ -81,37 +91,35 @@ impl Entry {
         &self.timestamp
     }
 
-    pub fn date(&self) -> &NaiveDate {
-        &self.date
+    pub fn date(&self) -> NaiveDate {
+        self.timestamp.date_naive()
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct NewEntry {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EntryPatch {
     #[serde(with = "serde_datetime")]
     timestamp: DateTime<Local>,
-    date: NaiveDate,
     command: Command,
 }
 
-impl From<&Entry> for NewEntry {
-    fn from(entry: &Entry) -> Self {
-        let timestamp = entry.timestamp;
-
-        Self {
-            timestamp,
-            date: timestamp.date_naive(),
-            command: entry.command.clone(),
-        }
-    }
-}
-
-impl NewEntry {
+impl EntryPatch {
     pub fn new(timestamp: DateTime<Local>, command: Command) -> Self {
-        NewEntry {
-            timestamp,
-            date: timestamp.date_naive(),
-            command,
+        EntryPatch { timestamp, command }
+    }
+
+    pub fn timestamp(&self) -> DateTime<Local> {
+        self.timestamp
+    }
+
+    pub fn date(&self) -> NaiveDate {
+        self.timestamp.date_naive()
+    }
+
+    pub fn from_entry(entry: &Entry) -> Self {
+        Self {
+            timestamp: *entry.timestamp(),
+            command: entry.command.clone(),
         }
     }
 }
@@ -132,13 +140,7 @@ mod tests {
                 context: WorkContext::Office,
             },
         };
-        let entry = Entry::new(
-            EntryId(1),
-            EntryVersion(1),
-            timestamp,
-            timestamp.date_naive(),
-            command,
-        );
+        let entry = Entry::new(EntryId(1), EntryVersion(1), timestamp, command);
 
         let json = serde_json::to_value(&entry).unwrap();
         assert_eq!(
@@ -161,13 +163,7 @@ mod tests {
             description: Some("test for Command::End".to_string()),
         };
 
-        let entry = Entry::new(
-            EntryId(1),
-            EntryVersion(1),
-            timestamp,
-            timestamp.date_naive(),
-            command,
-        );
+        let entry = Entry::new(EntryId(1), EntryVersion(1), timestamp, command);
         let json = serde_json::to_value(&entry).unwrap();
 
         assert_eq!(
@@ -186,13 +182,7 @@ mod tests {
             title: "Log test".into(),
             description: Some("test for Command::Log".to_string()),
         };
-        let entry = Entry::new(
-            EntryId(1),
-            EntryVersion(1),
-            timestamp,
-            timestamp.date_naive(),
-            command,
-        );
+        let entry = Entry::new(EntryId(1), EntryVersion(1), timestamp, command);
 
         let json = serde_json::to_value(&entry).unwrap();
 
@@ -209,13 +199,7 @@ mod tests {
     fn serializes_command_break_start() {
         let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
         let command = Command::BreakStart;
-        let entry = Entry::new(
-            EntryId(1),
-            EntryVersion(1),
-            timestamp,
-            timestamp.date_naive(),
-            command,
-        );
+        let entry = Entry::new(EntryId(1), EntryVersion(1), timestamp, command);
 
         let json = serde_json::to_value(&entry).unwrap();
 
@@ -231,13 +215,7 @@ mod tests {
         let command = Command::BreakEnd {
             description: Some("test for Command::BreakEnd".to_string()),
         };
-        let entry: Entry = Entry::new(
-            EntryId(42),
-            EntryVersion(4),
-            timestamp,
-            timestamp.date_naive(),
-            command,
-        );
+        let entry: Entry = Entry::new(EntryId(42), EntryVersion(4), timestamp, command);
 
         let json = serde_json::to_value(&entry).unwrap();
 

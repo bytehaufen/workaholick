@@ -1,11 +1,12 @@
-use crate::domain::{Entry, EntryId, NewEntry};
+use crate::domain::{Entry, EntryId, EntryPatch};
 
 use anyhow::Result;
 
 pub trait EntryStore {
-    fn append(&mut self, entry: NewEntry) -> Result<()>;
-    fn entries(&self) -> &[Entry];
-    fn delete_by_id(&mut self, id: &EntryId) -> Result<bool>;
-    fn update(&mut self, id: EntryId, patch: NewEntry) -> Result<()>;
-    fn find_by_id(&self, id: EntryId) -> Option<&Entry>;
+    fn insert(&mut self, entry: EntryPatch) -> Result<EntryId>;
+    /// This is sorted by timestamp
+    fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)>;
+    fn remove(&mut self, id: &EntryId) -> Result<Entry>;
+    fn update(&mut self, id: &EntryId, patch: EntryPatch) -> Result<()>;
+    fn get(&self, id: &EntryId) -> Option<&Entry>;
 }

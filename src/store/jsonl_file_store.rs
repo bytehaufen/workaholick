@@ -1,11 +1,13 @@
+use std::cmp::Ordering;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
+use indexmap::IndexMap;
 
 use crate::EntryStore;
-use crate::domain::{Entry, EntryId, NewEntry};
+use crate::domain::{Entry, EntryId, EntryPatch};
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
 const VERSION: u8 = 1;
@@ -16,8 +18,7 @@ pub struct JsonlFileStore {
     file_path: PathBuf,
     _lock_file: File,
     lock_path: PathBuf,
-    entries: Vec<Entry>,
-    next_id: EntryId,
+    entries: IndexMap<EntryId, Entry>,
 }
 
 impl Drop for JsonlFileStore {
@@ -37,27 +38,40 @@ impl JsonlFileStore {
 
         let (lock_file, lock_path) = Self::create_lock_file(file_path)?;
 
-        let entries = match Self::read_file(file_path) {
+        let try_load = || {
+            let entries = Self::read_file(file_path)?;
+            let len = entries.len();
+            let entries = entries.into_iter().try_fold(
+                IndexMap::with_capacity(len),
+                |mut entries, entry| {
+                    let id = *entry.id();
+                    if entries.insert(id, entry).is_some() {
+                        anyhow::bail!("duplicate id {id} in entries");
+                    }
+
+                    Ok(entries)
+                },
+            )?;
+
+            check_timestamp_ordering(&entries)?;
+
+            Ok(entries)
+        };
+
+        let entries = match try_load() {
             Ok(entries) => entries,
             Err(error) => {
+                drop(lock_file);
                 let _ = fs::remove_file(&lock_path);
                 return Err(error);
             }
         };
-
-        let next_id = if let Some(max) = entries.iter().map(|entry| entry.id()).max() {
-            max.value() + 1
-        } else {
-            0
-        }
-        .into();
 
         Ok(Self {
             file_path: file_path.into(),
             _lock_file: lock_file,
             lock_path,
             entries,
-            next_id,
         })
     }
 
@@ -123,10 +137,13 @@ impl JsonlFileStore {
 
         let mut writer = BufWriter::with_capacity(BUFFER_SIZE, file);
 
-        for entry in &self.entries {
-            serde_json::to_writer(&mut writer, entry)?;
-            writeln!(writer)?;
-        }
+        self.entries
+            .iter()
+            .try_for_each(|(_, entry)| -> anyhow::Result<()> {
+                serde_json::to_writer(&mut writer, entry)?;
+                writeln!(writer)?;
+                Ok(())
+            })?;
 
         writer.flush()?;
         writer.get_ref().sync_all()?;
@@ -149,61 +166,99 @@ impl JsonlFileStore {
 
         Ok((file, path))
     }
+
+    fn insert_sorted_by_timestamp(&mut self, id: EntryId, entry: Entry) {
+        self.entries
+            .insert_sorted_by(id, entry, |_i1, e1, _i2, e2| {
+                e1.timestamp()
+                    .partial_cmp(e2.timestamp())
+                    .unwrap_or(Ordering::Equal)
+            });
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Entries are not in chronological order:\n{0}")]
+pub struct EntryOrderError(pub String);
+
+fn check_timestamp_ordering(entries: &IndexMap<EntryId, Entry>) -> Result<(), EntryOrderError> {
+    let (errors, _) = entries
+        .iter()
+        .fold((Vec::new(), None), |(mut ts_errors, last_ts), entry| {
+            let ts = entry.1.timestamp();
+
+            if let Some(last_ts) = last_ts && last_ts >= ts {
+                let id = entry.0;
+
+                ts_errors.push(format!( "Entry {id} is out of order: previous timestamp {last_ts}, current timestamp {ts}"));
+            }
+
+            (ts_errors, Some(ts))
+        });
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        let error = errors
+            .iter()
+            .map(|e| format!(" - {}", e))
+            .collect::<Vec<_>>()
+            .join("\n");
+        Err(EntryOrderError(error))
+    }
 }
 
 impl EntryStore for JsonlFileStore {
-    fn append(&mut self, entry: NewEntry) -> Result<()> {
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.file_path)?;
-        let entry = Entry::from_new_entry(self.next_id, VERSION.into(), entry);
-
-        let mut writer = BufWriter::with_capacity(BUFFER_SIZE, file);
-        serde_json::to_writer(&mut writer, &entry)?;
-        writeln!(writer)?;
-        writer.flush()?;
-        writer.get_ref().sync_all()?;
-
-        self.entries.push(entry);
-        self.next_id = EntryId::from(self.next_id.value() + 1);
-
-        Ok(())
-    }
-
-    fn entries(&self) -> &[Entry] {
-        &self.entries
-    }
-
-    fn delete_by_id(&mut self, id: &EntryId) -> Result<bool> {
-        if let Some(position) = self.entries.iter().position(|entry| entry.id() == id) {
-            self.entries.remove(position);
-
-            self.persist()?;
-            return Ok(true);
-        }
-
-        Ok(false)
-    }
-
-    fn update(&mut self, id: EntryId, patch: NewEntry) -> Result<()> {
-        let position = self
+    fn insert(&mut self, new_entry: EntryPatch) -> anyhow::Result<EntryId> {
+        let id = self
             .entries
-            .iter_mut()
-            .position(|entry| *entry.id() == id)
-            .with_context(|| format!("cannot find entry with ID {id:?}"))?;
+            .keys()
+            .max()
+            .map(|id| id.incremented())
+            .unwrap_or_default();
 
-        let existing = &self.entries[position];
-        let updated = Entry::from_new_entry(id, *existing.version(), patch);
+        let new_entry = Entry::from_patch(id, VERSION.into(), new_entry);
 
-        self.entries[position] = updated;
+        self.insert_sorted_by_timestamp(id, new_entry);
+
+        self.persist()?;
+
+        Ok(id)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)> {
+        self.entries.iter()
+    }
+
+    fn remove(&mut self, id: &EntryId) -> anyhow::Result<Entry> {
+        // We do a slow shift remove, to do not mess the order in the stored file
+        let entry = self
+            .entries
+            .shift_remove(id)
+            .with_context(|| format!("id {id} does not exist"))?;
+
+        self.persist()?;
+
+        Ok(entry)
+    }
+
+    fn update(&mut self, id: &EntryId, patch: EntryPatch) -> Result<()> {
+        let entry = self
+            .entries
+            .get_mut(id)
+            .with_context(|| format!("id {id} does not exist"))?;
+
+        let updated_entry = Entry::from_patch(*id, *entry.version(), patch);
+        self.entries.shift_remove(id);
+        self.insert_sorted_by_timestamp(*id, updated_entry);
+
         self.persist()?;
 
         Ok(())
     }
 
-    fn find_by_id(&self, id: EntryId) -> Option<&Entry> {
-        self.entries.iter().find(|entry| *entry.id() == id)
+    fn get(&self, id: &EntryId) -> Option<&Entry> {
+        self.entries.get(id)
     }
 }
 
@@ -224,16 +279,16 @@ mod tests {
         let timestamp2 = Local.with_ymd_and_hms(2026, 2, 3, 4, 5, 6).unwrap();
 
         let assert_store = |store: &JsonlFileStore| {
-            assert_eq!(store.entries().len(), 2);
-            assert_eq!(store.entries()[0].id().value(), 0);
-            assert_eq!(store.entries()[1].id().value(), 1);
+            assert_eq!(store.entries.len(), 2);
+            assert_eq!(store.entries[0].id().value(), 0);
+            assert_eq!(store.entries[1].id().value(), 1);
         };
 
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
 
             store
-                .append(NewEntry::new(
+                .insert(EntryPatch::new(
                     timestamp1,
                     Command::Start {
                         kind: ActivityKind::Work {
@@ -243,7 +298,7 @@ mod tests {
                 ))
                 .unwrap();
             store
-                .append(NewEntry::new(
+                .insert(EntryPatch::new(
                     timestamp2,
                     Command::End {
                         title: "The main thing".into(),
@@ -271,7 +326,7 @@ mod tests {
         let timestamp3 = Local.with_ymd_and_hms(2027, 3, 4, 5, 6, 7).unwrap();
 
         let assert_store = |store: &JsonlFileStore| {
-            let entries = store.entries();
+            let entries = &store.entries;
             assert_eq!(entries.len(), 2);
             assert_eq!(entries[0].id().value(), 0);
             assert_eq!(entries[1].id().value(), 2);
@@ -294,7 +349,7 @@ mod tests {
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
             store
-                .append(NewEntry::new(
+                .insert(EntryPatch::new(
                     timestamp1,
                     Command::Log {
                         title: "the a thing".into(),
@@ -303,7 +358,7 @@ mod tests {
                 ))
                 .unwrap();
             store
-                .append(NewEntry::new(
+                .insert(EntryPatch::new(
                     timestamp2,
                     Command::Log {
                         title: "the b thing".into(),
@@ -312,7 +367,7 @@ mod tests {
                 ))
                 .unwrap();
             store
-                .append(NewEntry::new(
+                .insert(EntryPatch::new(
                     timestamp3,
                     Command::Log {
                         title: "the c thing".into(),
@@ -321,8 +376,12 @@ mod tests {
                 ))
                 .unwrap();
 
-            let deleted = store.delete_by_id(&EntryId::from(1)).unwrap();
-            assert!(deleted);
+            let deleted = store.remove(&EntryId::from(1)).unwrap();
+            if let Command::Log { title, .. } = deleted.command() {
+                assert_eq!(title, "the b thing");
+            } else {
+                panic!("expected Command::Log");
+            }
             assert_store(&store);
         }
         {
@@ -350,11 +409,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
 
-        let assert_store = |store: &JsonlFileStore| {
-            assert_eq!(store.entries().len(), 3);
-            assert_eq!(store.entries()[0].id().value(), 0);
-            assert_eq!(store.entries()[1].id().value(), 1);
-            assert_eq!(store.entries()[2].id().value(), 2);
+        let assert_store = |store: &JsonlFileStore, id1, id2, id3| {
+            assert_eq!(store.entries.len(), 3);
+            assert_eq!(store.entries[0].id().value(), id1);
+            assert_eq!(store.entries[1].id().value(), id2);
+            assert_eq!(store.entries[2].id().value(), id3);
         };
 
         {
@@ -364,7 +423,7 @@ mod tests {
             let timestamp3 = Local.with_ymd_and_hms(2025, 12, 24, 20, 0, 0).unwrap();
 
             store
-                .append(NewEntry::new(
+                .insert(EntryPatch::new(
                     timestamp1,
                     Command::Start {
                         kind: ActivityKind::Vacation,
@@ -373,7 +432,7 @@ mod tests {
                 .unwrap();
 
             store
-                .append(NewEntry::new(
+                .insert(EntryPatch::new(
                     timestamp2,
                     Command::Log {
                         title: "So hungry".into(),
@@ -383,7 +442,7 @@ mod tests {
                 .unwrap();
 
             store
-                .append(NewEntry::new(
+                .insert(EntryPatch::new(
                     timestamp3,
                     Command::End {
                         title: "So excited".into(),
@@ -392,31 +451,31 @@ mod tests {
                 ))
                 .unwrap();
 
-            assert_store(&store);
+            assert_store(&store, 1, 0, 2);
         }
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
-            let updated = NewEntry::new(
+            let updated = EntryPatch::new(
                 Local.with_ymd_and_hms(2025, 12, 24, 18, 0, 0).unwrap(),
                 Command::End {
                     title: "So excited".into(),
                     description: Some("un-wrapping presents".into()),
                 },
             );
-            store.update(1.into(), updated).unwrap();
+            store.update(&EntryId::from(1), updated).unwrap();
 
-            assert_store(&store);
+            assert_store(&store, 0, 1, 2);
         }
         {
             let store = JsonlFileStore::new(&file_path).unwrap();
 
-            assert_store(&store);
-            assert_eq!(store.entries()[1].timestamp().hour(), 18);
+            assert_store(&store, 0, 1, 2);
+            assert_eq!(store.entries[1].timestamp().hour(), 18);
 
             if let Command::End {
                 title: _,
                 description,
-            } = store.entries()[1].command()
+            } = store.entries[1].command()
             {
                 assert_eq!(description.as_deref(), Some("un-wrapping presents"));
             } else {
@@ -433,7 +492,7 @@ mod tests {
         let mut store = JsonlFileStore::new(&file_path).unwrap();
 
         store
-            .append(NewEntry::new(
+            .insert(EntryPatch::new(
                 Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
                 Command::Log {
                     title: "the a thing".into(),
@@ -442,7 +501,7 @@ mod tests {
             ))
             .unwrap();
 
-        let patch = NewEntry::new(
+        let patch = EntryPatch::new(
             Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
             Command::Log {
                 title: "the b thing".into(),
@@ -450,22 +509,19 @@ mod tests {
             },
         );
 
-        let err = store.update(999.into(), patch).unwrap_err();
-        assert!(
-            err.to_string().contains("cannot find entry with ID"),
-            "unexpected error: {err:?}"
-        );
+        let err = store.update(&999.into(), patch).unwrap_err();
+        assert_eq!(err.to_string(), "id 999 does not exist");
     }
 
     #[test]
-    fn delete_missing_id_returns_false() {
+    fn delete_missing_id_returns_error() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
 
         let mut store = JsonlFileStore::new(&file_path).unwrap();
 
         store
-            .append(NewEntry::new(
+            .insert(EntryPatch::new(
                 Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
                 Command::Log {
                     title: "the a thing".into(),
@@ -474,10 +530,14 @@ mod tests {
             ))
             .unwrap();
 
-        let deleted = store.delete_by_id(&EntryId::from(123)).unwrap();
-        assert!(!deleted);
-        assert_eq!(store.entries().len(), 1);
-        assert_eq!(store.entries()[0].id().value(), 0);
+        let deleted = store.remove(&EntryId::from(123));
+        if let Err(err) = deleted {
+            err.root_cause(); //TODO: Improve test when done with proper error handling
+        } else {
+            panic!("expected error");
+        }
+        assert_eq!(store.entries.len(), 1);
+        assert_eq!(store.entries[0].id().value(), 0);
     }
 
     #[test]
@@ -488,7 +548,7 @@ mod tests {
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
             store
-                .append(NewEntry::new(
+                .insert(EntryPatch::new(
                     Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
                     Command::Log {
                         title: "the a thing".into(),
@@ -497,7 +557,7 @@ mod tests {
                 ))
                 .unwrap();
             store
-                .append(NewEntry::new(
+                .insert(EntryPatch::new(
                     Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
                     Command::Log {
                         title: "the b thing".into(),
@@ -510,7 +570,7 @@ mod tests {
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
             store
-                .append(NewEntry::new(
+                .insert(EntryPatch::new(
                     Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
                     Command::Log {
                         title: "the c thing".into(),
@@ -519,10 +579,10 @@ mod tests {
                 ))
                 .unwrap();
 
-            assert_eq!(store.entries().len(), 3);
-            assert_eq!(store.entries()[0].id().value(), 0);
-            assert_eq!(store.entries()[1].id().value(), 1);
-            assert_eq!(store.entries()[2].id().value(), 2);
+            assert_eq!(store.entries.len(), 3);
+            assert_eq!(store.entries[0].id().value(), 0);
+            assert_eq!(store.entries[1].id().value(), 1);
+            assert_eq!(store.entries[2].id().value(), 2);
         }
     }
 
@@ -569,10 +629,10 @@ mod tests {
         let file_path = dir.path().join("entries.jsonl");
 
         let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
-        let entry = Entry::from_new_entry(
+        let entry = Entry::from_patch(
             EntryId::from(0),
             super::VERSION.into(),
-            NewEntry::new(
+            EntryPatch::new(
                 timestamp,
                 Command::Log {
                     title: "the a thing".into(),
@@ -588,8 +648,8 @@ mod tests {
         writeln!(file).unwrap();
 
         let store = JsonlFileStore::new(&file_path).unwrap();
-        assert_eq!(store.entries().len(), 1);
-        assert_eq!(store.entries()[0].id().value(), 0);
+        assert_eq!(store.entries.len(), 1);
+        assert_eq!(store.entries[0].id().value(), 0);
     }
 
     #[test]
