@@ -160,7 +160,7 @@ impl JsonlFileStore {
                     If no other instance is running, remove the lock file."
                 )
             } else {
-                anyhow!(error).context(format!("create lock file {path:?}"))
+                anyhow!("create lock file {path:?}: {error}")
             }
         })?;
 
@@ -271,7 +271,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn append_persists_and_reopen_reads_entries() {
+    fn insert_persists_and_reopen_reads_entries() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
 
@@ -330,20 +330,21 @@ mod tests {
             assert_eq!(entries.len(), 2);
             assert_eq!(entries[0].id().value(), 0);
             assert_eq!(entries[1].id().value(), 2);
-            match entries[0].command() {
+
+            assert_eq!(
+                *entries[0].command(),
                 Command::Log {
-                    title: _,
-                    description,
-                } => assert_eq!(description.as_deref(), Some("a")),
-                _other => panic!("expected Command::Log"),
-            }
-            match entries[1].command() {
+                    title: "the a thing".into(),
+                    description: Some("a".into()),
+                }
+            );
+            assert_eq!(
+                *entries[1].command(),
                 Command::Log {
-                    title: _,
-                    description,
-                } => assert_eq!(description.as_deref(), Some("c")),
-                _other => panic!("expected Command::Log"),
-            }
+                    title: "the c thing".into(),
+                    description: Some("c".into()),
+                }
+            );
         };
 
         {
@@ -377,11 +378,14 @@ mod tests {
                 .unwrap();
 
             let deleted = store.remove(&EntryId::from(1)).unwrap();
-            if let Command::Log { title, .. } = deleted.command() {
-                assert_eq!(title, "the b thing");
-            } else {
-                panic!("expected Command::Log");
-            }
+            assert_eq!(
+                *deleted.command(),
+                Command::Log {
+                    title: "the b thing".into(),
+                    description: Some("b".into())
+                }
+            );
+
             assert_store(&store);
         }
         {
@@ -398,10 +402,7 @@ mod tests {
         let _store1 = JsonlFileStore::new(&file_path).unwrap();
         let err = JsonlFileStore::new(&file_path).unwrap_err();
 
-        assert!(
-            err.to_string().contains("lock file exists"),
-            "unexpected error: {err:?}"
-        );
+        assert!(err.to_string().contains("lock file exists"));
     }
 
     #[test]
@@ -472,15 +473,13 @@ mod tests {
             assert_store(&store, 0, 1, 2);
             assert_eq!(store.entries[1].timestamp().hour(), 18);
 
-            if let Command::End {
-                title: _,
-                description,
-            } = store.entries[1].command()
-            {
-                assert_eq!(description.as_deref(), Some("un-wrapping presents"));
-            } else {
-                panic!("Wrong command type");
-            }
+            assert_eq!(
+                *store.entries[1].command(),
+                Command::End {
+                    title: "So excited".into(),
+                    description: Some("un-wrapping presents".into())
+                }
+            );
         }
     }
 
@@ -530,18 +529,16 @@ mod tests {
             ))
             .unwrap();
 
-        let deleted = store.remove(&EntryId::from(123));
-        if let Err(err) = deleted {
-            err.root_cause(); //TODO: Improve test when done with proper error handling
-        } else {
-            panic!("expected error");
-        }
+        let error = store.remove(&EntryId::from(123)).unwrap_err();
+
+        assert_eq!(error.to_string(), "id 123 does not exist");
+
         assert_eq!(store.entries.len(), 1);
         assert_eq!(store.entries[0].id().value(), 0);
     }
 
     #[test]
-    fn append_after_reopen_continues_ids() {
+    fn insert_after_reopen_continues_ids() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
 
@@ -607,10 +604,7 @@ mod tests {
 
         {
             let _store = JsonlFileStore::new(&store_file_path).unwrap();
-            assert!(
-                fs::exists(&lock_file_path).unwrap(),
-                "Lock file does not exist"
-            );
+            assert!(fs::exists(&lock_file_path).unwrap());
         }
 
         let mut store_file = fs::File::create_new(&store_file_path).unwrap();
@@ -620,7 +614,7 @@ mod tests {
 
         let _ = JsonlFileStore::new(&store_file_path).unwrap_err();
 
-        assert!(!fs::exists(&lock_file_path).unwrap(), "Lock file exists");
+        assert!(!fs::exists(&lock_file_path).unwrap());
     }
 
     #[test]
@@ -662,9 +656,66 @@ mod tests {
 
         let err = JsonlFileStore::new(&file_path).unwrap_err();
         let msg = err.to_string();
-        assert!(
-            msg.contains("parse JSON on line 1"),
-            "unexpected error: {msg}"
+        assert!(msg.contains("parse JSON on line 1"));
+    }
+
+    #[test]
+    fn new_with_duplicate_ids_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_file_path = dir.path().join("entries.jsonl");
+
+        let mut file = File::create(&store_file_path).unwrap();
+        file.write_all(br#"{"id":0,"version":1,"timestamp":"2026-01-05 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
+                                {"id":0,"version":1,"timestamp":"2026-01-05 16:45:03 +0100","command":{"end":{"title":"foo","description":null}}}"#).unwrap();
+        file.flush().unwrap();
+
+        let error = JsonlFileStore::new(&store_file_path).unwrap_err();
+        assert_eq!(error.to_string(), "duplicate id 0 in entries");
+    }
+
+    #[test]
+    fn new_with_duplicate_unsorted_timestamps_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_file_path = dir.path().join("entries.jsonl");
+
+        let mut file = File::create(&store_file_path).unwrap();
+        file.write_all(br#"{"id":0,"version":1,"timestamp":"2026-01-05 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
+                                {"id":1,"version":1,"timestamp":"2026-01-04 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
+                                {"id":2,"version":1,"timestamp":"2026-01-03 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
+                                {"id":3,"version":1,"timestamp":"2026-01-02 16:45:03 +0100","command":{"end":{"title":"foo","description":null}}}"#).unwrap();
+        file.flush().unwrap();
+
+        let error = JsonlFileStore::new(&store_file_path).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Entries are not in chronological order:\n - Entry 1 is out of order: previous timestamp 2026-01-05 04:30:26 +01:00, current timestamp 2026-01-04 04:30:26 +01:00\n - Entry 2 is out of order: previous timestamp 2026-01-04 04:30:26 +01:00, current timestamp 2026-01-03 04:30:26 +01:00\n - Entry 3 is out of order: previous timestamp 2026-01-03 04:30:26 +01:00, current timestamp 2026-01-02 16:45:03 +01:00"
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn create_lock_file_with_permission_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+
+        // Create the parent directory but make it read-only
+        let lock_dir = dir.path().join("readonly");
+        std::fs::create_dir(&lock_dir).unwrap();
+        let mut perms = std::fs::metadata(&lock_dir).unwrap().permissions();
+        perms.set_mode(0o444); // read-only
+        std::fs::set_permissions(&lock_dir, perms).unwrap();
+
+        let store_in_readonly = lock_dir.join("entries.jsonl");
+        let err = JsonlFileStore::new(&store_in_readonly).unwrap_err();
+
+        // Restore permissions
+        let mut perms = std::fs::metadata(&lock_dir).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&lock_dir, perms).unwrap();
+
+        let msg = err.to_string();
+        assert!(msg.contains("create lock file"));
+        assert!(msg.contains("Permission denied"));
     }
 }

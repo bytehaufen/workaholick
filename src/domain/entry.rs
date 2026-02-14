@@ -229,4 +229,49 @@ mod tests {
         let decoded: Entry = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, entry);
     }
+
+    #[test]
+    fn actual_version_is_one() {
+        assert_eq!(EntryVersion::default(), EntryVersion::from(1));
+    }
+
+    #[test]
+    fn timestamp_returns_timestamp() {
+        let timestamp = Local.with_ymd_and_hms(2026, 2, 14, 14, 32, 14).unwrap();
+        let patch = EntryPatch::new(
+            timestamp,
+            Command::Start {
+                kind: ActivityKind::Vacation,
+            },
+        );
+        assert_eq!(patch.timestamp(), timestamp);
+    }
+
+    #[test]
+    fn date_returns_date() {
+        let timestamp = Local.with_ymd_and_hms(2026, 2, 14, 14, 33, 14).unwrap();
+        let patch = EntryPatch::new(
+            timestamp,
+            Command::Start {
+                kind: ActivityKind::Vacation,
+            },
+        );
+        assert_eq!(patch.date(), timestamp.date_naive());
+    }
+
+    #[test]
+    fn from_entry_copies_fields() {
+        let timestamp = Local.with_ymd_and_hms(2026, 2, 14, 14, 37, 14).unwrap();
+        let entry = Entry::new(
+            42.into(),
+            1.into(),
+            timestamp,
+            Command::Start {
+                kind: ActivityKind::Holiday,
+            },
+        );
+        let patch = EntryPatch::from_entry(&entry);
+        assert_eq!(patch.timestamp, entry.timestamp);
+        assert_eq!(patch.command, entry.command);
+    }
 }

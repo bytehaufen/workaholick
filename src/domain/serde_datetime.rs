@@ -20,3 +20,24 @@ where
 
     Ok(date_time.with_timezone(&Local))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deserialize_invalid_date() {
+        let invalid_date = "\"not a date\"";
+        let result: Result<DateTime<Local>, _> = serde_json::from_str(invalid_date);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_deserialize_valid_date() {
+        let dt = Local::now();
+        let s = dt.format(super::FORMAT).to_string();
+        let json = format!("\"{}\"", s);
+        let result: Result<DateTime<Local>, _> = serde_json::from_str(&json);
+        assert!(result.is_ok());
+    }
+}
