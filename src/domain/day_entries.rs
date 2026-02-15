@@ -411,11 +411,6 @@ mod tests {
     use crate::domain::WorkContext;
     use chrono::{Local, TimeZone};
 
-    #[ctor::ctor]
-    fn init() {
-        colored::control::set_override(false);
-    }
-
     fn make_entry(id: u64, mins: u32, cmd: Command) -> Entry {
         let ts = Local.with_ymd_and_hms(2025, 1, 10, 16, mins, 0).unwrap();
         Entry::new(id.into(), 1.into(), ts, cmd)
@@ -658,7 +653,7 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 2: cannot start work while already active (work)"
+            "Day entries validation failed with 1 error(s): \n - Entry 2: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)"
         )
     }
 
@@ -678,7 +673,7 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 1: cannot end while idle"
+            "Day entries validation failed with 1 error(s): \n - Entry 1: cannot \u{1b}[31mend\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
         );
     }
 
@@ -698,7 +693,7 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 1: cannot log while idle"
+            "Day entries validation failed with 1 error(s): \n - Entry 1: cannot \u{1b}[31mlog\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
         )
     }
 
@@ -710,7 +705,7 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 1: cannot start break while idle"
+            "Day entries validation failed with 1 error(s): \n - Entry 1: cannot \u{1b}[31mstart break\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
         );
     }
 
@@ -734,7 +729,7 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 2: cannot end break when not breaking"
+            "Day entries validation failed with 1 error(s): \n - Entry 2: cannot \u{1b}[31mend break\u{1b}[0m when \u{1b}[33mnot breaking\u{1b}[0m"
         );
     }
 
@@ -766,7 +761,7 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 3: cannot 'end' while breaking"
+            "Day entries validation failed with 1 error(s): \n - Entry 3: cannot '\u{1b}[31mend\u{1b}[0m' while \u{1b}[33mbreaking\u{1b}[0m"
         );
     }
 
@@ -798,7 +793,30 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 3: cannot 'log' while breaking"
+            "Day entries validation failed with 1 error(s): \n - Entry 3: cannot '\u{1b}[31mlog\u{1b}[0m' while \u{1b}[33mbreaking\u{1b}[0m"
+        );
+    }
+
+    #[test]
+    fn rejects_break_while_on_break() {
+        let entries = [
+            make_entry(
+                1,
+                0,
+                Command::Start {
+                    kind: Default::default(),
+                },
+            ),
+            make_entry(2, 1, Command::BreakStart {}),
+            make_entry(2, 2, Command::BreakStart {}),
+        ];
+
+        let entries: Vec<&Entry> = entries.iter().collect();
+
+        let err = validate_day_entries(&entries).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Day entries validation failed with 1 error(s): \n - Entry 2: cannot \u{1b}[31mstart break\u{1b}[0m while already \u{1b}[33mbreaking\u{1b}[0m"
         );
     }
 }
