@@ -1,31 +1,32 @@
 use crate::{
     EntryStore,
-    domain::{EntriesByDay, Entry, EntryId, EntryPatch},
+    domain::{Entry, EntryId, EntryMutation, EntryPatch, EntryValidationIndex},
 };
 
 #[derive(Debug)]
 pub struct ValidatedEntryStore<STORE> {
     store: STORE,
-    entries_by_day: EntriesByDay,
 }
 
 impl<STORE: EntryStore> ValidatedEntryStore<STORE> {
     pub fn new(store: STORE) -> anyhow::Result<Self> {
         let entries: Vec<(&EntryId, &Entry)> = store.iter().collect();
+        EntryValidationIndex::validate_snapshot(&entries)?;
 
-        let entries_by_day = EntriesByDay::try_new(&entries)?;
+        Ok(Self { store })
+    }
 
-        Ok(Self { store, entries_by_day })
+    fn entries(&self) -> Vec<(&EntryId, &Entry)> {
+        self.store.iter().collect()
     }
 }
 
 impl<STORE: EntryStore> EntryStore for ValidatedEntryStore<STORE> {
     fn insert(&mut self, entry: EntryPatch) -> anyhow::Result<EntryId> {
-        let entries: Vec<(&EntryId, &Entry)> = self.store.iter().collect();
-        let validated_entry = self.entries_by_day.validate_insert_entry(&entries, &entry)?;
+        let entries = self.entries();
+        EntryValidationIndex::validate(&entries, EntryMutation::Insert { patch: &entry })?;
 
         let id = self.store.insert(entry)?;
-        self.entries_by_day.apply_insert(id, validated_entry);
 
         Ok(id)
     }
@@ -35,23 +36,20 @@ impl<STORE: EntryStore> EntryStore for ValidatedEntryStore<STORE> {
     }
 
     fn remove(&mut self, id: &EntryId) -> anyhow::Result<Entry> {
-        let entries: Vec<(&EntryId, &Entry)> = self.store.iter().collect();
-        let validated_entry = self.entries_by_day.validate_remove_entry(&entries, id)?;
+        let entries = self.entries();
+        EntryValidationIndex::validate(&entries, EntryMutation::Remove { id })?;
 
         let entry = self.store.remove(id)?;
-
-        self.entries_by_day.apply_remove(validated_entry);
 
         Ok(entry)
     }
 
     fn update(&mut self, id: &EntryId, patch: EntryPatch) -> anyhow::Result<()> {
-        let entries: Vec<(&EntryId, &Entry)> = self.store.iter().collect();
-        let validated_update = self.entries_by_day.validate_update_entry(&entries, id, &patch)?;
+        let entries = self.entries();
+        EntryValidationIndex::validate(&entries, EntryMutation::Update { id, patch: &patch })?;
 
         self.store.update(id, patch)?;
 
-        self.entries_by_day.apply_update(validated_update);
         Ok(())
     }
 

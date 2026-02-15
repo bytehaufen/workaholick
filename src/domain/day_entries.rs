@@ -7,59 +7,71 @@ use crate::domain::{EntryPatch, entry::EntryVersion};
 
 use super::{ActivityKind, Command, Entry, EntryId};
 
-#[derive(Debug)]
-pub struct ValidatedInsert {
-    patch: EntryPatch,
-}
-impl ValidatedInsert {
-    pub fn get(&self) -> &EntryPatch {
-        &self.patch
-    }
-}
-
-#[derive(Debug)]
-pub struct ValidatedRemove {
-    id: EntryId,
-}
-impl ValidatedRemove {
-    pub fn get(&self) -> &EntryId {
-        &self.id
-    }
-}
-
-#[derive(Debug)]
-pub struct ValidatedUpdate {
-    id: EntryId,
-    patch: EntryPatch,
-    new_index: usize,
+#[derive(Debug, Clone, Copy)]
+pub enum EntryMutation<'a> {
+    Insert { patch: &'a EntryPatch },
+    Remove { id: &'a EntryId },
+    Update { id: &'a EntryId, patch: &'a EntryPatch },
 }
 
 #[derive(Debug, PartialEq)]
-pub struct EntriesByDay {
-    days: BTreeMap<NaiveDate, DayEntries>,
+pub(crate) struct EntryValidationIndex {
+    days: BTreeMap<NaiveDate, DayEntryIds>,
 }
 
-impl EntriesByDay {
-    pub fn validate_insert_entry(
+impl EntryValidationIndex {
+    pub fn validate(
+        entries: &[(&EntryId, &Entry)],
+        mutation: EntryMutation<'_>,
+    ) -> anyhow::Result<()> {
+        let entries_by_day = Self::try_new(entries)?;
+
+        match mutation {
+            EntryMutation::Insert { patch } => entries_by_day.validate_insert_entry(entries, patch),
+            EntryMutation::Remove { id } => entries_by_day.validate_remove_entry(entries, id),
+            EntryMutation::Update { id, patch } => {
+                entries_by_day.validate_update_entry(entries, id, patch)
+            }
+        }
+    }
+
+    pub fn validate_snapshot(entries: &[(&EntryId, &Entry)]) -> anyhow::Result<()> {
+        Self::try_new(entries).map(|_| ())
+    }
+
+    fn validate_insert_entry(
         &self,
         entries: &[(&EntryId, &Entry)],
         patch: &EntryPatch,
-    ) -> anyhow::Result<ValidatedInsert> {
+    ) -> anyhow::Result<()> {
         let date = patch.timestamp().date_naive();
         let dummy = Entry::from_patch(EntryId::default(), EntryVersion::default(), patch.clone());
 
         let mut relevant_entries: Vec<(&EntryId, &Entry)> = Vec::new();
 
-        let resolve = |id| (id, Self::resolve_entry(entries, id));
+        let resolve = |id| -> anyhow::Result<(&EntryId, &Entry)> {
+            Ok((id, Self::resolve_entry(entries, id)?))
+        };
 
         // Previous day
         if let Some((_, prev_day)) = self.days.range(..date).next_back() {
-            relevant_entries.extend(prev_day.inner.iter().map(resolve));
+            relevant_entries.extend(
+                prev_day
+                    .inner
+                    .iter()
+                    .map(resolve)
+                    .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
+            );
         }
 
         // Current day (inclusive new one)
         if let Some(day) = self.days.get(&date) {
-            relevant_entries.extend(day.inner.iter().map(resolve));
+            relevant_entries.extend(
+                day.inner
+                    .iter()
+                    .map(resolve)
+                    .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
+            );
         }
 
         let dummy_id = EntryId::default();
@@ -69,72 +81,84 @@ impl EntriesByDay {
         if let Some((_, next_day)) =
             self.days.range((Bound::Excluded(date), Bound::Unbounded)).next()
         {
-            relevant_entries.extend(next_day.inner.iter().map(resolve));
+            relevant_entries.extend(
+                next_day
+                    .inner
+                    .iter()
+                    .map(resolve)
+                    .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
+            );
         }
 
         Self::try_new(&relevant_entries)?;
 
-        Ok(ValidatedInsert { patch: patch.clone() })
+        Ok(())
     }
 
-    pub fn validate_remove_entry(
+    fn validate_remove_entry(
         &self,
         entries: &[(&EntryId, &Entry)],
         id: &EntryId,
-    ) -> anyhow::Result<ValidatedRemove> {
-        let entry = Self::resolve_entry(entries, id);
+    ) -> anyhow::Result<()> {
+        let entry = Self::resolve_entry(entries, id)?;
         let date = entry.timestamp().date_naive();
 
         let mut relevant_entries: Vec<(&EntryId, &Entry)> = Vec::new();
 
-        let resolve = |id| (id, Self::resolve_entry(entries, id));
+        let resolve = |id| -> anyhow::Result<(&EntryId, &Entry)> {
+            Ok((id, Self::resolve_entry(entries, id)?))
+        };
         // Previous day
         if let Some((_, prev_day)) = self.days.range(..date).next_back() {
-            relevant_entries.extend(prev_day.inner.iter().map(resolve));
+            relevant_entries.extend(
+                prev_day
+                    .inner
+                    .iter()
+                    .map(resolve)
+                    .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
+            );
         }
 
         // Current day, excluding the removed one
         if let Some(day) = self.days.get(&date) {
-            relevant_entries
-                .extend(day.inner.iter().filter(|&entry_id| entry_id != id).map(resolve));
+            relevant_entries.extend(
+                day.inner
+                    .iter()
+                    .filter(|&entry_id| entry_id != id)
+                    .map(resolve)
+                    .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
+            );
         }
 
         // Next day
         if let Some((_, next_day)) =
             self.days.range((Bound::Excluded(date), Bound::Unbounded)).next()
         {
-            relevant_entries.extend(next_day.inner.iter().map(resolve));
+            relevant_entries.extend(
+                next_day
+                    .inner
+                    .iter()
+                    .map(resolve)
+                    .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
+            );
         }
 
         if !relevant_entries.is_empty() {
             Self::try_new(&relevant_entries)?;
         }
 
-        Ok(ValidatedRemove { id: *id })
+        Ok(())
     }
 
-    pub fn validate_update_entry(
+    fn validate_update_entry(
         &self,
         entries: &[(&EntryId, &Entry)],
         id: &EntryId,
         patch: &EntryPatch,
-    ) -> anyhow::Result<ValidatedUpdate> {
-        let entry = Self::resolve_entry(entries, id);
+    ) -> anyhow::Result<()> {
+        let entry = Self::resolve_entry(entries, id)?;
         let old_date = entry.date();
         let new_date = patch.date();
-
-        let new_index = {
-            let new_ts = patch.timestamp();
-            let ids: Vec<EntryId> = self
-                .days
-                .get(&new_date)
-                .map(|day| day.inner.iter().copied().filter(|entry_id| entry_id != id).collect())
-                .unwrap_or_default();
-
-            ids.iter()
-                .position(|entry_id| *Self::resolve_entry(entries, entry_id).timestamp() > new_ts)
-                .unwrap_or(ids.len())
-        };
 
         if old_date != new_date {
             self.validate_remove_entry(entries, id)?;
@@ -145,19 +169,32 @@ impl EntriesByDay {
             self.validate_insert_entry(&entries, patch)?;
         } else {
             let updated = Entry::from_patch(*id, EntryVersion::default(), patch.clone());
-            let resolve = |entry_id| (entry_id, Self::resolve_entry(entries, entry_id));
+            let resolve = |entry_id| -> anyhow::Result<(&EntryId, &Entry)> {
+                Ok((entry_id, Self::resolve_entry(entries, entry_id)?))
+            };
 
             let mut relevant_entries: Vec<(&EntryId, &Entry)> = Vec::new();
 
             // Prev day
             if let Some((_, prev_day)) = self.days.range(..&patch.date()).next_back() {
-                relevant_entries.extend(prev_day.inner.iter().map(resolve));
+                relevant_entries.extend(
+                    prev_day
+                        .inner
+                        .iter()
+                        .map(resolve)
+                        .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
+                );
             }
 
             // Current day
             if let Some(day) = self.days.get(&patch.date()) {
-                relevant_entries
-                    .extend(day.inner.iter().filter(|entry_id| *entry_id != id).map(resolve));
+                relevant_entries.extend(
+                    day.inner
+                        .iter()
+                        .filter(|entry_id| *entry_id != id)
+                        .map(resolve)
+                        .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
+                );
             }
             relevant_entries.push((id, &updated));
 
@@ -165,47 +202,23 @@ impl EntriesByDay {
             if let Some((_, next_day)) =
                 self.days.range((Bound::Excluded(patch.date()), Bound::Unbounded)).next()
             {
-                relevant_entries.extend(next_day.inner.iter().map(resolve));
+                relevant_entries.extend(
+                    next_day
+                        .inner
+                        .iter()
+                        .map(resolve)
+                        .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
+                );
             }
 
             let _ = Self::try_new(&relevant_entries)?;
         }
 
-        Ok(ValidatedUpdate { id: *id, patch: patch.clone(), new_index })
+        Ok(())
     }
 
-    pub fn apply_insert(&mut self, id: EntryId, patch: ValidatedInsert) {
-        let date = patch.get().timestamp().date_naive();
-        let day_entries = self.days.entry(date).or_default();
-        day_entries.inner.push(id);
-    }
-
-    pub fn apply_remove(&mut self, id: ValidatedRemove) {
-        let id = *id.get();
-        self.days.retain(|_, day| {
-            day.inner.retain(|entry_id| *entry_id != id);
-            !day.inner.is_empty()
-        });
-    }
-
-    pub fn apply_update(&mut self, update: ValidatedUpdate) {
-        let ValidatedUpdate { id, patch, new_index } = update;
-        let new_date = patch.date();
-
-        self.days.retain(|_, day| {
-            day.inner.retain(|entry_id| *entry_id != id);
-            !day.inner.is_empty()
-        });
-
-        let day_entries = self.days.entry(new_date).or_default();
-        day_entries.inner.retain(|entry_id| *entry_id != id);
-
-        let insert_pos = new_index.min(day_entries.inner.len());
-        day_entries.inner.insert(insert_pos, id);
-    }
-
-    pub(crate) fn try_new(entries: &[(&EntryId, &Entry)]) -> anyhow::Result<Self> {
-        let days = partition_by_date(entries)?;
+    fn try_new(entries: &[(&EntryId, &Entry)]) -> anyhow::Result<Self> {
+        let days = index_entries_by_date(entries)?;
         let dates: Vec<_> = days.keys().collect();
 
         // Iterate over dates to check that the date before ends with `Command::End`
@@ -214,7 +227,7 @@ impl EntriesByDay {
             let day = &days[date];
 
             if let Some(last_id) = day.inner.last() {
-                let last_entry = Self::resolve_entry(entries, last_id);
+                let last_entry = Self::resolve_entry(entries, last_id)?;
 
                 match last_entry.command() {
                     Command::End { .. } => {}
@@ -228,32 +241,37 @@ impl EntriesByDay {
         Ok(Self { days })
     }
 
-    fn resolve_entry<'a>(entries: &'a [(&EntryId, &Entry)], id: &EntryId) -> &'a Entry {
-        let (_, entry) =
-            entries.iter().find(|(entry_id, _)| *entry_id == id).expect("entry should exist");
+    fn resolve_entry<'a>(
+        entries: &'a [(&EntryId, &Entry)],
+        id: &EntryId,
+    ) -> anyhow::Result<&'a Entry> {
+        let (_, entry) = entries
+            .iter()
+            .find(|(entry_id, _)| *entry_id == id)
+            .ok_or_else(|| anyhow::anyhow!("entry {id} should exist during validation"))?;
 
-        entry
+        Ok(entry)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct DayEntries {
+struct DayEntryIds {
     inner: Vec<EntryId>,
 }
 
-impl TryFrom<&Vec<&Entry>> for DayEntries {
-    type Error = DayEntriesValidationError;
+impl TryFrom<&Vec<&Entry>> for DayEntryIds {
+    type Error = DayEntryValidationError;
 
-    fn try_from(entries: &Vec<&Entry>) -> Result<Self, DayEntriesValidationError> {
+    fn try_from(entries: &Vec<&Entry>) -> Result<Self, DayEntryValidationError> {
         if entries.is_empty() {
-            return Err(DayEntriesValidationError {
+            return Err(DayEntryValidationError {
                 errors: vec!["entries must not be empty".into()],
             });
         }
         let first_date = entries[0].date();
 
         if !entries.iter().all(|entry| entry.date() == first_date) {
-            return Err(DayEntriesValidationError {
+            return Err(DayEntryValidationError {
                 errors: vec!["entries must all be of the same date".into()],
             });
         }
@@ -267,11 +285,11 @@ impl TryFrom<&Vec<&Entry>> for DayEntries {
 
 #[derive(Debug, thiserror::Error)]
 #[error("Day entries validation failed with {} error(s):\n{}", errors.len(), errors.iter().map(|e| format!(" - {}", e)).collect::<Vec<_>>().join("\n"))]
-pub struct DayEntriesValidationError {
+struct DayEntryValidationError {
     errors: Vec<String>,
 }
 
-fn validate_day_entries(entries: &[&Entry]) -> Result<(), DayEntriesValidationError> {
+fn validate_day_entries(entries: &[&Entry]) -> Result<(), DayEntryValidationError> {
     #[derive(Clone, Copy)]
     enum State {
         Idle,
@@ -325,12 +343,12 @@ fn validate_day_entries(entries: &[&Entry]) -> Result<(), DayEntriesValidationEr
         (state, errors)
     });
 
-    if errors.is_empty() { Ok(()) } else { Err(DayEntriesValidationError { errors }) }
+    if errors.is_empty() { Ok(()) } else { Err(DayEntryValidationError { errors }) }
 }
 
-pub fn partition_by_date(
+fn index_entries_by_date(
     entries: &[(&EntryId, &Entry)],
-) -> Result<BTreeMap<NaiveDate, DayEntries>, DayEntriesValidationError> {
+) -> Result<BTreeMap<NaiveDate, DayEntryIds>, DayEntryValidationError> {
     let mut entries_by_date: BTreeMap<NaiveDate, Vec<&Entry>> =
         entries.iter().fold(BTreeMap::new(), |mut acc, (_entry_id, entry)| {
             acc.entry(entry.date()).or_default().push(entry);
@@ -341,12 +359,10 @@ pub fn partition_by_date(
         .values_mut()
         .for_each(|entries| entries.sort_by_key(|entry| *entry.timestamp()));
 
-    dbg!(&entries_by_date);
-
     let (day_entries, errors) = entries_by_date.iter().fold(
         (BTreeMap::new(), Vec::new()),
         |(mut day_entries, mut errors), (date, entries)| {
-            match DayEntries::try_from(entries) {
+            match DayEntryIds::try_from(entries) {
                 Ok(day_entry) => {
                     day_entries.insert(*date, day_entry);
                 }
@@ -357,7 +373,7 @@ pub fn partition_by_date(
         },
     );
 
-    if errors.is_empty() { Ok(day_entries) } else { Err(DayEntriesValidationError { errors }) }
+    if errors.is_empty() { Ok(day_entries) } else { Err(DayEntryValidationError { errors }) }
 }
 
 #[cfg(test)]
@@ -398,7 +414,7 @@ mod tests {
 
         #[test]
         fn try_from_empty_returns_error() {
-            let err = DayEntries::try_from(&Vec::new()).unwrap_err();
+            let err = DayEntryIds::try_from(&Vec::new()).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 "\
@@ -413,7 +429,7 @@ Day entries validation failed with 1 error(s):
             let entry2 =
                 entry(2, Local.with_ymd_and_hms(4025, 1, 4, 16, 9, 0).unwrap(), Command::default());
 
-            let err = DayEntries::try_from(&vec![&entry1, &entry2]).unwrap_err();
+            let err = DayEntryIds::try_from(&vec![&entry1, &entry2]).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 "\
@@ -423,13 +439,13 @@ Day entries validation failed with 1 error(s):
         }
     }
 
-    mod partition_by_date_tests {
+    mod index_entries_by_date_tests {
         use super::*;
 
         #[test]
         fn returns_empty_map_for_empty_input() {
             let input: Vec<(&EntryId, &Entry)> = Vec::new();
-            let by_date = partition_by_date(&input).unwrap();
+            let by_date = index_entries_by_date(&input).unwrap();
             assert!(by_date.is_empty());
         }
 
@@ -450,7 +466,7 @@ Day entries validation failed with 1 error(s):
 
             let entries: Vec<(&EntryId, &Entry)> =
                 vec![(entry1.id(), &entry1), (entry2.id(), &entry2), (entry3.id(), &entry3)];
-            let by_date = partition_by_date(&entries).unwrap();
+            let by_date = index_entries_by_date(&entries).unwrap();
 
             assert_eq!(by_date.len(), 2);
             assert!(by_date.contains_key(&entry1.timestamp().date_naive()));
@@ -485,7 +501,7 @@ Day entries validation failed with 1 error(s):
             ];
             let entries: Vec<(&EntryId, &Entry)> = entries.iter().map(|e| (e.id(), e)).collect();
 
-            let errors = partition_by_date(&entries).unwrap_err().to_string();
+            let errors = index_entries_by_date(&entries).unwrap_err().to_string();
             assert_eq!(
                 errors,
                 "\
@@ -706,7 +722,7 @@ Day entries validation failed with 1 error(s):
 
             let entries = id_refs(&all);
 
-            let err = EntriesByDay::try_new(&entries).unwrap_err().to_string();
+            let err = EntryValidationIndex::try_new(&entries).unwrap_err().to_string();
             assert!(err.contains("must end with 'End'"));
         }
 
@@ -733,14 +749,14 @@ Day entries validation failed with 1 error(s):
             all.extend_from_slice(&day2);
 
             let entries = id_refs(&all);
-            let by_day = EntriesByDay::try_new(&entries).unwrap();
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
 
-            let mut expected: BTreeMap<NaiveDate, DayEntries> = BTreeMap::new();
-            let day_entries_1 = DayEntries { inner: day1.iter().map(|e| *e.id()).collect() };
-            let day_entries_2 = DayEntries { inner: day2.iter().map(|e| *e.id()).collect() };
+            let mut expected: BTreeMap<NaiveDate, DayEntryIds> = BTreeMap::new();
+            let day_entries_1 = DayEntryIds { inner: day1.iter().map(|e| *e.id()).collect() };
+            let day_entries_2 = DayEntryIds { inner: day2.iter().map(|e| *e.id()).collect() };
             expected.insert(ts1.date_naive(), day_entries_1);
             expected.insert(ts4.date_naive(), day_entries_2);
-            let expected = EntriesByDay { days: expected };
+            let expected = EntryValidationIndex { days: expected };
 
             assert_eq!(by_day, expected);
         }
@@ -777,15 +793,13 @@ Day entries validation failed with 1 error(s):
             all.extend_from_slice(&day2);
 
             let entries = id_refs(&all);
-            let by_day = EntriesByDay::try_new(&entries).unwrap();
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
 
             let patch = EntryPatch::new(
                 Local.with_ymd_and_hms(2025, 1, 10, 11, 0, 0).unwrap(),
                 Command::Log { title: "late log".into(), description: None },
             );
 
-            eprintln!();
-            eprintln!("Starting");
             let err = by_day.validate_insert_entry(&entries, &patch).unwrap_err().to_string();
 
             assert_eq!(
@@ -819,7 +833,7 @@ Day entries validation failed with 1 error(s):
             all.extend_from_slice(&day2);
 
             let entries = id_refs(&all);
-            let by_day = EntriesByDay::try_new(&entries).unwrap();
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
 
             let patch = EntryPatch::new(
                 Local.with_ymd_and_hms(2025, 1, 11, 9, 2, 0).unwrap(),
@@ -861,7 +875,7 @@ Day entries validation failed with 1 error(s):
             all.extend_from_slice(&day2);
 
             let entries = id_refs(&all);
-            let by_day = EntriesByDay::try_new(&entries).unwrap();
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
 
             let err = by_day.validate_remove_entry(&entries, day1[1].id()).unwrap_err().to_string();
             assert!(err.contains("must end with 'End'"));
@@ -876,12 +890,11 @@ Day entries validation failed with 1 error(s):
             )];
 
             let entries = id_refs(&only);
-            let mut by_day = EntriesByDay::try_new(&entries).unwrap();
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
 
-            let validated = by_day.validate_remove_entry(&entries, only[0].id()).unwrap();
-            by_day.apply_remove(validated);
+            by_day.validate_remove_entry(&entries, only[0].id()).unwrap();
 
-            assert!(by_day.days.is_empty());
+            assert!(by_day.validate_remove_entry(&entries, only[0].id()).is_ok());
         }
 
         #[test]
@@ -905,7 +918,7 @@ Day entries validation failed with 1 error(s):
             ];
 
             let entries = id_refs(&day);
-            let by_day = EntriesByDay::try_new(&entries).unwrap();
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
 
             let patch = EntryPatch::new(
                 Local.with_ymd_and_hms(2025, 1, 11, 9, 2, 0).unwrap(),
@@ -941,7 +954,7 @@ Day entries validation failed with 1 error(s):
             all.extend_from_slice(&day1);
 
             let entries = id_refs(&all);
-            let by_day = EntriesByDay::try_new(&entries).unwrap();
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
 
             let patch = EntryPatch::new(
                 Local.with_ymd_and_hms(2025, 1, 11, 9, 10, 0).unwrap(),
@@ -951,75 +964,6 @@ Day entries validation failed with 1 error(s):
             let err =
                 by_day.validate_update_entry(&entries, &3.into(), &patch).unwrap_err().to_string();
             assert!(err.contains("must end with 'End'"));
-        }
-
-        #[test]
-        fn apply_update_moves_entry_between_days_and_keeps_index() {
-            let day1 = [
-                entry(
-                    1,
-                    Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
-                ),
-                entry(
-                    2,
-                    Local.with_ymd_and_hms(2025, 1, 10, 9, 10, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
-                ),
-            ];
-            let day2 = [
-                entry(
-                    3,
-                    Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
-                ),
-                entry(
-                    4,
-                    Local.with_ymd_and_hms(2025, 1, 11, 9, 10, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
-                ),
-            ];
-
-            let mut all = Vec::new();
-            all.extend_from_slice(&day1);
-            all.extend_from_slice(&day2);
-
-            let entries = id_refs(&all);
-            let mut by_day = EntriesByDay::try_new(&entries).unwrap();
-
-            let patch = EntryPatch::new(
-                Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
-                Command::End { title: "".into(), description: None },
-            );
-
-            let validated = by_day.validate_update_entry(&entries, day1[1].id(), &patch).unwrap();
-            by_day.apply_update(validated);
-
-            let d1 = chrono::NaiveDate::from_ymd_opt(2025, 1, 10).unwrap();
-            let d2 = chrono::NaiveDate::from_ymd_opt(2025, 1, 11).unwrap();
-
-            let day1_after = by_day.days.get(&d1).unwrap();
-            let day2_after = by_day.days.get(&d2).unwrap();
-
-            assert_eq!(day1_after.inner, vec![*day1[0].id()]);
-            assert_eq!(day2_after.inner, vec![*day2[0].id(), *day1[1].id(), *day2[1].id()]);
-        }
-
-        #[test]
-        fn apply_remove_deletes_empty_day() {
-            let only = [entry(
-                1,
-                Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                Command::Start { kind: Default::default() },
-            )];
-
-            let entries = id_refs(&only);
-            let mut by_day = EntriesByDay::try_new(&entries).unwrap();
-
-            let validated = by_day.validate_remove_entry(&entries, only[0].id()).unwrap();
-            by_day.apply_remove(validated);
-
-            assert!(by_day.days.is_empty());
         }
     }
 }
