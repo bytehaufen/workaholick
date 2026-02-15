@@ -22,10 +22,10 @@ impl<STORE: EntryStore> ValidatedEntryStore<STORE> {
 impl<STORE: EntryStore> EntryStore for ValidatedEntryStore<STORE> {
     fn insert(&mut self, entry: EntryPatch) -> anyhow::Result<EntryId> {
         let entries: Vec<(&EntryId, &Entry)> = self.store.iter().collect();
-        let validated_entry = self.entries_by_day.validate_append_entry(&entries, &entry)?;
+        let validated_entry = self.entries_by_day.validate_insert_entry(&entries, &entry)?;
 
         let id = self.store.insert(entry)?;
-        self.entries_by_day.apply_append(id, validated_entry);
+        self.entries_by_day.apply_insert(id, validated_entry);
 
         Ok(id)
     }
