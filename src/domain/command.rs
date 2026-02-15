@@ -7,15 +7,9 @@ pub enum Command {
     #[strum(to_string = "start")]
     Start { kind: ActivityKind },
     #[strum(to_string = "end")]
-    End {
-        title: String,
-        description: Option<String>,
-    },
+    End { title: String, description: Option<String> },
     #[strum(to_string = "log")]
-    Log {
-        title: String,
-        description: Option<String>,
-    },
+    Log { title: String, description: Option<String> },
     #[strum(to_string = "start break")]
     BreakStart,
     #[strum(to_string = "end break")]
@@ -24,9 +18,6 @@ pub enum Command {
 
 impl Default for Command {
     fn default() -> Self {
-        Self::Log {
-            title: String::new(),
-            description: None,
-        }
+        Self::Log { title: String::new(), description: None }
     }
 }

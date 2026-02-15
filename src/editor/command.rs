@@ -16,16 +16,10 @@ pub fn choose_editor(env_visual: Option<String>, env_editor: Option<String>) -> 
 pub fn parse_editor_command(cmd: &str) -> Result<EditorCommand> {
     let parts = shlex::split(cmd).ok_or_else(|| anyhow!("Could not parse Editor: {cmd}"))?;
     if parts.is_empty() {
-        return Ok(EditorCommand {
-            program: "vi".into(),
-            args: vec![],
-        });
+        return Ok(EditorCommand { program: "vi".into(), args: vec![] });
     }
 
-    Ok(EditorCommand {
-        program: parts[0].clone(),
-        args: parts[1..].to_vec(),
-    })
+    Ok(EditorCommand { program: parts[0].clone(), args: parts[1..].to_vec() })
 }
 
 #[cfg(test)]
@@ -94,10 +88,7 @@ mod tests {
     fn parse_editor_preserves_quoted_arg() {
         let parsed = parse_editor_command("code --goto 'src/main.rs:10:2'").unwrap();
         assert_eq!(parsed.program, "code");
-        assert_eq!(
-            parsed.args,
-            vec!["--goto".to_string(), "src/main.rs:10:2".to_string()]
-        );
+        assert_eq!(parsed.args, vec!["--goto".to_string(), "src/main.rs:10:2".to_string()]);
     }
 
     #[test]

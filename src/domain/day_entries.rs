@@ -63,19 +63,15 @@ impl EntriesByDay {
         relevant_entries.push((&dummy_id, &dummy));
 
         // Next day
-        if let Some((_, next_day)) = self
-            .days
-            .range((Bound::Excluded(date), Bound::Unbounded))
-            .next()
+        if let Some((_, next_day)) =
+            self.days.range((Bound::Excluded(date), Bound::Unbounded)).next()
         {
             relevant_entries.extend(next_day.inner.iter().map(resolve));
         }
 
         Self::try_new(&relevant_entries)?;
 
-        Ok(ValidatedAppend {
-            patch: patch.clone(),
-        })
+        Ok(ValidatedAppend { patch: patch.clone() })
     }
 
     pub fn validate_remove_entry(
@@ -96,19 +92,13 @@ impl EntriesByDay {
 
         // Current day, excluding the removed one
         if let Some(day) = self.days.get(&date) {
-            relevant_entries.extend(
-                day.inner
-                    .iter()
-                    .filter(|&entry_id| entry_id != id)
-                    .map(resolve),
-            );
+            relevant_entries
+                .extend(day.inner.iter().filter(|&entry_id| entry_id != id).map(resolve));
         }
 
         // Next day
-        if let Some((_, next_day)) = self
-            .days
-            .range((Bound::Excluded(date), Bound::Unbounded))
-            .next()
+        if let Some((_, next_day)) =
+            self.days.range((Bound::Excluded(date), Bound::Unbounded)).next()
         {
             relevant_entries.extend(next_day.inner.iter().map(resolve));
         }
@@ -135,13 +125,7 @@ impl EntriesByDay {
             let ids: Vec<EntryId> = self
                 .days
                 .get(&new_date)
-                .map(|day| {
-                    day.inner
-                        .iter()
-                        .copied()
-                        .filter(|entry_id| entry_id != id)
-                        .collect()
-                })
+                .map(|day| day.inner.iter().copied().filter(|entry_id| entry_id != id).collect())
                 .unwrap_or_default();
 
             ids.iter()
@@ -165,20 +149,14 @@ impl EntriesByDay {
 
             // Current day
             if let Some(day) = self.days.get(&patch.date()) {
-                relevant_entries.extend(
-                    day.inner
-                        .iter()
-                        .filter(|entry_id| *entry_id != id)
-                        .map(resolve),
-                );
+                relevant_entries
+                    .extend(day.inner.iter().filter(|entry_id| *entry_id != id).map(resolve));
             }
             relevant_entries.push((id, &updated));
 
             // Next day
-            if let Some((_, next_day)) = self
-                .days
-                .range((Bound::Excluded(patch.date()), Bound::Unbounded))
-                .next()
+            if let Some((_, next_day)) =
+                self.days.range((Bound::Excluded(patch.date()), Bound::Unbounded)).next()
             {
                 relevant_entries.extend(next_day.inner.iter().map(resolve));
             }
@@ -186,11 +164,7 @@ impl EntriesByDay {
             let _ = Self::try_new(&relevant_entries)?;
         }
 
-        Ok(ValidatedUpdate {
-            id: *id,
-            patch: patch.clone(),
-            new_index,
-        })
+        Ok(ValidatedUpdate { id: *id, patch: patch.clone(), new_index })
     }
 
     pub fn apply_append(&mut self, id: EntryId, patch: ValidatedAppend) {
@@ -208,11 +182,7 @@ impl EntriesByDay {
     }
 
     pub fn apply_update(&mut self, update: ValidatedUpdate) {
-        let ValidatedUpdate {
-            id,
-            patch,
-            new_index,
-        } = update;
+        let ValidatedUpdate { id, patch, new_index } = update;
         let new_date = patch.date();
 
         self.days.retain(|_, day| {
@@ -252,10 +222,8 @@ impl EntriesByDay {
     }
 
     fn resolve_entry<'a>(entries: &'a [(&EntryId, &Entry)], id: &EntryId) -> &'a Entry {
-        let (_, entry) = entries
-            .iter()
-            .find(|(entry_id, _)| *entry_id == id)
-            .expect("entry should exist");
+        let (_, entry) =
+            entries.iter().find(|(entry_id, _)| *entry_id == id).expect("entry should exist");
 
         entry
     }
@@ -306,64 +274,51 @@ fn validate_day_entries(entries: &[&Entry]) -> Result<(), DayEntriesValidationEr
 
     use State::*;
 
-    let (_, errors) = entries
-        .iter()
-        .fold((Idle, Vec::new()), |(mut state, mut errors), entry| {
-            let result = match (state, entry.command()) {
-                (Idle, Command::Start { kind, .. }) => Ok(Active(*kind)),
-                (Idle, command) => Err(format!(
-                    "cannot {} while {}",
-                    format!("{command}").red(),
-                    "idle".yellow()
-                )),
+    let (_, errors) = entries.iter().fold((Idle, Vec::new()), |(mut state, mut errors), entry| {
+        let result = match (state, entry.command()) {
+            (Idle, Command::Start { kind, .. }) => Ok(Active(*kind)),
+            (Idle, command) => {
+                Err(format!("cannot {} while {}", format!("{command}").red(), "idle".yellow()))
+            }
 
-                (Active(_), Command::Log { .. }) => Ok(state),
+            (Active(_), Command::Log { .. }) => Ok(state),
 
-                (Active(kind), Command::BreakStart) => Ok(Breaking(kind)),
-                (Breaking(kind), Command::BreakEnd { .. }) => Ok(Active(kind)),
+            (Active(kind), Command::BreakStart) => Ok(Breaking(kind)),
+            (Breaking(kind), Command::BreakEnd { .. }) => Ok(Active(kind)),
 
-                (Active(_), Command::End { .. }) => Ok(Idle),
+            (Active(_), Command::End { .. }) => Ok(Idle),
 
-                (Active(activity_kind), Command::Start { kind }) => Err(format!(
-                    "cannot {} while already active ({})",
-                    format!("start {kind}").red(),
-                    activity_kind.to_string().yellow()
-                )),
+            (Active(activity_kind), Command::Start { kind }) => Err(format!(
+                "cannot {} while already active ({})",
+                format!("start {kind}").red(),
+                activity_kind.to_string().yellow()
+            )),
 
-                (Active(_), Command::BreakEnd { .. }) => Err(format!(
-                    "cannot {} when {}",
-                    "end break".red(),
-                    "not breaking".yellow()
-                )),
+            (Active(_), Command::BreakEnd { .. }) => {
+                Err(format!("cannot {} when {}", "end break".red(), "not breaking".yellow()))
+            }
 
-                (
-                    Breaking(_),
-                    Command::Start { .. } | Command::End { .. } | Command::Log { .. },
-                ) => Err(format!(
+            (Breaking(_), Command::Start { .. } | Command::End { .. } | Command::Log { .. }) => {
+                Err(format!(
                     "cannot '{}' while {}",
                     entry.command().to_string().red(),
                     "breaking".yellow()
-                )),
-
-                (Breaking(_), Command::BreakStart) => Err(format!(
-                    "cannot {} while already {}",
-                    "start break".red(),
-                    "breaking".yellow()
-                )),
-            };
-
-            match result {
-                Err(error) => errors.push(format!("Entry {}: {}", entry.id(), error)),
-                Ok(new_state) => state = new_state,
+                ))
             }
-            (state, errors)
-        });
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(DayEntriesValidationError { errors })
-    }
+            (Breaking(_), Command::BreakStart) => {
+                Err(format!("cannot {} while already {}", "start break".red(), "breaking".yellow()))
+            }
+        };
+
+        match result {
+            Err(error) => errors.push(format!("Entry {}: {}", entry.id(), error)),
+            Ok(new_state) => state = new_state,
+        }
+        (state, errors)
+    });
+
+    if errors.is_empty() { Ok(()) } else { Err(DayEntriesValidationError { errors }) }
 }
 
 // impl<'a> TryFrom<Vec<&'a Entry>> for DayEntries<'a> {
@@ -377,12 +332,10 @@ pub fn partition_by_date(
     entries: &[(&EntryId, &Entry)],
 ) -> Result<BTreeMap<NaiveDate, DayEntries>, DayEntriesValidationError> {
     let entries_by_date: BTreeMap<NaiveDate, Vec<&Entry>> =
-        entries
-            .iter()
-            .fold(BTreeMap::new(), |mut acc, (_entry_id, entry)| {
-                acc.entry(entry.date()).or_default().push(entry);
-                acc
-            });
+        entries.iter().fold(BTreeMap::new(), |mut acc, (_entry_id, entry)| {
+            acc.entry(entry.date()).or_default().push(entry);
+            acc
+        });
 
     let (day_entries, errors) = entries_by_date.iter().fold(
         (BTreeMap::new(), Vec::new()),
@@ -398,11 +351,7 @@ pub fn partition_by_date(
         },
     );
 
-    if errors.is_empty() {
-        Ok(day_entries)
-    } else {
-        Err(DayEntriesValidationError { errors })
-    }
+    if errors.is_empty() { Ok(day_entries) } else { Err(DayEntriesValidationError { errors }) }
 }
 
 #[cfg(test)]
@@ -450,11 +399,7 @@ Day entries validation failed with 1 error(s):
             0.into(),
             1.into(),
             ts1,
-            Command::Start {
-                kind: ActivityKind::Work {
-                    context: WorkContext::Office,
-                },
-            },
+            Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
         );
 
         let ts2 = Local.with_ymd_and_hms(2026, 1, 4, 9, 0, 0).unwrap();
@@ -465,18 +410,11 @@ Day entries validation failed with 1 error(s):
             2.into(),
             1.into(),
             ts3,
-            Command::Start {
-                kind: ActivityKind::Work {
-                    context: WorkContext::Office,
-                },
-            },
+            Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
         );
 
-        let entries: Vec<(&EntryId, &Entry)> = vec![
-            (entry1.id(), &entry1),
-            (entry2.id(), &entry2),
-            (entry3.id(), &entry3),
-        ];
+        let entries: Vec<(&EntryId, &Entry)> =
+            vec![(entry1.id(), &entry1), (entry2.id(), &entry2), (entry3.id(), &entry3)];
 
         let by_date = partition_by_date(&entries).unwrap();
 
@@ -489,14 +427,7 @@ Day entries validation failed with 1 error(s):
         let day1_timestamps: Vec<_> = day1
             .inner
             .iter()
-            .map(|id| {
-                *entries
-                    .iter()
-                    .find(|(e_id, _)| *e_id == id)
-                    .unwrap()
-                    .1
-                    .timestamp()
-            })
+            .map(|id| *entries.iter().find(|(e_id, _)| *e_id == id).unwrap().1.timestamp())
             .collect();
         assert_eq!(day1_timestamps, vec![ts1, ts2]);
 
@@ -504,14 +435,7 @@ Day entries validation failed with 1 error(s):
         let day2_timestamps: Vec<_> = day2
             .inner
             .iter()
-            .map(|id| {
-                *entries
-                    .iter()
-                    .find(|(e_id, _)| *e_id == id)
-                    .unwrap()
-                    .1
-                    .timestamp()
-            })
+            .map(|id| *entries.iter().find(|(e_id, _)| *e_id == id).unwrap().1.timestamp())
             .collect();
         assert_eq!(day2_timestamps, vec![ts3]);
     }
@@ -519,48 +443,12 @@ Day entries validation failed with 1 error(s):
     #[test]
     fn partition_by_date_returns_collected_errors() {
         let entries = [
-            make_entry(
-                1,
-                0,
-                Command::Start {
-                    kind: Default::default(),
-                },
-            ),
-            make_entry(
-                2,
-                5,
-                Command::Start {
-                    kind: Default::default(),
-                },
-            ),
-            make_entry(
-                3,
-                5,
-                Command::Start {
-                    kind: Default::default(),
-                },
-            ),
-            make_entry(
-                5,
-                6,
-                Command::Start {
-                    kind: Default::default(),
-                },
-            ),
-            make_entry(
-                6,
-                7,
-                Command::Start {
-                    kind: Default::default(),
-                },
-            ),
-            make_entry(
-                7,
-                8,
-                Command::Start {
-                    kind: Default::default(),
-                },
-            ),
+            make_entry(1, 0, Command::Start { kind: Default::default() }),
+            make_entry(2, 5, Command::Start { kind: Default::default() }),
+            make_entry(3, 5, Command::Start { kind: Default::default() }),
+            make_entry(5, 6, Command::Start { kind: Default::default() }),
+            make_entry(6, 7, Command::Start { kind: Default::default() }),
+            make_entry(7, 8, Command::Start { kind: Default::default() }),
         ];
         let entries: Vec<(&EntryId, &Entry)> = entries.iter().map(|e| (e.id(), e)).collect();
 
@@ -621,20 +509,8 @@ Day entries validation failed with 5 error(s):
     #[test]
     fn rejects_checkin_when_checked_in() {
         let entries = [
-            make_entry(
-                1,
-                0,
-                Command::Start {
-                    kind: Default::default(),
-                },
-            ),
-            make_entry(
-                2,
-                10,
-                Command::Start {
-                    kind: Default::default(),
-                },
-            ),
+            make_entry(1, 0, Command::Start { kind: Default::default() }),
+            make_entry(2, 10, Command::Start { kind: Default::default() }),
         ];
 
         let entries: Vec<&Entry> = entries.iter().collect();
@@ -650,14 +526,7 @@ Day entries validation failed with 1 error(s):
 
     #[test]
     fn rejects_checkout_when_not_checked_in() {
-        let entries = [make_entry(
-            1,
-            0,
-            Command::End {
-                title: "".into(),
-                description: None,
-            },
-        )];
+        let entries = [make_entry(1, 0, Command::End { title: "".into(), description: None })];
 
         let entries: Vec<&Entry> = entries.iter().collect();
 
@@ -672,14 +541,7 @@ Day entries validation failed with 1 error(s):
 
     #[test]
     fn rejects_log_when_not_checked_in() {
-        let entries = [make_entry(
-            1,
-            0,
-            Command::Log {
-                title: "".into(),
-                description: None,
-            },
-        )];
+        let entries = [make_entry(1, 0, Command::Log { title: "".into(), description: None })];
 
         let entries: Vec<&Entry> = entries.iter().collect();
 
@@ -709,13 +571,7 @@ Day entries validation failed with 1 error(s):
     #[test]
     fn rejects_break_end_when_not_on_break() {
         let entries = [
-            make_entry(
-                1,
-                0,
-                Command::Start {
-                    kind: Default::default(),
-                },
-            ),
+            make_entry(1, 0, Command::Start { kind: Default::default() }),
             make_entry(2, 10, Command::BreakEnd { description: None }),
         ];
 
@@ -733,22 +589,9 @@ Day entries validation failed with 1 error(s):
     #[test]
     fn rejects_checkout_while_on_break() {
         let entries = [
-            make_entry(
-                1,
-                0,
-                Command::Start {
-                    kind: Default::default(),
-                },
-            ),
+            make_entry(1, 0, Command::Start { kind: Default::default() }),
             make_entry(2, 10, Command::BreakStart),
-            make_entry(
-                3,
-                20,
-                Command::End {
-                    title: "".into(),
-                    description: None,
-                },
-            ),
+            make_entry(3, 20, Command::End { title: "".into(), description: None }),
         ];
 
         let entries: Vec<&Entry> = entries.iter().collect();
@@ -765,22 +608,9 @@ Day entries validation failed with 1 error(s):
     #[test]
     fn rejects_log_while_on_break() {
         let entries = [
-            make_entry(
-                1,
-                0,
-                Command::Start {
-                    kind: Default::default(),
-                },
-            ),
+            make_entry(1, 0, Command::Start { kind: Default::default() }),
             make_entry(2, 10, Command::BreakStart),
-            make_entry(
-                3,
-                20,
-                Command::Log {
-                    title: "".into(),
-                    description: None,
-                },
-            ),
+            make_entry(3, 20, Command::Log { title: "".into(), description: None }),
         ];
 
         let entries: Vec<&Entry> = entries.iter().collect();
@@ -797,13 +627,7 @@ Day entries validation failed with 1 error(s):
     #[test]
     fn rejects_break_while_on_break() {
         let entries = [
-            make_entry(
-                1,
-                0,
-                Command::Start {
-                    kind: Default::default(),
-                },
-            ),
+            make_entry(1, 0, Command::Start { kind: Default::default() }),
             make_entry(2, 1, Command::BreakStart {}),
             make_entry(2, 2, Command::BreakStart {}),
         ];

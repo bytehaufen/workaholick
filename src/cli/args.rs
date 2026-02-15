@@ -110,9 +110,7 @@ pub enum ActivityKindCommand {
 impl From<ActivityKindCommand> for ActivityKind {
     fn from(time_kind_arg: ActivityKindCommand) -> Self {
         match time_kind_arg {
-            ActivityKindCommand::Work { context } => Self::Work {
-                context: context.into(),
-            },
+            ActivityKindCommand::Work { context } => Self::Work { context: context.into() },
             ActivityKindCommand::Vacation => Self::Vacation,
             ActivityKindCommand::Sick => Self::Sick,
             ActivityKindCommand::SickChild => Self::SickChild,

@@ -19,9 +19,7 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            store_path: default_store_path(),
-        }
+        Self { store_path: default_store_path() }
     }
 }
 
@@ -64,9 +62,7 @@ pub fn edit(editor: &dyn Editor) -> Result<()> {
          # Keep the format valid.\n\n"
     );
 
-    let editored = editor
-        .edit(&(header + &original), FileType::Toml)
-        .context("opening editor")?;
+    let editored = editor.edit(&(header + &original), FileType::Toml).context("opening editor")?;
     let cfg: Config = toml::from_str(&editored).context("config TOML is invalid (not saving)")?;
     save(&path, &cfg)?;
 

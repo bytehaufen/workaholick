@@ -67,12 +67,7 @@ impl JsonlFileStore {
             }
         };
 
-        Ok(Self {
-            file_path: file_path.into(),
-            _lock_file: lock_file,
-            lock_path,
-            entries,
-        })
+        Ok(Self { file_path: file_path.into(), _lock_file: lock_file, lock_path, entries })
     }
 
     fn read_from<R: BufRead>(reader: R, path: &Path) -> Result<Vec<Entry>> {
@@ -129,21 +124,15 @@ impl JsonlFileStore {
         let file_path = &self.file_path;
         let temp_file = Self::temp_file_path(file_path);
 
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&temp_file)?;
+        let file = OpenOptions::new().create(true).truncate(true).write(true).open(&temp_file)?;
 
         let mut writer = BufWriter::with_capacity(BUFFER_SIZE, file);
 
-        self.entries
-            .iter()
-            .try_for_each(|(_, entry)| -> anyhow::Result<()> {
-                serde_json::to_writer(&mut writer, entry)?;
-                writeln!(writer)?;
-                Ok(())
-            })?;
+        self.entries.iter().try_for_each(|(_, entry)| -> anyhow::Result<()> {
+            serde_json::to_writer(&mut writer, entry)?;
+            writeln!(writer)?;
+            Ok(())
+        })?;
 
         writer.flush()?;
         writer.get_ref().sync_all()?;
@@ -168,12 +157,9 @@ impl JsonlFileStore {
     }
 
     fn insert_sorted_by_timestamp(&mut self, id: EntryId, entry: Entry) {
-        self.entries
-            .insert_sorted_by(id, entry, |_i1, e1, _i2, e2| {
-                e1.timestamp()
-                    .partial_cmp(e2.timestamp())
-                    .unwrap_or(Ordering::Equal)
-            });
+        self.entries.insert_sorted_by(id, entry, |_i1, e1, _i2, e2| {
+            e1.timestamp().partial_cmp(e2.timestamp()).unwrap_or(Ordering::Equal)
+        });
     }
 }
 
@@ -182,40 +168,33 @@ impl JsonlFileStore {
 pub struct EntryOrderError(pub String);
 
 fn check_timestamp_ordering(entries: &IndexMap<EntryId, Entry>) -> Result<(), EntryOrderError> {
-    let (errors, _) = entries
-        .iter()
-        .fold((Vec::new(), None), |(mut ts_errors, last_ts), entry| {
-            let ts = entry.1.timestamp();
+    let (errors, _) = entries.iter().fold((Vec::new(), None), |(mut ts_errors, last_ts), entry| {
+        let ts = entry.1.timestamp();
 
-            if let Some(last_ts) = last_ts && last_ts >= ts {
-                let id = entry.0;
+        if let Some(last_ts) = last_ts
+            && last_ts >= ts
+        {
+            let id = entry.0;
 
-                ts_errors.push(format!( "Entry {id} is out of order: previous timestamp {last_ts}, current timestamp {ts}"));
-            }
+            ts_errors.push(format!(
+                "Entry {id} is out of order: previous timestamp {last_ts}, current timestamp {ts}"
+            ));
+        }
 
-            (ts_errors, Some(ts))
-        });
+        (ts_errors, Some(ts))
+    });
 
     if errors.is_empty() {
         Ok(())
     } else {
-        let error = errors
-            .iter()
-            .map(|e| format!(" - {}", e))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let error = errors.iter().map(|e| format!(" - {}", e)).collect::<Vec<_>>().join("\n");
         Err(EntryOrderError(error))
     }
 }
 
 impl EntryStore for JsonlFileStore {
     fn insert(&mut self, new_entry: EntryPatch) -> anyhow::Result<EntryId> {
-        let id = self
-            .entries
-            .keys()
-            .max()
-            .map(|id| id.incremented())
-            .unwrap_or_default();
+        let id = self.entries.keys().max().map(|id| id.incremented()).unwrap_or_default();
 
         let new_entry = Entry::from_patch(id, VERSION.into(), new_entry);
 
@@ -232,10 +211,8 @@ impl EntryStore for JsonlFileStore {
 
     fn remove(&mut self, id: &EntryId) -> anyhow::Result<Entry> {
         // We do a slow shift remove, to do not mess the order in the stored file
-        let entry = self
-            .entries
-            .shift_remove(id)
-            .with_context(|| format!("id {id} does not exist"))?;
+        let entry =
+            self.entries.shift_remove(id).with_context(|| format!("id {id} does not exist"))?;
 
         self.persist()?;
 
@@ -243,10 +220,7 @@ impl EntryStore for JsonlFileStore {
     }
 
     fn update(&mut self, id: &EntryId, patch: EntryPatch) -> Result<()> {
-        let entry = self
-            .entries
-            .get_mut(id)
-            .with_context(|| format!("id {id} does not exist"))?;
+        let entry = self.entries.get_mut(id).with_context(|| format!("id {id} does not exist"))?;
 
         let updated_entry = Entry::from_patch(*id, *entry.version(), patch);
         self.entries.shift_remove(id);
@@ -290,11 +264,7 @@ mod tests {
             store
                 .insert(EntryPatch::new(
                     timestamp1,
-                    Command::Start {
-                        kind: ActivityKind::Work {
-                            context: WorkContext::Office,
-                        },
-                    },
+                    Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
                 ))
                 .unwrap();
             store
@@ -333,17 +303,11 @@ mod tests {
 
             assert_eq!(
                 *entries[0].command(),
-                Command::Log {
-                    title: "the a thing".into(),
-                    description: Some("a".into()),
-                }
+                Command::Log { title: "the a thing".into(), description: Some("a".into()) }
             );
             assert_eq!(
                 *entries[1].command(),
-                Command::Log {
-                    title: "the c thing".into(),
-                    description: Some("c".into()),
-                }
+                Command::Log { title: "the c thing".into(), description: Some("c".into()) }
             );
         };
 
@@ -380,10 +344,7 @@ mod tests {
             let deleted = store.remove(&EntryId::from(1)).unwrap();
             assert_eq!(
                 *deleted.command(),
-                Command::Log {
-                    title: "the b thing".into(),
-                    description: Some("b".into())
-                }
+                Command::Log { title: "the b thing".into(), description: Some("b".into()) }
             );
 
             assert_store(&store);
@@ -426,9 +387,7 @@ mod tests {
             store
                 .insert(EntryPatch::new(
                     timestamp1,
-                    Command::Start {
-                        kind: ActivityKind::Vacation,
-                    },
+                    Command::Start { kind: ActivityKind::Vacation },
                 ))
                 .unwrap();
 
@@ -493,19 +452,13 @@ mod tests {
         store
             .insert(EntryPatch::new(
                 Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
-                Command::Log {
-                    title: "the a thing".into(),
-                    description: Some("a".into()),
-                },
+                Command::Log { title: "the a thing".into(), description: Some("a".into()) },
             ))
             .unwrap();
 
         let patch = EntryPatch::new(
             Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
-            Command::Log {
-                title: "the b thing".into(),
-                description: Some("b".into()),
-            },
+            Command::Log { title: "the b thing".into(), description: Some("b".into()) },
         );
 
         let err = store.update(&999.into(), patch).unwrap_err();
@@ -522,10 +475,7 @@ mod tests {
         store
             .insert(EntryPatch::new(
                 Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
-                Command::Log {
-                    title: "the a thing".into(),
-                    description: Some("a".into()),
-                },
+                Command::Log { title: "the a thing".into(), description: Some("a".into()) },
             ))
             .unwrap();
 
@@ -547,19 +497,13 @@ mod tests {
             store
                 .insert(EntryPatch::new(
                     Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
-                    Command::Log {
-                        title: "the a thing".into(),
-                        description: Some("a".into()),
-                    },
+                    Command::Log { title: "the a thing".into(), description: Some("a".into()) },
                 ))
                 .unwrap();
             store
                 .insert(EntryPatch::new(
                     Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
-                    Command::Log {
-                        title: "the b thing".into(),
-                        description: Some("b".into()),
-                    },
+                    Command::Log { title: "the b thing".into(), description: Some("b".into()) },
                 ))
                 .unwrap();
         }
@@ -569,10 +513,7 @@ mod tests {
             store
                 .insert(EntryPatch::new(
                     Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
-                    Command::Log {
-                        title: "the c thing".into(),
-                        description: Some("c".into()),
-                    },
+                    Command::Log { title: "the c thing".into(), description: Some("c".into()) },
                 ))
                 .unwrap();
 
@@ -608,9 +549,7 @@ mod tests {
         }
 
         let mut store_file = fs::File::create_new(&store_file_path).unwrap();
-        store_file
-            .write_all("not parsable data".as_bytes())
-            .unwrap();
+        store_file.write_all("not parsable data".as_bytes()).unwrap();
 
         let _ = JsonlFileStore::new(&store_file_path).unwrap_err();
 
@@ -628,10 +567,7 @@ mod tests {
             super::VERSION.into(),
             EntryPatch::new(
                 timestamp,
-                Command::Log {
-                    title: "the a thing".into(),
-                    description: Some("a".into()),
-                },
+                Command::Log { title: "the a thing".into(), description: Some("a".into()) },
             ),
         );
 

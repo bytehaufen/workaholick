@@ -22,11 +22,7 @@ pub struct App<S: EntryStore, EDITOR: Editor> {
 
 impl<STORE: EntryStore, EDITOR: Editor> App<STORE, EDITOR> {
     pub fn new(config: Config, store: STORE, editor: EDITOR) -> Result<Self> {
-        Ok(Self {
-            config,
-            v_store: ValidatedEntryStore::new(store)?,
-            editor,
-        })
+        Ok(Self { config, v_store: ValidatedEntryStore::new(store)?, editor })
     }
 
     // TODO:
@@ -63,9 +59,7 @@ impl<STORE: EntryStore, EDITOR: Editor> App<STORE, EDITOR> {
 
     pub fn edit(&mut self, id: u64) -> Result<()> {
         let entry: EntryPatch = EntryPatch::from_entry(
-            self.v_store
-                .get(&id.into())
-                .with_context(|| format!("find ID {id}"))?,
+            self.v_store.get(&id.into()).with_context(|| format!("find ID {id}"))?,
         );
 
         let initial = render_for_edit(&entry)?;

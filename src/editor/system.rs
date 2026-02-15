@@ -141,10 +141,6 @@ mod tests {
 
     #[test]
     fn std_process_run_missing_program_is_err() {
-        assert!(
-            StdProcess
-                .run("definitely-not-a-real-program", &[])
-                .is_err()
-        );
+        assert!(StdProcess.run("definitely-not-a-real-program", &[]).is_err());
     }
 }

@@ -25,8 +25,6 @@ pub enum ActivityKind {
 
 impl Default for ActivityKind {
     fn default() -> Self {
-        Self::Work {
-            context: WorkContext::Office,
-        }
+        Self::Work { context: WorkContext::Office }
     }
 }

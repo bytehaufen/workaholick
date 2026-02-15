@@ -15,19 +15,14 @@ impl<STORE: EntryStore> ValidatedEntryStore<STORE> {
 
         let entries_by_day = EntriesByDay::try_new(&entries)?;
 
-        Ok(Self {
-            store,
-            entries_by_day,
-        })
+        Ok(Self { store, entries_by_day })
     }
 }
 
 impl<STORE: EntryStore> EntryStore for ValidatedEntryStore<STORE> {
     fn insert(&mut self, entry: EntryPatch) -> anyhow::Result<EntryId> {
         let entries: Vec<(&EntryId, &Entry)> = self.store.iter().collect();
-        let validated_entry = self
-            .entries_by_day
-            .validate_append_entry(&entries, &entry)?;
+        let validated_entry = self.entries_by_day.validate_append_entry(&entries, &entry)?;
 
         let id = self.store.insert(entry)?;
         self.entries_by_day.apply_append(id, validated_entry);
@@ -52,9 +47,7 @@ impl<STORE: EntryStore> EntryStore for ValidatedEntryStore<STORE> {
 
     fn update(&mut self, id: &EntryId, patch: EntryPatch) -> anyhow::Result<()> {
         let entries: Vec<(&EntryId, &Entry)> = self.store.iter().collect();
-        let validated_update = self
-            .entries_by_day
-            .validate_update_entry(&entries, id, &patch)?;
+        let validated_update = self.entries_by_day.validate_update_entry(&entries, id, &patch)?;
 
         self.store.update(id, patch)?;
 

@@ -63,12 +63,7 @@ impl Entry {
         timestamp: DateTime<Local>,
         command: Command,
     ) -> Entry {
-        Entry {
-            id,
-            version,
-            timestamp,
-            command,
-        }
+        Entry { id, version, timestamp, command }
     }
 
     pub(crate) fn from_patch(id: EntryId, version: EntryVersion, new: EntryPatch) -> Entry {
@@ -117,10 +112,7 @@ impl EntryPatch {
     }
 
     pub fn from_entry(entry: &Entry) -> Self {
-        Self {
-            timestamp: *entry.timestamp(),
-            command: entry.command.clone(),
-        }
+        Self { timestamp: *entry.timestamp(), command: entry.command.clone() }
     }
 }
 
@@ -135,20 +127,11 @@ mod tests {
     #[test]
     fn serializes_command_start() {
         let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
-        let command = Command::Start {
-            kind: ActivityKind::Work {
-                context: WorkContext::Office,
-            },
-        };
+        let command = Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } };
         let entry = Entry::new(EntryId(1), EntryVersion(1), timestamp, command);
 
         let json = serde_json::to_value(&entry).unwrap();
-        assert_eq!(
-            json["command"]["start"]["kind"]["work"]["context"]
-                .as_str()
-                .unwrap(),
-            "office"
-        );
+        assert_eq!(json["command"]["start"]["kind"]["work"]["context"].as_str().unwrap(), "office");
 
         let decoded: Entry = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, entry);
@@ -212,17 +195,14 @@ mod tests {
     #[test]
     fn serializes_command_break_end() {
         let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
-        let command = Command::BreakEnd {
-            description: Some("test for Command::BreakEnd".to_string()),
-        };
+        let command =
+            Command::BreakEnd { description: Some("test for Command::BreakEnd".to_string()) };
         let entry: Entry = Entry::new(EntryId(42), EntryVersion(4), timestamp, command);
 
         let json = serde_json::to_value(&entry).unwrap();
 
         assert_eq!(
-            json["command"]["break_end"]["description"]
-                .as_str()
-                .unwrap(),
+            json["command"]["break_end"]["description"].as_str().unwrap(),
             "test for Command::BreakEnd"
         );
 
@@ -238,24 +218,14 @@ mod tests {
     #[test]
     fn timestamp_returns_timestamp() {
         let timestamp = Local.with_ymd_and_hms(2026, 2, 14, 14, 32, 14).unwrap();
-        let patch = EntryPatch::new(
-            timestamp,
-            Command::Start {
-                kind: ActivityKind::Vacation,
-            },
-        );
+        let patch = EntryPatch::new(timestamp, Command::Start { kind: ActivityKind::Vacation });
         assert_eq!(patch.timestamp(), timestamp);
     }
 
     #[test]
     fn date_returns_date() {
         let timestamp = Local.with_ymd_and_hms(2026, 2, 14, 14, 33, 14).unwrap();
-        let patch = EntryPatch::new(
-            timestamp,
-            Command::Start {
-                kind: ActivityKind::Vacation,
-            },
-        );
+        let patch = EntryPatch::new(timestamp, Command::Start { kind: ActivityKind::Vacation });
         assert_eq!(patch.date(), timestamp.date_naive());
     }
 
@@ -266,9 +236,7 @@ mod tests {
             42.into(),
             1.into(),
             timestamp,
-            Command::Start {
-                kind: ActivityKind::Holiday,
-            },
+            Command::Start { kind: ActivityKind::Holiday },
         );
         let patch = EntryPatch::from_entry(&entry);
         assert_eq!(patch.timestamp, entry.timestamp);
