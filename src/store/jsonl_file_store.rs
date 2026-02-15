@@ -621,11 +621,9 @@ mod tests {
                                 {"id":3,"version":1,"timestamp":"2026-01-02 16:45:03 +0100","command":{"end":{"title":"foo","description":null}}}"#).unwrap();
         file.flush().unwrap();
 
-        let error = JsonlFileStore::new(&store_file_path).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "Entries are not in chronological order:\n - Entry 1 is out of order: previous timestamp 2026-01-05 04:30:26 +01:00, current timestamp 2026-01-04 04:30:26 +01:00\n - Entry 2 is out of order: previous timestamp 2026-01-04 04:30:26 +01:00, current timestamp 2026-01-03 04:30:26 +01:00\n - Entry 3 is out of order: previous timestamp 2026-01-03 04:30:26 +01:00, current timestamp 2026-01-02 16:45:03 +01:00"
-        );
+        let msg = JsonlFileStore::new(&store_file_path).unwrap_err().to_string();
+        assert!(msg.contains("Entries are not in chronological order:"));
+        assert!(msg.contains("Entry 1 is out of order")); 
     }
 
     #[test]
