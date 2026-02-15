@@ -325,7 +325,7 @@ fn validate_day_entries(entries: &[&Entry]) -> Result<(), DayEntryValidationErro
 
             (Breaking(_), Command::Start { .. } | Command::End { .. } | Command::Log { .. }) => {
                 Err(format!(
-                    "cannot '{}' while {}",
+                    "cannot {} while {}",
                     entry.command().to_string().red(),
                     "breaking".yellow()
                 ))
@@ -381,12 +381,22 @@ mod tests {
     use super::*;
     use crate::domain::WorkContext;
     use chrono::{Local, TimeZone};
+    use colored::control;
+    use std::sync::Once;
+
+    fn disable_colors_for_tests() {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            control::set_override(false);
+        });
+    }
 
     fn ts(day: u32, hour: u32, min: u32) -> chrono::DateTime<Local> {
         Local.with_ymd_and_hms(2025, 1, day, hour, min, 0).unwrap()
     }
 
     fn entry(id: u64, ts: chrono::DateTime<Local>, cmd: Command) -> Entry {
+        disable_colors_for_tests();
         Entry::new(id.into(), 1.into(), ts, cmd)
     }
 
@@ -506,11 +516,11 @@ Day entries validation failed with 1 error(s):
                 errors,
                 "\
 Day entries validation failed with 5 error(s):
- - Entry 2: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)
- - Entry 3: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)
- - Entry 5: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)
- - Entry 6: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)
- - Entry 7: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)"
+ - Entry 2: cannot start work while already active (work)
+ - Entry 3: cannot start work while already active (work)
+ - Entry 5: cannot start work while already active (work)
+ - Entry 6: cannot start work while already active (work)
+ - Entry 7: cannot start work while already active (work)"
             );
         }
     }
@@ -568,7 +578,7 @@ Day entries validation failed with 5 error(s):
                 err.to_string(),
                 "\
 Day entries validation failed with 1 error(s):
- - Entry 2: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)"
+ - Entry 2: cannot start work while already active (work)"
             )
         }
 
@@ -583,7 +593,7 @@ Day entries validation failed with 1 error(s):
                 err.to_string(),
                 "\
 Day entries validation failed with 1 error(s):
- - Entry 1: cannot \u{1b}[31mend\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
+ - Entry 1: cannot end while idle"
             );
         }
 
@@ -598,7 +608,7 @@ Day entries validation failed with 1 error(s):
                 err.to_string(),
                 "\
 Day entries validation failed with 1 error(s):
- - Entry 1: cannot \u{1b}[31mlog\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
+ - Entry 1: cannot log while idle"
             )
         }
 
@@ -613,7 +623,7 @@ Day entries validation failed with 1 error(s):
                 err.to_string(),
                 "\
 Day entries validation failed with 1 error(s):
- - Entry 1: cannot \u{1b}[31mstart break\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
+ - Entry 1: cannot start break while idle"
             );
         }
 
@@ -631,7 +641,7 @@ Day entries validation failed with 1 error(s):
                 err.to_string(),
                 "\
 Day entries validation failed with 1 error(s):
- - Entry 2: cannot \u{1b}[31mend break\u{1b}[0m when \u{1b}[33mnot breaking\u{1b}[0m"
+ - Entry 2: cannot end break when not breaking"
             );
         }
 
@@ -650,7 +660,7 @@ Day entries validation failed with 1 error(s):
                 err.to_string(),
                 "\
 Day entries validation failed with 1 error(s):
- - Entry 3: cannot '\u{1b}[31mend\u{1b}[0m' while \u{1b}[33mbreaking\u{1b}[0m"
+ - Entry 3: cannot end while breaking"
             );
         }
 
@@ -669,7 +679,7 @@ Day entries validation failed with 1 error(s):
                 err.to_string(),
                 "\
 Day entries validation failed with 1 error(s):
- - Entry 3: cannot '\u{1b}[31mlog\u{1b}[0m' while \u{1b}[33mbreaking\u{1b}[0m"
+ - Entry 3: cannot log while breaking"
             );
         }
 
@@ -688,7 +698,7 @@ Day entries validation failed with 1 error(s):
                 err.to_string(),
                 "\
 Day entries validation failed with 1 error(s):
- - Entry 3: cannot \u{1b}[31mstart break\u{1b}[0m while already \u{1b}[33mbreaking\u{1b}[0m"
+ - Entry 3: cannot start break while already breaking"
             );
         }
     }
@@ -804,25 +814,32 @@ Day entries validation failed with 1 error(s):
 
             assert_eq!(
                 err,
-                "Day entries validation failed with 1 error(s):\n - Entry 0: cannot \u{1b}[31mlog\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
+                "Day entries validation failed with 1 error(s):\n - Entry 0: cannot log while idle"
             );
         }
 
         #[test]
         fn validate_insert_entry_allows_valid_insert_in_same_day() {
-            let day1 = [entry(
-                1,
-                Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                Command::Start { kind: Default::default() },
-            )];
-            let day2 = [
+            let day1 = [
+                entry(
+                    1,
+                    Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
                 entry(
                     2,
+                    Local.with_ymd_and_hms(2025, 1, 10, 9, 10, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+            let day2 = [
+                entry(
+                    3,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
                     Command::Start { kind: Default::default() },
                 ),
                 entry(
-                    3,
+                    4,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
                     Command::End { title: "".into(), description: None },
                 ),
@@ -963,7 +980,7 @@ Day entries validation failed with 1 error(s):
 
             let err =
                 by_day.validate_update_entry(&entries, &3.into(), &patch).unwrap_err().to_string();
-            assert!(err.contains("must end with 'End'"));
+            assert!(err.contains("should exist during validation"));
         }
     }
 }
