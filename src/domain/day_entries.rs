@@ -360,286 +360,350 @@ mod tests {
     use crate::domain::WorkContext;
     use chrono::{Local, TimeZone};
 
-    fn make_entry(id: u64, mins: u32, cmd: Command) -> Entry {
-        let ts = Local.with_ymd_and_hms(2025, 1, 10, 16, mins, 0).unwrap();
+    fn ts(day: u32, hour: u32, min: u32) -> chrono::DateTime<Local> {
+        Local.with_ymd_and_hms(2025, 1, day, hour, min, 0).unwrap()
+    }
+
+    fn entry(id: u64, ts: chrono::DateTime<Local>, cmd: Command) -> Entry {
         Entry::new(id.into(), 1.into(), ts, cmd)
     }
 
-    #[test]
-    fn try_new_rejects_empty_entries() {
-        let err = DayEntries::try_from(&Vec::new()).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "\
+    fn make_entry(id: u64, mins: u32, cmd: Command) -> Entry {
+        entry(id, ts(10, 16, mins), cmd)
+    }
+
+    fn entries_at_same_day(cmds: &[Command]) -> Vec<Entry> {
+        cmds.iter()
+            .enumerate()
+            .map(|(i, cmd)| make_entry((i + 1) as u64, (i as u32) * 5, cmd.clone()))
+            .collect()
+    }
+
+    fn refs(entries: &[Entry]) -> Vec<&Entry> {
+        entries.iter().collect()
+    }
+
+    fn id_refs(entries: &[Entry]) -> Vec<(&EntryId, &Entry)> {
+        entries.iter().map(|e| (e.id(), e)).collect()
+    }
+
+    mod day_entries {
+        use super::*;
+
+        #[test]
+        fn try_from_empty_returns_error() {
+            let err = DayEntries::try_from(&Vec::new()).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "\
 Day entries validation failed with 1 error(s):
  - entries must not be empty"
-        );
-    }
+            );
+        }
 
-    #[test]
-    fn try_new_rejects_not_unique_date() {
-        let ts1 = Local.with_ymd_and_hms(2025, 1, 4, 16, 8, 0).unwrap();
-        let entry1 = Entry::new(0.into(), 1.into(), ts1, Command::default());
-        let ts2 = Local.with_ymd_and_hms(4025, 1, 4, 16, 9, 0).unwrap();
-        let entry2 = Entry::new(1.into(), 1.into(), ts2, Command::default());
+        #[test]
+        fn try_from_mixed_dates_returns_error() {
+            let entry1 = entry(1, ts(4, 16, 8), Command::default());
+            let entry2 =
+                entry(2, Local.with_ymd_and_hms(4025, 1, 4, 16, 9, 0).unwrap(), Command::default());
 
-        let err = DayEntries::try_from(&vec![&entry1, &entry2]).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "\
+            let err = DayEntries::try_from(&vec![&entry1, &entry2]).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "\
 Day entries validation failed with 1 error(s):
  - entries must all be of the same date"
-        );
+            );
+        }
     }
 
-    #[test]
-    fn partitions_entries_into_multiple_days() {
-        let ts1 = Local.with_ymd_and_hms(2026, 1, 4, 8, 0, 0).unwrap();
-        let entry1 = Entry::new(
-            0.into(),
-            1.into(),
-            ts1,
-            Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
-        );
+    mod partition_by_date_tests {
+        use super::*;
 
-        let ts2 = Local.with_ymd_and_hms(2026, 1, 4, 9, 0, 0).unwrap();
-        let entry2 = Entry::new(1.into(), 1.into(), ts2, Command::BreakStart);
+        #[test]
+        fn returns_empty_map_for_empty_input() {
+            let input: Vec<(&EntryId, &Entry)> = Vec::new();
+            let by_date = partition_by_date(&input).unwrap();
+            assert!(by_date.is_empty());
+        }
 
-        let ts3 = Local.with_ymd_and_hms(2026, 1, 5, 10, 0, 0).unwrap();
-        let entry3 = Entry::new(
-            2.into(),
-            1.into(),
-            ts3,
-            Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
-        );
+        #[test]
+        fn partitions_entries_into_multiple_days() {
+            let entry1 = entry(
+                1,
+                Local.with_ymd_and_hms(2026, 1, 4, 8, 0, 0).unwrap(),
+                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
+            );
+            let entry2 =
+                entry(2, Local.with_ymd_and_hms(2026, 1, 4, 9, 0, 0).unwrap(), Command::BreakStart);
+            let entry3 = entry(
+                3,
+                Local.with_ymd_and_hms(2026, 1, 5, 10, 0, 0).unwrap(),
+                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
+            );
 
-        let entries: Vec<(&EntryId, &Entry)> =
-            vec![(entry1.id(), &entry1), (entry2.id(), &entry2), (entry3.id(), &entry3)];
+            let entries: Vec<(&EntryId, &Entry)> =
+                vec![(entry1.id(), &entry1), (entry2.id(), &entry2), (entry3.id(), &entry3)];
+            let by_date = partition_by_date(&entries).unwrap();
 
-        let by_date = partition_by_date(&entries).unwrap();
+            assert_eq!(by_date.len(), 2);
+            assert!(by_date.contains_key(&entry1.timestamp().date_naive()));
+            assert!(by_date.contains_key(&entry3.timestamp().date_naive()));
 
-        assert_eq!(by_date.len(), 2);
-        assert!(by_date.contains_key(&ts1.date_naive()));
-        assert!(by_date.contains_key(&ts2.date_naive()));
+            let day1 = by_date.get(&entry1.timestamp().date_naive()).unwrap();
+            let day1_timestamps: Vec<_> = day1
+                .inner
+                .iter()
+                .map(|id| *entries.iter().find(|(e_id, _)| *e_id == id).unwrap().1.timestamp())
+                .collect();
+            assert_eq!(day1_timestamps, vec![*entry1.timestamp(), *entry2.timestamp()]);
 
-        let day1 = by_date.get(&ts1.date_naive()).unwrap();
+            let day2 = by_date.get(&entry3.timestamp().date_naive()).unwrap();
+            let day2_timestamps: Vec<_> = day2
+                .inner
+                .iter()
+                .map(|id| *entries.iter().find(|(e_id, _)| *e_id == id).unwrap().1.timestamp())
+                .collect();
+            assert_eq!(day2_timestamps, vec![*entry3.timestamp()]);
+        }
 
-        let day1_timestamps: Vec<_> = day1
-            .inner
-            .iter()
-            .map(|id| *entries.iter().find(|(e_id, _)| *e_id == id).unwrap().1.timestamp())
-            .collect();
-        assert_eq!(day1_timestamps, vec![ts1, ts2]);
+        #[test]
+        fn returns_collected_errors_message_snapshot() {
+            let entries = [
+                make_entry(1, 0, Command::Start { kind: Default::default() }),
+                make_entry(2, 5, Command::Start { kind: Default::default() }),
+                make_entry(3, 5, Command::Start { kind: Default::default() }),
+                make_entry(5, 6, Command::Start { kind: Default::default() }),
+                make_entry(6, 7, Command::Start { kind: Default::default() }),
+                make_entry(7, 8, Command::Start { kind: Default::default() }),
+            ];
+            let entries: Vec<(&EntryId, &Entry)> = entries.iter().map(|e| (e.id(), e)).collect();
 
-        let day2 = by_date.get(&ts3.date_naive()).unwrap();
-        let day2_timestamps: Vec<_> = day2
-            .inner
-            .iter()
-            .map(|id| *entries.iter().find(|(e_id, _)| *e_id == id).unwrap().1.timestamp())
-            .collect();
-        assert_eq!(day2_timestamps, vec![ts3]);
-    }
-
-    #[test]
-    fn partition_by_date_returns_collected_errors() {
-        let entries = [
-            make_entry(1, 0, Command::Start { kind: Default::default() }),
-            make_entry(2, 5, Command::Start { kind: Default::default() }),
-            make_entry(3, 5, Command::Start { kind: Default::default() }),
-            make_entry(5, 6, Command::Start { kind: Default::default() }),
-            make_entry(6, 7, Command::Start { kind: Default::default() }),
-            make_entry(7, 8, Command::Start { kind: Default::default() }),
-        ];
-        let entries: Vec<(&EntryId, &Entry)> = entries.iter().map(|e| (e.id(), e)).collect();
-
-        let errors = partition_by_date(&entries).unwrap_err().to_string();
-        assert_eq!(
-            errors,
-            "\
+            let errors = partition_by_date(&entries).unwrap_err().to_string();
+            assert_eq!(
+                errors,
+                "\
 Day entries validation failed with 5 error(s):
  - Entry 2: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)
  - Entry 3: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)
  - Entry 5: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)
  - Entry 6: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)
  - Entry 7: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)"
-        );
+            );
+        }
     }
 
-    #[test]
-    fn returns_empty_map_for_empty_input() {
-        let input: Vec<(&EntryId, &Entry)> = Vec::new();
-        let by_date = partition_by_date(&input).unwrap();
-        assert!(by_date.is_empty());
-    }
+    mod validate_day_entries_tests {
+        use super::*;
 
-    #[test]
-    fn accepts_valid_full_day() {
-        #[rustfmt::skip]
-        let entries = [
-            make_entry( 1, 0, Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } }),
-            make_entry(2, 5, Command::Log { title: "doing stuff".into(), description: None }),
-            make_entry(3, 10, Command::BreakStart),
-            make_entry(4, 15, Command::BreakEnd { description: None }),
-            make_entry( 5, 20, Command::Log { title: "doing other stuff".into(), description: None }),
-            make_entry( 6, 25, Command::End { title: "done with all stuff".into(), description: None }),
-        ];
+        #[test]
+        fn valid_full_day_returns_ok() {
+            #[rustfmt::skip]
+            let cmds = [
+                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
+                Command::Log { title: "doing stuff".into(), description: None },
+                Command::BreakStart,
+                Command::BreakEnd { description: None },
+                Command::Log { title: "doing other stuff".into(), description: None },
+                Command::End { title: "done with all stuff".into(), description: None },
+            ];
 
-        let entries: Vec<&Entry> = entries.iter().collect();
+            let entries = entries_at_same_day(&cmds);
+            let entries = refs(&entries);
 
-        assert!(validate_day_entries(&entries).is_ok());
-    }
+            assert!(validate_day_entries(&entries).is_ok());
+        }
 
-    #[test]
-    fn accepts_multiple_checkin_checkout_cycles() {
-        #[rustfmt::skip]
-        let entries = [
-            make_entry( 1, 0, Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } }),
-            make_entry(2, 5, Command::End { title: "id 2".into(), description: None }),
-            make_entry( 3, 10, Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } }),
-            make_entry(4, 15, Command::End { title: "id 4".into(), description: None }),
-            make_entry( 5, 20, Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } }),
-            make_entry(6, 25, Command::End { title: "id 6".into(), description: None }),
-        ];
+        #[test]
+        fn multiple_checkin_checkout_cycles_returns_ok() {
+            #[rustfmt::skip]
+            let cmds = [
+                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
+                Command::End { title: "id 2".into(), description: None },
+                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
+                Command::End { title: "id 4".into(), description: None },
+                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
+                Command::End { title: "id 6".into(), description: None },
+            ];
 
-        let entries: Vec<&Entry> = entries.iter().collect();
+            let entries = entries_at_same_day(&cmds);
+            let entries = refs(&entries);
 
-        assert!(validate_day_entries(&entries).is_ok());
-    }
+            assert!(validate_day_entries(&entries).is_ok());
+        }
 
-    #[test]
-    fn rejects_checkin_when_checked_in() {
-        let entries = [
-            make_entry(1, 0, Command::Start { kind: Default::default() }),
-            make_entry(2, 10, Command::Start { kind: Default::default() }),
-        ];
+        #[test]
+        fn given_active_start_returns_error() {
+            let cmds = [
+                Command::Start { kind: Default::default() },
+                Command::Start { kind: Default::default() },
+            ];
+            let entries = entries_at_same_day(&cmds);
+            let entries = refs(&entries);
 
-        let entries: Vec<&Entry> = entries.iter().collect();
-
-        let err = validate_day_entries(&entries).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "\
+            let err = validate_day_entries(&entries).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "\
 Day entries validation failed with 1 error(s):
  - Entry 2: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)"
-        )
-    }
+            )
+        }
 
-    #[test]
-    fn rejects_checkout_when_not_checked_in() {
-        let entries = [make_entry(1, 0, Command::End { title: "".into(), description: None })];
+        #[test]
+        fn given_idle_end_returns_error_message() {
+            let cmds = [Command::End { title: "".into(), description: None }];
+            let entries = entries_at_same_day(&cmds);
+            let entries = refs(&entries);
 
-        let entries: Vec<&Entry> = entries.iter().collect();
-
-        let err = validate_day_entries(&entries).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "\
+            let err = validate_day_entries(&entries).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "\
 Day entries validation failed with 1 error(s):
  - Entry 1: cannot \u{1b}[31mend\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
-        );
-    }
+            );
+        }
 
-    #[test]
-    fn rejects_log_when_not_checked_in() {
-        let entries = [make_entry(1, 0, Command::Log { title: "".into(), description: None })];
+        #[test]
+        fn given_idle_log_returns_error_message() {
+            let cmds = [Command::Log { title: "".into(), description: None }];
+            let entries = entries_at_same_day(&cmds);
+            let entries = refs(&entries);
 
-        let entries: Vec<&Entry> = entries.iter().collect();
-
-        let err = validate_day_entries(&entries).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "\
+            let err = validate_day_entries(&entries).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "\
 Day entries validation failed with 1 error(s):
  - Entry 1: cannot \u{1b}[31mlog\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
-        )
-    }
+            )
+        }
 
-    #[test]
-    fn rejects_break_start_when_not_checked_in() {
-        let entries = [make_entry(1, 0, Command::BreakStart)];
-        let entries: Vec<&Entry> = entries.iter().collect();
+        #[test]
+        fn given_idle_break_start_returns_error_message() {
+            let cmds = [Command::BreakStart];
+            let entries = entries_at_same_day(&cmds);
+            let entries = refs(&entries);
 
-        let err = validate_day_entries(&entries).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "\
+            let err = validate_day_entries(&entries).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "\
 Day entries validation failed with 1 error(s):
  - Entry 1: cannot \u{1b}[31mstart break\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
-        );
-    }
+            );
+        }
 
-    #[test]
-    fn rejects_break_end_when_not_on_break() {
-        let entries = [
-            make_entry(1, 0, Command::Start { kind: Default::default() }),
-            make_entry(2, 10, Command::BreakEnd { description: None }),
-        ];
+        #[test]
+        fn given_active_break_end_returns_error_message() {
+            let cmds = [
+                Command::Start { kind: Default::default() },
+                Command::BreakEnd { description: None },
+            ];
+            let entries = entries_at_same_day(&cmds);
+            let entries = refs(&entries);
 
-        let entries: Vec<&Entry> = entries.iter().collect();
-
-        let err = validate_day_entries(&entries).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "\
+            let err = validate_day_entries(&entries).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "\
 Day entries validation failed with 1 error(s):
  - Entry 2: cannot \u{1b}[31mend break\u{1b}[0m when \u{1b}[33mnot breaking\u{1b}[0m"
-        );
-    }
+            );
+        }
 
-    #[test]
-    fn rejects_checkout_while_on_break() {
-        let entries = [
-            make_entry(1, 0, Command::Start { kind: Default::default() }),
-            make_entry(2, 10, Command::BreakStart),
-            make_entry(3, 20, Command::End { title: "".into(), description: None }),
-        ];
+        #[test]
+        fn given_breaking_end_returns_error_message() {
+            let cmds = [
+                Command::Start { kind: Default::default() },
+                Command::BreakStart,
+                Command::End { title: "".into(), description: None },
+            ];
+            let entries = entries_at_same_day(&cmds);
+            let entries = refs(&entries);
 
-        let entries: Vec<&Entry> = entries.iter().collect();
-
-        let err = validate_day_entries(&entries).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "\
+            let err = validate_day_entries(&entries).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "\
 Day entries validation failed with 1 error(s):
  - Entry 3: cannot '\u{1b}[31mend\u{1b}[0m' while \u{1b}[33mbreaking\u{1b}[0m"
-        );
-    }
+            );
+        }
 
-    #[test]
-    fn rejects_log_while_on_break() {
-        let entries = [
-            make_entry(1, 0, Command::Start { kind: Default::default() }),
-            make_entry(2, 10, Command::BreakStart),
-            make_entry(3, 20, Command::Log { title: "".into(), description: None }),
-        ];
+        #[test]
+        fn given_breaking_log_returns_error_message() {
+            let cmds = [
+                Command::Start { kind: Default::default() },
+                Command::BreakStart,
+                Command::Log { title: "".into(), description: None },
+            ];
+            let entries = entries_at_same_day(&cmds);
+            let entries = refs(&entries);
 
-        let entries: Vec<&Entry> = entries.iter().collect();
-
-        let err = validate_day_entries(&entries).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "\
+            let err = validate_day_entries(&entries).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "\
 Day entries validation failed with 1 error(s):
  - Entry 3: cannot '\u{1b}[31mlog\u{1b}[0m' while \u{1b}[33mbreaking\u{1b}[0m"
-        );
+            );
+        }
+
+        #[test]
+        fn given_breaking_break_start_returns_error_message() {
+            // Fixes the previous duplicate-id issue by generating unique IDs via helper.
+            let cmds = [
+                Command::Start { kind: Default::default() },
+                Command::BreakStart,
+                Command::BreakStart,
+            ];
+            let entries = entries_at_same_day(&cmds);
+            let entries = refs(&entries);
+
+            let err = validate_day_entries(&entries).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "\
+Day entries validation failed with 1 error(s):
+ - Entry 3: cannot \u{1b}[31mstart break\u{1b}[0m while already \u{1b}[33mbreaking\u{1b}[0m"
+            );
+        }
     }
 
-    #[test]
-    fn rejects_break_while_on_break() {
-        let entries = [
-            make_entry(1, 0, Command::Start { kind: Default::default() }),
-            make_entry(2, 1, Command::BreakStart {}),
-            make_entry(2, 2, Command::BreakStart {}),
-        ];
+    mod entries_by_day_tests {
+        use super::*;
 
-        let entries: Vec<&Entry> = entries.iter().collect();
+        #[test]
+        fn rejects_if_previous_day_missing_end() {
+            // Two days: first day ends with Start (invalid, because there is a following day)
+            let day1 = [entry(
+                1,
+                Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
+                Command::Start { kind: Default::default() },
+            )];
+            let day2 = [
+                entry(
+                    2,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    3,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
 
-        let err = validate_day_entries(&entries).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "\
-Day entries validation failed with 1 error(s):
- - Entry 2: cannot \u{1b}[31mstart break\u{1b}[0m while already \u{1b}[33mbreaking\u{1b}[0m"
-        );
+            let mut all = Vec::new();
+            all.extend_from_slice(&day1);
+            all.extend_from_slice(&day2);
+
+            let entries = id_refs(&all);
+
+            let err = EntriesByDay::try_new(&entries).unwrap_err().to_string();
+            assert!(err.contains("must end with 'End'"));
+        }
     }
 }
