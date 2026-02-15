@@ -291,7 +291,7 @@ impl TryFrom<&Vec<&Entry>> for DayEntries {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("Day entries validation failed with {} error(s): \n{}", errors.len(), errors.iter().map(|e| format!(" - {}", e)).collect::<Vec<_>>().join("\n"))]
+#[error("Day entries validation failed with {} error(s):\n{}", errors.len(), errors.iter().map(|e| format!(" - {}", e)).collect::<Vec<_>>().join("\n"))]
 pub struct DayEntriesValidationError {
     errors: Vec<String>,
 }
@@ -421,7 +421,9 @@ mod tests {
         let err = DayEntries::try_from(&Vec::new()).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - entries must not be empty"
+            "\
+Day entries validation failed with 1 error(s):
+ - entries must not be empty"
         );
     }
 
@@ -435,7 +437,9 @@ mod tests {
         let err = DayEntries::try_from(&vec![&entry1, &entry2]).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - entries must all be of the same date"
+            "\
+Day entries validation failed with 1 error(s):
+ - entries must all be of the same date"
         );
     }
 
@@ -513,6 +517,67 @@ mod tests {
     }
 
     #[test]
+    fn partition_by_date_returns_collected_errors() {
+        let entries = [
+            make_entry(
+                1,
+                0,
+                Command::Start {
+                    kind: Default::default(),
+                },
+            ),
+            make_entry(
+                2,
+                5,
+                Command::Start {
+                    kind: Default::default(),
+                },
+            ),
+            make_entry(
+                3,
+                5,
+                Command::Start {
+                    kind: Default::default(),
+                },
+            ),
+            make_entry(
+                5,
+                6,
+                Command::Start {
+                    kind: Default::default(),
+                },
+            ),
+            make_entry(
+                6,
+                7,
+                Command::Start {
+                    kind: Default::default(),
+                },
+            ),
+            make_entry(
+                7,
+                8,
+                Command::Start {
+                    kind: Default::default(),
+                },
+            ),
+        ];
+        let entries: Vec<(&EntryId, &Entry)> = entries.iter().map(|e| (e.id(), e)).collect();
+
+        let errors = partition_by_date(&entries).unwrap_err().to_string();
+        assert_eq!(
+            errors,
+            "\
+Day entries validation failed with 5 error(s):
+ - Entry 2: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)
+ - Entry 3: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)
+ - Entry 5: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)
+ - Entry 6: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)
+ - Entry 7: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)"
+        );
+    }
+
+    #[test]
     fn returns_empty_map_for_empty_input() {
         let input: Vec<(&EntryId, &Entry)> = Vec::new();
         let by_date = partition_by_date(&input).unwrap();
@@ -521,42 +586,14 @@ mod tests {
 
     #[test]
     fn accepts_valid_full_day() {
+        #[rustfmt::skip]
         let entries = [
-            make_entry(
-                1,
-                0,
-                Command::Start {
-                    kind: ActivityKind::Work {
-                        context: WorkContext::Office,
-                    },
-                },
-            ),
-            make_entry(
-                2,
-                5,
-                Command::Log {
-                    title: "doing stuff".into(),
-                    description: None,
-                },
-            ),
+            make_entry( 1, 0, Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } }),
+            make_entry(2, 5, Command::Log { title: "doing stuff".into(), description: None }),
             make_entry(3, 10, Command::BreakStart),
             make_entry(4, 15, Command::BreakEnd { description: None }),
-            make_entry(
-                5,
-                20,
-                Command::Log {
-                    title: "doing other stuff".into(),
-                    description: None,
-                },
-            ),
-            make_entry(
-                6,
-                25,
-                Command::End {
-                    title: "done with all stuff".into(),
-                    description: None,
-                },
-            ),
+            make_entry( 5, 20, Command::Log { title: "doing other stuff".into(), description: None }),
+            make_entry( 6, 25, Command::End { title: "done with all stuff".into(), description: None }),
         ];
 
         let entries: Vec<&Entry> = entries.iter().collect();
@@ -566,58 +603,14 @@ mod tests {
 
     #[test]
     fn accepts_multiple_checkin_checkout_cycles() {
+        #[rustfmt::skip]
         let entries = [
-            make_entry(
-                1,
-                0,
-                Command::Start {
-                    kind: ActivityKind::Work {
-                        context: WorkContext::Office,
-                    },
-                },
-            ),
-            make_entry(
-                2,
-                5,
-                Command::End {
-                    title: "id 2".into(),
-                    description: None,
-                },
-            ),
-            make_entry(
-                3,
-                10,
-                Command::Start {
-                    kind: ActivityKind::Work {
-                        context: WorkContext::Office,
-                    },
-                },
-            ),
-            make_entry(
-                4,
-                15,
-                Command::End {
-                    title: "id 4".into(),
-                    description: None,
-                },
-            ),
-            make_entry(
-                5,
-                20,
-                Command::Start {
-                    kind: ActivityKind::Work {
-                        context: WorkContext::Office,
-                    },
-                },
-            ),
-            make_entry(
-                6,
-                25,
-                Command::End {
-                    title: "id 6".into(),
-                    description: None,
-                },
-            ),
+            make_entry( 1, 0, Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } }),
+            make_entry(2, 5, Command::End { title: "id 2".into(), description: None }),
+            make_entry( 3, 10, Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } }),
+            make_entry(4, 15, Command::End { title: "id 4".into(), description: None }),
+            make_entry( 5, 20, Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } }),
+            make_entry(6, 25, Command::End { title: "id 6".into(), description: None }),
         ];
 
         let entries: Vec<&Entry> = entries.iter().collect();
@@ -632,18 +625,14 @@ mod tests {
                 1,
                 0,
                 Command::Start {
-                    kind: ActivityKind::Work {
-                        context: WorkContext::Office,
-                    },
+                    kind: Default::default(),
                 },
             ),
             make_entry(
                 2,
                 10,
                 Command::Start {
-                    kind: ActivityKind::Work {
-                        context: WorkContext::Office,
-                    },
+                    kind: Default::default(),
                 },
             ),
         ];
@@ -653,7 +642,9 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 2: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)"
+            "\
+Day entries validation failed with 1 error(s):
+ - Entry 2: cannot \u{1b}[31mstart work\u{1b}[0m while already active (\u{1b}[33mwork\u{1b}[0m)"
         )
     }
 
@@ -673,7 +664,9 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 1: cannot \u{1b}[31mend\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
+            "\
+Day entries validation failed with 1 error(s):
+ - Entry 1: cannot \u{1b}[31mend\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
         );
     }
 
@@ -693,7 +686,9 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 1: cannot \u{1b}[31mlog\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
+            "\
+Day entries validation failed with 1 error(s):
+ - Entry 1: cannot \u{1b}[31mlog\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
         )
     }
 
@@ -705,7 +700,9 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 1: cannot \u{1b}[31mstart break\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
+            "\
+Day entries validation failed with 1 error(s):
+ - Entry 1: cannot \u{1b}[31mstart break\u{1b}[0m while \u{1b}[33midle\u{1b}[0m"
         );
     }
 
@@ -716,9 +713,7 @@ mod tests {
                 1,
                 0,
                 Command::Start {
-                    kind: ActivityKind::Work {
-                        context: WorkContext::Office,
-                    },
+                    kind: Default::default(),
                 },
             ),
             make_entry(2, 10, Command::BreakEnd { description: None }),
@@ -729,7 +724,9 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 2: cannot \u{1b}[31mend break\u{1b}[0m when \u{1b}[33mnot breaking\u{1b}[0m"
+            "\
+Day entries validation failed with 1 error(s):
+ - Entry 2: cannot \u{1b}[31mend break\u{1b}[0m when \u{1b}[33mnot breaking\u{1b}[0m"
         );
     }
 
@@ -740,9 +737,7 @@ mod tests {
                 1,
                 0,
                 Command::Start {
-                    kind: ActivityKind::Work {
-                        context: WorkContext::Office,
-                    },
+                    kind: Default::default(),
                 },
             ),
             make_entry(2, 10, Command::BreakStart),
@@ -761,7 +756,9 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 3: cannot '\u{1b}[31mend\u{1b}[0m' while \u{1b}[33mbreaking\u{1b}[0m"
+            "\
+Day entries validation failed with 1 error(s):
+ - Entry 3: cannot '\u{1b}[31mend\u{1b}[0m' while \u{1b}[33mbreaking\u{1b}[0m"
         );
     }
 
@@ -772,9 +769,7 @@ mod tests {
                 1,
                 0,
                 Command::Start {
-                    kind: ActivityKind::Work {
-                        context: WorkContext::Office,
-                    },
+                    kind: Default::default(),
                 },
             ),
             make_entry(2, 10, Command::BreakStart),
@@ -793,7 +788,9 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 3: cannot '\u{1b}[31mlog\u{1b}[0m' while \u{1b}[33mbreaking\u{1b}[0m"
+            "\
+Day entries validation failed with 1 error(s):
+ - Entry 3: cannot '\u{1b}[31mlog\u{1b}[0m' while \u{1b}[33mbreaking\u{1b}[0m"
         );
     }
 
@@ -816,7 +813,9 @@ mod tests {
         let err = validate_day_entries(&entries).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Day entries validation failed with 1 error(s): \n - Entry 2: cannot \u{1b}[31mstart break\u{1b}[0m while already \u{1b}[33mbreaking\u{1b}[0m"
+            "\
+Day entries validation failed with 1 error(s):
+ - Entry 2: cannot \u{1b}[31mstart break\u{1b}[0m while already \u{1b}[33mbreaking\u{1b}[0m"
         );
     }
 }
