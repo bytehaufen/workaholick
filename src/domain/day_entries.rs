@@ -1344,5 +1344,29 @@ Day entries validation failed with 1 error(s):
 
             assert!(err.contains("cannot end while idle"));
         }
+
+        #[test]
+        fn validate_remove_entry_rejects_missing_id() {
+            let day = [
+                entry(
+                    1,
+                    Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    2,
+                    Local.with_ymd_and_hms(2025, 1, 10, 9, 5, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+
+            let entries = id_refs(&day);
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let missing_id: EntryId = 999.into();
+
+            let err = by_day.validate_remove_entry(&entries, &missing_id).unwrap_err().to_string();
+
+            assert!(err.contains("entry 999 should exist during validation"));
+        }
     }
 }
