@@ -623,7 +623,7 @@ mod tests {
 
         let msg = JsonlFileStore::new(&store_file_path).unwrap_err().to_string();
         assert!(msg.contains("Entries are not in chronological order:"));
-        assert!(msg.contains("Entry 1 is out of order")); 
+        assert!(msg.contains("Entry 1 is out of order"));
     }
 
     #[test]

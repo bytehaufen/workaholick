@@ -120,15 +120,14 @@ impl EntryValidationIndex {
         }
 
         // Current day, excluding the removed one
-        if let Some(day) = self.days.get(&date) {
-            relevant_entries.extend(
-                day.inner
-                    .iter()
-                    .filter(|&entry_id| entry_id != id)
-                    .map(resolve)
-                    .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
-            );
-        }
+        let day = self.days.get(&date).expect("current day should exist");
+        relevant_entries.extend(
+            day.inner
+                .iter()
+                .filter(|&entry_id| entry_id != id)
+                .map(resolve)
+                .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
+        );
 
         // Next day
         if let Some((_, next_day)) =
@@ -163,10 +162,11 @@ impl EntryValidationIndex {
         if old_date != new_date {
             self.validate_remove_entry(entries, id)?;
 
-            let mut entries: Vec<(&EntryId, &Entry)> = entries.to_vec();
-            entries.retain(|(entry_id, _)| *entry_id != id);
+            let mut entries_without_target: Vec<(&EntryId, &Entry)> = entries.to_vec();
+            entries_without_target.retain(|(entry_id, _)| *entry_id != id);
 
-            self.validate_insert_entry(&entries, patch)?;
+            let by_day_without_target = Self::try_new(&entries_without_target)?;
+            by_day_without_target.validate_insert_entry(&entries_without_target, patch)?;
         } else {
             let updated = Entry::from_patch(*id, EntryVersion::default(), patch.clone());
             let resolve = |entry_id| -> anyhow::Result<(&EntryId, &Entry)> {
@@ -187,15 +187,14 @@ impl EntryValidationIndex {
             }
 
             // Current day
-            if let Some(day) = self.days.get(&patch.date()) {
-                relevant_entries.extend(
-                    day.inner
-                        .iter()
-                        .filter(|entry_id| *entry_id != id)
-                        .map(resolve)
-                        .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
-                );
-            }
+            let day = self.days.get(&patch.date()).expect("current day should exist");
+            relevant_entries.extend(
+                day.inner
+                    .iter()
+                    .filter(|entry_id| *entry_id != id)
+                    .map(resolve)
+                    .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
+            );
             relevant_entries.push((id, &updated));
 
             // Next day
@@ -226,13 +225,16 @@ impl EntryValidationIndex {
             let date = window[0];
             let day = &days[date];
 
-            if let Some(last_id) = day.inner.last() {
-                let last_entry = Self::resolve_entry(entries, last_id)?;
+            let last_id = day
+                .inner
+                .last()
+                .expect("invariant violated: indexed day must contain at least one entry");
 
-                match last_entry.command() {
-                    Command::End { .. } => {}
-                    _ => anyhow::bail!(" day {date} must end with 'End'"),
-                }
+            let last_entry = Self::resolve_entry(entries, last_id)?;
+
+            match last_entry.command() {
+                Command::End { .. } => {}
+                _ => anyhow::bail!(" day {date} must end with 'End'"),
             }
 
             Ok(())
@@ -899,6 +901,44 @@ Day entries validation failed with 1 error(s):
         }
 
         #[test]
+        fn validate_remove_entry_rejects_when_actual_day_gets_invalid() {
+            let day1 = [
+                entry(
+                    1,
+                    Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    2,
+                    Local.with_ymd_and_hms(2025, 1, 10, 9, 5, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+            let day2 = [
+                entry(
+                    3,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    4,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+
+            let mut all = Vec::new();
+            all.extend_from_slice(&day1);
+            all.extend_from_slice(&day2);
+
+            let entries = id_refs(&all);
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+
+            let err = by_day.validate_remove_entry(&entries, day2[0].id()).unwrap_err().to_string();
+            assert!(err.contains("cannot end while idle"));
+        }
+
+        #[test]
         fn validate_remove_entry_allows_removing_last_entry_and_prunes_day_on_apply() {
             let only = [entry(
                 1,
@@ -915,7 +955,198 @@ Day entries validation failed with 1 error(s):
         }
 
         #[test]
-        fn validate_update_entry_allows_reordering_within_day() {
+        fn validate_remove_entry_allows_removing_valid() {
+            let day1 = [
+                entry(
+                    1,
+                    Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    2,
+                    Local.with_ymd_and_hms(2025, 1, 10, 9, 5, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+            let day2 = [
+                entry(
+                    3,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    4,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 3, 0).unwrap(),
+                    Command::Log { title: "".into(), description: None },
+                ),
+                entry(
+                    5,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+            let day3 = [
+                entry(
+                    6,
+                    Local.with_ymd_and_hms(2025, 1, 12, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    7,
+                    Local.with_ymd_and_hms(2025, 1, 12, 9, 5, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+
+            let mut all = Vec::new();
+            all.extend_from_slice(&day1);
+            all.extend_from_slice(&day2);
+            all.extend_from_slice(&day3);
+
+            let entries = id_refs(&all);
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+
+            by_day.validate_remove_entry(&entries, day2[1].id()).expect("expect valid entries");
+        }
+
+        #[test]
+        fn validate_update_entry_allows_reordering_on_different_days() {
+            let day1 = [
+                entry(
+                    1,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    2,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
+                    Command::Log { title: "a".into(), description: None },
+                ),
+                entry(
+                    3,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 10, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+            let day2 = [
+                entry(
+                    4,
+                    Local.with_ymd_and_hms(2025, 1, 12, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    5,
+                    Local.with_ymd_and_hms(2025, 1, 12, 9, 5, 0).unwrap(),
+                    Command::Log { title: "a".into(), description: None },
+                ),
+                entry(
+                    6,
+                    Local.with_ymd_and_hms(2025, 1, 12, 9, 10, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+            let day3 = [
+                entry(
+                    7,
+                    Local.with_ymd_and_hms(2025, 1, 13, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    8,
+                    Local.with_ymd_and_hms(2025, 1, 13, 9, 5, 0).unwrap(),
+                    Command::Log { title: "a".into(), description: None },
+                ),
+                entry(
+                    9,
+                    Local.with_ymd_and_hms(2025, 1, 13, 9, 10, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+            let days: Vec<_> = vec![day1, day2.clone(), day3].into_iter().flatten().collect();
+
+            let entries = id_refs(&days);
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+
+            let patch = EntryPatch::new(
+                Local.with_ymd_and_hms(2025, 1, 11, 9, 2, 0).unwrap(),
+                Command::Log { title: "moved".into(), description: None },
+            );
+
+            let result = by_day.validate_update_entry(&entries, day2[1].id(), &patch);
+
+            assert!(result.is_ok(), "expected Ok, but was Err: {:?}", result.unwrap_err());
+        }
+
+        #[test]
+        fn validate_update_entry_allows_reordering_on_same_day() {
+            let day1 = [
+                entry(
+                    1,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    2,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
+                    Command::Log { title: "a".into(), description: None },
+                ),
+                entry(
+                    3,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 10, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+            let day2 = [
+                entry(
+                    4,
+                    Local.with_ymd_and_hms(2025, 1, 12, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    5,
+                    Local.with_ymd_and_hms(2025, 1, 12, 9, 5, 0).unwrap(),
+                    Command::Log { title: "a".into(), description: None },
+                ),
+                entry(
+                    6,
+                    Local.with_ymd_and_hms(2025, 1, 12, 9, 10, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+            let day3 = [
+                entry(
+                    7,
+                    Local.with_ymd_and_hms(2025, 1, 13, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    8,
+                    Local.with_ymd_and_hms(2025, 1, 13, 9, 5, 0).unwrap(),
+                    Command::Log { title: "a".into(), description: None },
+                ),
+                entry(
+                    9,
+                    Local.with_ymd_and_hms(2025, 1, 13, 9, 10, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+            let days: Vec<_> = vec![day1, day2.clone(), day3].into_iter().flatten().collect();
+
+            let entries = id_refs(&days);
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+
+            let patch = EntryPatch::new(
+                Local.with_ymd_and_hms(2025, 1, 12, 9, 2, 0).unwrap(),
+                Command::Log { title: "moved".into(), description: None },
+            );
+
+            let result = by_day.validate_update_entry(&entries, day2[1].id(), &patch);
+
+            assert!(result.is_ok(), "expected Ok, but was Err: {:?}", result.unwrap_err());
+        }
+
+        #[test]
+        fn validate_update_entry_rejects_invalid_same_day_command_change() {
             let day = [
                 entry(
                     1,
@@ -938,13 +1169,121 @@ Day entries validation failed with 1 error(s):
             let by_day = EntryValidationIndex::try_new(&entries).unwrap();
 
             let patch = EntryPatch::new(
-                Local.with_ymd_and_hms(2025, 1, 11, 9, 2, 0).unwrap(),
+                Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
+                Command::End { title: "nope".into(), description: None },
+            );
+
+            let err = by_day
+                .validate_update_entry(&entries, day[1].id(), &patch)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("cannot end while idle"));
+        }
+
+        #[test]
+        fn validate_update_entry_rejects_invalid_same_day_reordering() {
+            let day = [
+                entry(
+                    1,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    2,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
+                    Command::Log { title: "a".into(), description: None },
+                ),
+                entry(
+                    3,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 10, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+
+            let entries = id_refs(&day);
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+
+            let patch = EntryPatch::new(
+                Local.with_ymd_and_hms(2025, 1, 11, 8, 55, 0).unwrap(),
+                Command::End { title: "".into(), description: None },
+            );
+
+            let err = by_day
+                .validate_update_entry(&entries, day[2].id(), &patch)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("cannot end while idle"));
+        }
+
+        #[test]
+        fn validate_update_entry_allows_move_to_new_day_when_old_day_becomes_empty() {
+            let only = [entry(
+                1,
+                Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
+                Command::Start { kind: Default::default() },
+            )];
+
+            let entries = id_refs(&only);
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+
+            let patch = EntryPatch::new(
+                Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
+                Command::Start { kind: Default::default() },
+            );
+
+            let result = by_day.validate_update_entry(&entries, only[0].id(), &patch);
+            assert!(result.is_ok(), "expected Ok, but was Err: {:?}", result.unwrap_err());
+        }
+
+        #[test]
+        fn validate_update_entry_rejects_move_to_new_day_when_target_day_sequence_invalid() {
+            let day1 = [
+                entry(
+                    1,
+                    Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    2,
+                    Local.with_ymd_and_hms(2025, 1, 10, 9, 5, 0).unwrap(),
+                    Command::Log { title: "a".into(), description: None },
+                ),
+                entry(
+                    3,
+                    Local.with_ymd_and_hms(2025, 1, 10, 9, 10, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+            let day2 = [
+                entry(
+                    4,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    5,
+                    Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+
+            let mut all = Vec::new();
+            all.extend_from_slice(&day1);
+            all.extend_from_slice(&day2);
+
+            let entries = id_refs(&all);
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+
+            let patch = EntryPatch::new(
+                Local.with_ymd_and_hms(2025, 1, 11, 9, 6, 0).unwrap(),
                 Command::Log { title: "moved".into(), description: None },
             );
 
-            let result = by_day.validate_update_entry(&entries, day[1].id(), &patch);
-
-            assert!(result.is_ok());
+            let err = by_day
+                .validate_update_entry(&entries, day1[1].id(), &patch)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("cannot log while idle"));
         }
 
         #[test]
@@ -980,7 +1319,30 @@ Day entries validation failed with 1 error(s):
 
             let err =
                 by_day.validate_update_entry(&entries, &3.into(), &patch).unwrap_err().to_string();
-            assert!(err.contains("should exist during validation"));
+            assert!(err.contains("must end with 'End'"));
+        }
+
+        #[test]
+        fn validate_rejects_invalid_days() {
+            let entry1 = entry(
+                3,
+                Local.with_ymd_and_hms(2025, 1, 10, 9, 10, 0).unwrap(),
+                Command::End { title: "".into(), description: None },
+            );
+
+            let entries = vec![entry1.clone()];
+            let entries = id_refs(&entries);
+
+            let patch = EntryPatch::from_entry(&entry1);
+
+            let err = EntryValidationIndex::validate(
+                &entries,
+                EntryMutation::Update { id: &3.into(), patch: &patch },
+            )
+            .unwrap_err()
+            .to_string();
+
+            assert!(err.contains("cannot end while idle"));
         }
     }
 }
