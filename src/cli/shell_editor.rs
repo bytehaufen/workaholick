@@ -65,7 +65,7 @@ mod tests {
     }
     impl FakeEnv {
         fn with(mut self, key: &str, value: Option<&str>) -> Self {
-            self.vars.insert(key.to_string(), value.map(|string| string.to_string()));
+            self.vars.insert(key.to_string(), value.map(str::to_string));
             self
         }
     }
@@ -86,11 +86,7 @@ mod tests {
         }
 
         fn read_string(&self, path: &Path) -> Result<String> {
-            self.files
-                .borrow()
-                .get(path)
-                .cloned()
-                .ok_or_else(|| anyhow!("missing file: {}", path.display()))
+            self.files.borrow().get(path).cloned().ok_or(anyhow!("missing file"))
         }
     }
 
@@ -176,5 +172,44 @@ mod tests {
 
         let err = editor.edit("initial", FileType::Ron).unwrap_err();
         assert!(err.to_string().contains("running editor"));
+    }
+
+    #[test]
+    fn fake_proc_writes_edited_content_when_args_have_path() {
+        let fs = FakeFs::default();
+        let proc = FakeProc { fs: fs.clone(), edited: "edited".to_string(), ..Default::default() };
+        let path = PathBuf::from("/tmp/workaholick-test4.ron");
+        let args = vec![path.to_string_lossy().to_string()];
+
+        proc.run("nvim", &args).unwrap();
+
+        let content = fs.read_string(&path).unwrap();
+        assert_eq!(content, "edited");
+
+        let calls = proc.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "nvim");
+    }
+
+    #[test]
+    fn fake_proc_with_no_args_skips_write() {
+        let fs = FakeFs::default();
+        let proc = FakeProc { fs: fs.clone(), edited: "edited".to_string(), ..Default::default() };
+
+        proc.run("nvim", &[]).unwrap();
+
+        assert!(fs.files.borrow().is_empty());
+
+        let calls = proc.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "nvim");
+    }
+
+    #[test]
+    fn real_constructs_shell_editor_with_std_adapters() {
+        fn assert_type(_: &ShellEditor<StdEnv, StdFs, TempFileTemp, StdProcess>) {}
+
+        let editor = ShellEditor::real();
+        assert_type(&editor);
     }
 }
