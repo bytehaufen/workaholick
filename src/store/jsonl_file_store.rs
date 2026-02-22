@@ -107,8 +107,11 @@ impl JsonlFileStore {
     }
 
     fn replace_file(&self, from: &Path, to: &Path) -> Result<()> {
-        if cfg!(windows) && to.exists() {
-            let _ = fs::remove_file(to);
+        #[cfg(windows)]
+        {
+            if to.exists() {
+                let _ = fs::remove_file(to);
+            }
         }
 
         fs::rename(from, to)
@@ -522,6 +525,104 @@ mod tests {
             assert_eq!(store.entries[1].id().value(), 1);
             assert_eq!(store.entries[2].id().value(), 2);
         }
+    }
+
+    #[test]
+    fn iter_returns_entries_sorted_by_timestamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+        let mut store = JsonlFileStore::new(&file_path).unwrap();
+
+        store
+            .insert(EntryPatch::new(
+                Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
+                Command::Log { title: "late".into(), description: None },
+            ))
+            .unwrap();
+        store
+            .insert(EntryPatch::new(
+                Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
+                Command::Log { title: "early".into(), description: None },
+            ))
+            .unwrap();
+        store
+            .insert(EntryPatch::new(
+                Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
+                Command::Log { title: "mid".into(), description: None },
+            ))
+            .unwrap();
+
+        let hours: Vec<u32> = store.iter().map(|(_, e)| e.timestamp().hour()).collect();
+        assert_eq!(hours, vec![10, 11, 12]);
+    }
+
+    #[test]
+    fn get_returns_entry_for_existing_id_and_none_for_missing_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+        let mut store = JsonlFileStore::new(&file_path).unwrap();
+
+        let id = store
+            .insert(EntryPatch::new(
+                Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
+                Command::Log { title: "a".into(), description: Some("b".into()) },
+            ))
+            .unwrap();
+
+        let entry = store.get(&id).expect("entry should be present");
+        assert_eq!(
+            *entry.command(),
+            Command::Log { title: "a".into(), description: Some("b".into()) }
+        );
+        assert!(store.get(&999.into()).is_none());
+    }
+
+    #[test]
+    fn new_rejects_path_without_parent_directory() {
+        let file_path = PathBuf::from("/");
+        let err = JsonlFileStore::new(&file_path).unwrap_err();
+        assert!(err.to_string().contains("Expected parent directory for file path"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn new_adds_context_when_opening_existing_file_fails() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+
+        File::create(&file_path).unwrap();
+        let mut perms = std::fs::metadata(&file_path).unwrap().permissions();
+        perms.set_mode(0o000);
+        std::fs::set_permissions(&file_path, perms).unwrap();
+
+        let err = JsonlFileStore::new(&file_path).unwrap_err().to_string();
+        assert!(err.contains("open file"));
+        assert!(err.contains("for reading"));
+
+        let mut perms = std::fs::metadata(&file_path).unwrap().permissions();
+        perms.set_mode(0o644);
+        std::fs::set_permissions(&file_path, perms).unwrap();
+    }
+
+    #[test]
+    fn persist_adds_context_when_rename_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+
+        let mut store = JsonlFileStore::new(&file_path).unwrap();
+        std::fs::create_dir(&file_path).unwrap();
+
+        let err = store
+            .insert(EntryPatch::new(
+                Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
+                Command::Log { title: "boom".into(), description: None },
+            ))
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("replace log file via rename"));
     }
 
     #[test]
