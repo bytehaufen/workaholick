@@ -234,7 +234,11 @@ impl EntryValidationIndex {
 
             match last_entry.command() {
                 Command::End { .. } => {}
-                _ => anyhow::bail!(" day {date} must end with 'End'"),
+                _ => anyhow::bail!(
+                    "Day {} must end with {}",
+                    date.to_string().yellow(),
+                    "End".yellow()
+                ),
             }
 
             Ok(())
@@ -305,7 +309,7 @@ fn validate_day_entries(entries: &[&Entry]) -> Result<(), DayEntryValidationErro
         let result = match (state, entry.command()) {
             (Idle, Command::Start { kind, .. }) => Ok(Active(*kind)),
             (Idle, command) => {
-                Err(format!("cannot {} while {}", format!("{command}").red(), "idle".yellow()))
+                Err(format!("cannot {} while {}", command.to_string().yellow(), "idle".yellow()))
             }
 
             (Active(_), Command::Log { .. }) => Ok(state),
@@ -317,25 +321,27 @@ fn validate_day_entries(entries: &[&Entry]) -> Result<(), DayEntryValidationErro
 
             (Active(activity_kind), Command::Start { kind }) => Err(format!(
                 "cannot {} while already active ({})",
-                format!("start {kind}").red(),
+                format!("start {kind}").yellow(),
                 activity_kind.to_string().yellow()
             )),
 
             (Active(_), Command::BreakEnd { .. }) => {
-                Err(format!("cannot {} when {}", "end break".red(), "not breaking".yellow()))
+                Err(format!("cannot {} when {}", "end break".yellow(), "not breaking".yellow()))
             }
 
             (Breaking(_), Command::Start { .. } | Command::End { .. } | Command::Log { .. }) => {
                 Err(format!(
                     "cannot {} while {}",
-                    entry.command().to_string().red(),
+                    entry.command().to_string().yellow(),
                     "breaking".yellow()
                 ))
             }
 
-            (Breaking(_), Command::BreakStart) => {
-                Err(format!("cannot {} while already {}", "start break".red(), "breaking".yellow()))
-            }
+            (Breaking(_), Command::BreakStart) => Err(format!(
+                "cannot {} while already {}",
+                "start break".yellow(),
+                "breaking".yellow()
+            )),
         };
 
         match result {
@@ -735,7 +741,7 @@ Day entries validation failed with 1 error(s):
             let entries = id_refs(&all);
 
             let err = EntryValidationIndex::try_new(&entries).unwrap_err().to_string();
-            assert!(err.contains("must end with 'End'"));
+            assert!(err.contains("must end with End"));
         }
 
         #[test]
@@ -897,7 +903,7 @@ Day entries validation failed with 1 error(s):
             let by_day = EntryValidationIndex::try_new(&entries).unwrap();
 
             let err = by_day.validate_remove_entry(&entries, day1[1].id()).unwrap_err().to_string();
-            assert!(err.contains("must end with 'End'"));
+            assert!(err.contains("must end with End"));
         }
 
         #[test]
@@ -1319,7 +1325,7 @@ Day entries validation failed with 1 error(s):
 
             let err =
                 by_day.validate_update_entry(&entries, &3.into(), &patch).unwrap_err().to_string();
-            assert!(err.contains("must end with 'End'"));
+            assert!(err.contains("must end with End"));
         }
 
         #[test]
