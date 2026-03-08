@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -40,22 +39,7 @@ impl JsonlFileStore {
 
         let try_load = || {
             let entries = Self::read_file(file_path)?;
-            let len = entries.len();
-            let entries = entries.into_iter().try_fold(
-                IndexMap::with_capacity(len),
-                |mut entries, entry| {
-                    let id = *entry.id();
-                    if entries.insert(id, entry).is_some() {
-                        anyhow::bail!("duplicate id {id} in entries");
-                    }
-
-                    Ok(entries)
-                },
-            )?;
-
-            check_timestamp_ordering(&entries)?;
-
-            Ok(entries)
+            Self::normalize_entries(entries)
         };
 
         let entries = match try_load() {
@@ -95,6 +79,7 @@ impl JsonlFileStore {
             .collect()
     }
 
+    /// Reads in the file at `path` in a by timeestamp sorted `Vec<Entry>`
     fn read_file(path: &Path) -> Result<Vec<Entry>> {
         if !path.exists() {
             return Ok(Vec::new());
@@ -159,39 +144,28 @@ impl JsonlFileStore {
         Ok((file, path))
     }
 
-    fn insert_sorted_by_timestamp(&mut self, id: EntryId, entry: Entry) {
-        self.entries.insert_sorted_by(id, entry, |_i1, e1, _i2, e2| {
-            e1.timestamp().partial_cmp(e2.timestamp()).unwrap_or(Ordering::Equal)
-        });
+    fn insert_sorted(&mut self, id: EntryId, entry: Entry) {
+        self.entries
+            .insert_sorted_by(id, entry, |_i1, e1, _i2, e2| e1.sort_key().cmp(&e2.sort_key()));
     }
-}
 
-#[derive(Debug, thiserror::Error)]
-#[error("Entries are not in chronological order:\n{0}")]
-pub struct EntryOrderError(pub String);
+    fn normalize_entries(
+        entries: Vec<Entry>,
+    ) -> std::result::Result<IndexMap<EntryId, Entry>, anyhow::Error> {
+        let len = entries.len();
+        let mut entries =
+            entries.into_iter().try_fold(IndexMap::with_capacity(len), |mut entries, entry| {
+                let id = *entry.id();
+                if entries.insert(id, entry).is_some() {
+                    anyhow::bail!("duplicate id {id} in entries");
+                }
 
-fn check_timestamp_ordering(entries: &IndexMap<EntryId, Entry>) -> Result<(), EntryOrderError> {
-    let (errors, _) = entries.iter().fold((Vec::new(), None), |(mut ts_errors, last_ts), entry| {
-        let ts = entry.1.timestamp();
+                Ok(entries)
+            })?;
 
-        if let Some(last_ts) = last_ts
-            && last_ts >= ts
-        {
-            let id = entry.0;
+        entries.sort_by_key(|_, e| e.sort_key());
 
-            ts_errors.push(format!(
-                "Entry {id} is out of order: previous timestamp {last_ts}, current timestamp {ts}"
-            ));
-        }
-
-        (ts_errors, Some(ts))
-    });
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        let error = errors.iter().map(|e| format!(" - {}", e)).collect::<Vec<_>>().join("\n");
-        Err(EntryOrderError(error))
+        Ok(entries)
     }
 }
 
@@ -201,7 +175,7 @@ impl EntryStore for JsonlFileStore {
 
         let new_entry = Entry::from_patch(id, VERSION.into(), new_entry);
 
-        self.insert_sorted_by_timestamp(id, new_entry);
+        self.insert_sorted(id, new_entry);
 
         self.persist()?;
 
@@ -227,7 +201,7 @@ impl EntryStore for JsonlFileStore {
 
         let updated_entry = Entry::from_patch(*id, *entry.version(), patch);
         self.entries.shift_remove(id);
-        self.insert_sorted_by_timestamp(*id, updated_entry);
+        self.insert_sorted(*id, updated_entry);
 
         self.persist()?;
 
@@ -528,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_returns_entries_sorted_by_timestamp() {
+    fn iter_returns_entries_sorted_by_timestamp_when_inserted() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
         let mut store = JsonlFileStore::new(&file_path).unwrap();
@@ -711,23 +685,6 @@ mod tests {
     }
 
     #[test]
-    fn new_with_duplicate_unsorted_timestamps_returns_error() {
-        let dir = tempfile::tempdir().unwrap();
-        let store_file_path = dir.path().join("entries.jsonl");
-
-        let mut file = File::create(&store_file_path).unwrap();
-        file.write_all(br#"{"id":0,"version":1,"timestamp":"2026-01-05 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
-                                {"id":1,"version":1,"timestamp":"2026-01-04 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
-                                {"id":2,"version":1,"timestamp":"2026-01-03 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
-                                {"id":3,"version":1,"timestamp":"2026-01-02 16:45:03 +0100","command":{"end":{"title":"foo","description":null}}}"#).unwrap();
-        file.flush().unwrap();
-
-        let msg = JsonlFileStore::new(&store_file_path).unwrap_err().to_string();
-        assert!(msg.contains("Entries are not in chronological order:"));
-        assert!(msg.contains("Entry 1 is out of order"));
-    }
-
-    #[test]
     #[cfg(unix)]
     fn create_lock_file_with_permission_error() {
         use std::os::unix::fs::PermissionsExt;
@@ -752,5 +709,63 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("create lock file"));
         assert!(msg.contains("Permission denied"));
+    }
+
+    #[test]
+    fn iter_returns_entries_sorted_by_timestamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_file_path = dir.path().join("entries.jsonl");
+
+        let mut file = File::create(&store_file_path).unwrap();
+        file.write_all(br#"{"id":1,"version":1,"timestamp":"2026-01-05 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
+                                {"id":2,"version":1,"timestamp":"2026-01-05 03:45:03 +0100","command":{"end":{"title":"foo","description":null}}}"#).unwrap();
+        file.flush().unwrap();
+
+        let store = JsonlFileStore::new(&store_file_path).unwrap();
+
+        dbg!(&store.entries);
+
+        let mut iter = store.iter();
+
+        assert_eq!(*iter.next().unwrap().1.id(), EntryId::from(2));
+        assert_eq!(*iter.next().unwrap().1.id(), EntryId::from(1));
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn iter_returns_entries_sorted_by_id_when_timestamps_are_eq() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_file_path = dir.path().join("entries.jsonl");
+
+        let mut file = File::create(&store_file_path).unwrap();
+        file.write_all(br#"{"id":2,"version":1,"timestamp":"2026-01-05 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
+                                {"id":1,"version":1,"timestamp":"2026-01-05 04:30:26 +0100","command":{"end":{"title":"foo","description":null}}}"#).unwrap();
+        file.flush().unwrap();
+
+        let store = JsonlFileStore::new(&store_file_path).unwrap();
+
+        let mut iter = store.iter();
+
+        assert_eq!(*iter.next().unwrap().1.id(), EntryId::from(1));
+        assert_eq!(*iter.next().unwrap().1.id(), EntryId::from(2));
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn new_with_unsorted_timestamps_normalizes_iteration_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_file_path = dir.path().join("entries.jsonl");
+
+        let mut file = File::create(&store_file_path).unwrap();
+        file.write_all(br#"{"id":1,"version":1,"timestamp":"2026-01-04 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
+                                {"id":0,"version":1,"timestamp":"2026-01-04 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
+                                {"id":2,"version":1,"timestamp":"2026-01-03 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
+                                {"id":3,"version":1,"timestamp":"2026-01-02 16:45:03 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}"#).unwrap();
+        file.flush().unwrap();
+
+        let store = JsonlFileStore::new(&store_file_path).unwrap();
+
+        let ids: Vec<_> = store.iter().map(|(id, _)| id.value()).collect();
+        assert_eq!(ids, vec![3, 2, 0, 1]);
     }
 }

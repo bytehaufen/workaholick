@@ -89,6 +89,10 @@ impl Entry {
     pub fn date(&self) -> NaiveDate {
         self.timestamp.date_naive()
     }
+
+    pub fn sort_key(&self) -> (DateTime<Local>, EntryId) {
+        (self.timestamp, self.id)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
