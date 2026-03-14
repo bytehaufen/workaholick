@@ -15,7 +15,7 @@ macro_rules! append_and_print {
     }};
 }
 
-pub fn run<S: EntryStore, E: Editor>(app: &mut App<S, E>, cli: Cli) -> Result<()> {
+pub fn run<S: EntryStore>(app: &mut App<S>, cli: Cli, editor: &dyn Editor) -> Result<()> {
     match cli.command {
         CliCommand::Web => web::run(app),
 
@@ -38,7 +38,7 @@ pub fn run<S: EntryStore, E: Editor>(app: &mut App<S, E>, cli: Cli) -> Result<()
             println!("🗑️ Entry deleted:\n{entry:#?}");
             Ok(())
         }
-        CliCommand::Edit { id } => app.edit(id),
+        CliCommand::Edit { id } => app.edit(id, editor),
 
         CliCommand::Status => {
             // FIXME: implement

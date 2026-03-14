@@ -14,15 +14,14 @@ use anyhow::{Context, Result};
 
 // TODO: Move editor to Cli
 #[derive(Debug)]
-pub struct App<S: EntryStore, EDITOR: Editor> {
+pub struct App<S: EntryStore> {
     config: Config,
     v_store: ValidatedEntryStore<S>,
-    editor: EDITOR,
 }
 
-impl<STORE: EntryStore, EDITOR: Editor> App<STORE, EDITOR> {
-    pub fn new(config: Config, store: STORE, editor: EDITOR) -> Result<Self> {
-        Ok(Self { config, v_store: ValidatedEntryStore::new(store)?, editor })
+impl<STORE: EntryStore> App<STORE> {
+    pub fn new(config: Config, store: STORE) -> Result<Self> {
+        Ok(Self { config, v_store: ValidatedEntryStore::new(store)? })
     }
 
     // TODO:
@@ -57,13 +56,13 @@ impl<STORE: EntryStore, EDITOR: Editor> App<STORE, EDITOR> {
         Ok(())
     }
 
-    pub fn edit(&mut self, id: u64) -> Result<()> {
+    pub fn edit(&mut self, id: u64, editor: &dyn Editor) -> Result<()> {
         let entry: EntryPatch = EntryPatch::from_entry(
             self.v_store.get(&id.into()).with_context(|| format!("find ID {id}"))?,
         );
 
         let initial = render_for_edit(&entry)?;
-        let edited = self.editor.edit(&initial, FileType::Ron)?;
+        let edited = editor.edit(&initial, FileType::Ron)?;
         let patch = parse_edited(&edited)?;
         self.v_store.update(&id.into(), patch)?;
 

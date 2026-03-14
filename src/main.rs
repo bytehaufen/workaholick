@@ -47,7 +47,7 @@ fn main() -> Result<()> {
     };
     let store = JsonlFileStore::new(&cfg.store_path)?;
 
-    let mut app = App::new(cfg, store, editor)?;
+    let mut app = App::new(cfg, store)?;
 
-    cli::run(&mut app, cli)
+    cli::run(&mut app, cli, &editor)
 }
