@@ -61,7 +61,11 @@ fn run_inner<S: EntryStore>(app: &mut App<S>, cli: Cli, editor: &dyn Editor) -> 
 
             Ok(())
         }
-        CliCommand::Day { date } => app.day(date),
+        CliCommand::Day { date } => {
+            let entries = app.day(date)?;
+            println!("{entries:#?}");
+            Ok(())
+        }
         CliCommand::Report {} => todo!(),
     }
 }

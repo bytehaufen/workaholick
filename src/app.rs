@@ -44,11 +44,14 @@ impl<STORE: EntryStore> App<STORE> {
     //     summary(&entries, SummaryRequest::Day(today()))
     // }
 
-    pub fn day(&self, _date: NaiveDate) -> Result<()> {
-        let entries: Vec<&Entry> = self.v_store.iter().map(|(_, entry)| entry).collect();
+    pub fn day(&self, date: NaiveDate) -> Result<Vec<Entry>> {
+        let entries = self
+            .v_store
+            .iter()
+            .filter_map(|(_, entry)| (entry.date() == date).then_some(entry.clone()))
+            .collect();
 
-        println!("{entries:?}");
-        Ok(())
+        Ok(entries)
     }
 
     pub fn get_entry_patch(&self, id: u64) -> Result<EntryPatch> {
