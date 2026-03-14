@@ -8,21 +8,41 @@ use crate::{
 
 use anyhow::{Context, Result};
 
-#[derive(Debug)]
-pub struct App<S: EntryStore> {
-    config: Config,
-    v_store: ValidatedEntryStore<S>,
+pub trait Clock {
+    fn now(&self) -> DateTime<Local>;
 }
 
-impl<STORE: EntryStore> App<STORE> {
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemClock;
+
+impl Clock for SystemClock {
+    fn now(&self) -> DateTime<Local> {
+        Local::now()
+    }
+}
+
+#[derive(Debug)]
+pub struct App<S: EntryStore, C: Clock = SystemClock> {
+    config: Config,
+    v_store: ValidatedEntryStore<S>,
+    clock: C,
+}
+
+impl<STORE: EntryStore> App<STORE, SystemClock> {
     pub fn new(config: Config, store: STORE) -> Result<Self> {
-        Ok(Self { config, v_store: ValidatedEntryStore::new(store)? })
+        Self::new_with_clock(config, store, SystemClock)
+    }
+}
+
+impl<STORE: EntryStore, C: Clock> App<STORE, C> {
+    pub fn new_with_clock(config: Config, store: STORE, clock: C) -> Result<Self> {
+        Ok(Self { config, v_store: ValidatedEntryStore::new(store)?, clock })
     }
 
     // TODO:
     // - Implement methods: day, status, report
     pub fn append(&mut self, command: Command) -> anyhow::Result<EntryId> {
-        let now = now();
+        let now = self.clock.now();
         let entry = EntryPatch::new(now, command);
         self.v_store.insert(entry)
     }
@@ -67,8 +87,4 @@ impl<STORE: EntryStore> App<STORE> {
 
         Ok(())
     }
-}
-
-fn now() -> DateTime<Local> {
-    Local::now()
 }
