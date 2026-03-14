@@ -58,8 +58,8 @@ mod tests {
         entries.iter().collect()
     }
 
-    fn id_refs(entries: &[Entry]) -> Vec<(&EntryId, &Entry)> {
-        entries.iter().map(|e| (e.id(), e)).collect()
+    fn id_refs(entries: &[Entry]) -> Vec<&Entry> {
+        entries.iter().collect()
     }
 
     mod day_entries {
@@ -91,7 +91,7 @@ mod tests {
 
         #[test]
         fn returns_empty_map_for_empty_input() {
-            let input: Vec<(&EntryId, &Entry)> = Vec::new();
+            let input: Vec<&Entry> = Vec::new();
             let by_date = index_entries_by_date(&input).unwrap();
             assert!(by_date.is_empty());
         }
@@ -121,13 +121,7 @@ mod tests {
                 Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
             );
 
-            let entries: Vec<(&EntryId, &Entry)> = vec![
-                (entry1.id(), &entry1),
-                (entry2.id(), &entry2),
-                (entry3.id(), &entry3),
-                (entry4.id(), &entry4),
-                (entry5.id(), &entry5),
-            ];
+            let entries: Vec<&Entry> = vec![&entry1, &entry2, &entry3, &entry4, &entry5];
             let by_date = index_entries_by_date(&entries).unwrap();
 
             assert_eq!(by_date.len(), 2);
@@ -138,7 +132,7 @@ mod tests {
             let day1_timestamps: Vec<_> = day1
                 .ids
                 .iter()
-                .map(|id| *entries.iter().find(|(e_id, _)| *e_id == id).unwrap().1.timestamp())
+                .map(|id| *entries.iter().find(|entry| entry.id() == id).unwrap().timestamp())
                 .collect();
             assert_eq!(
                 day1_timestamps,
@@ -154,7 +148,7 @@ mod tests {
             let day2_timestamps: Vec<_> = day2
                 .ids
                 .iter()
-                .map(|id| *entries.iter().find(|(e_id, _)| *e_id == id).unwrap().1.timestamp())
+                .map(|id| *entries.iter().find(|entry| entry.id() == id).unwrap().timestamp())
                 .collect();
             assert_eq!(day2_timestamps, vec![*entry5.timestamp()]);
         }

@@ -10,18 +10,13 @@ pub struct ValidatedEntryStore<STORE> {
 impl<STORE: EntryReader + EntryWriter> ValidatedEntryStore<STORE> {
     pub fn new(store: STORE) -> anyhow::Result<Self> {
         let entries: Vec<&Entry> = store.iter().collect();
-        let indexed_entries = Self::indexed_entries(&entries);
-        EntryValidationIndex::validate_snapshot(&indexed_entries)?;
+        EntryValidationIndex::validate_snapshot(&entries)?;
 
         Ok(Self { store })
     }
 
     fn entries(&self) -> Vec<&Entry> {
         self.store.iter().collect()
-    }
-
-    fn indexed_entries<'a>(entries: &[&'a Entry]) -> Vec<(&'a EntryId, &'a Entry)> {
-        entries.iter().map(|entry| (entry.id(), *entry)).collect()
     }
 }
 
@@ -42,12 +37,8 @@ impl<STORE: EntryReader + EntryWriter> EntryWriter for ValidatedEntryStore<STORE
 
     fn insert(&mut self, entry: EntryPatch) -> anyhow::Result<EntryId> {
         let entries = self.entries();
-        let indexed_entries = Self::indexed_entries(&entries);
         let new_id = self.store.next_id();
-        EntryValidationIndex::validate(
-            &indexed_entries,
-            EntryMutation::Insert { patch: &entry, new_id },
-        )?;
+        EntryValidationIndex::validate(&entries, EntryMutation::Insert { patch: &entry, new_id })?;
 
         let id = self.store.insert(entry)?;
 
@@ -56,8 +47,7 @@ impl<STORE: EntryReader + EntryWriter> EntryWriter for ValidatedEntryStore<STORE
 
     fn remove(&mut self, id: &EntryId) -> anyhow::Result<Entry> {
         let entries = self.entries();
-        let indexed_entries = Self::indexed_entries(&entries);
-        EntryValidationIndex::validate(&indexed_entries, EntryMutation::Remove { id })?;
+        EntryValidationIndex::validate(&entries, EntryMutation::Remove { id })?;
 
         let entry = self.store.remove(id)?;
 
@@ -66,11 +56,7 @@ impl<STORE: EntryReader + EntryWriter> EntryWriter for ValidatedEntryStore<STORE
 
     fn update(&mut self, id: &EntryId, patch: EntryPatch) -> anyhow::Result<()> {
         let entries = self.entries();
-        let indexed_entries = Self::indexed_entries(&entries);
-        EntryValidationIndex::validate(
-            &indexed_entries,
-            EntryMutation::Update { id, patch: &patch },
-        )?;
+        EntryValidationIndex::validate(&entries, EntryMutation::Update { id, patch: &patch })?;
 
         self.store.update(id, patch)?;
 

@@ -112,7 +112,7 @@ mod tests {
             ts,
             Command::Log { title: "status".into(), description: None },
         );
-        let entries = vec![(entry.id(), &entry)];
+        let entries = vec![&entry];
 
         let err = EntryValidationIndex::validate_snapshot(&entries).unwrap_err();
         let styled = style_error(err);
