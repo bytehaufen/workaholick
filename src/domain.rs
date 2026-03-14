@@ -9,7 +9,10 @@ mod work_context;
 
 pub(crate) use activity_kind::ActivityKind;
 pub(crate) use command::Command;
-pub(crate) use day_entries::{EntryMutation, EntryValidationIndex};
+pub(crate) use day_entries::{
+    CommandLabel, DayEntryValidationError, DayEntryValidationIssue, EntryMutation,
+    EntryValidationIndex, TransitionReason,
+};
 pub(crate) use entry::{Entry, EntryId, EntryPatch};
 pub(crate) use period::Period;
 // pub(crate) use summary::{Summary, SummaryRequest, summary};

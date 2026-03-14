@@ -2,6 +2,9 @@ mod index;
 mod validation;
 
 pub(crate) use index::EntryValidationIndex;
+pub(crate) use validation::{
+    CommandLabel, DayEntryValidationError, DayEntryValidationIssue, TransitionReason,
+};
 
 use super::{EntryId, EntryPatch};
 

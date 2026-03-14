@@ -2,6 +2,7 @@ mod args;
 mod edit_format;
 mod run;
 mod shell_editor;
+mod validation_error;
 
 pub use args::Cli;
 pub use args::CliCommand;
