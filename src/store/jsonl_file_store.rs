@@ -171,10 +171,6 @@ impl JsonlFileStore {
 }
 
 impl EntryReader for JsonlFileStore {
-    fn next_id(&self) -> EntryId {
-        self.entries.keys().max().map(|id| id.incremented()).unwrap_or_default()
-    }
-
     fn iter(&self) -> Box<dyn Iterator<Item = &Entry> + '_> {
         Box::new(self.entries.values())
     }
@@ -185,6 +181,10 @@ impl EntryReader for JsonlFileStore {
 }
 
 impl EntryWriter for JsonlFileStore {
+    fn next_id(&self) -> EntryId {
+        self.entries.keys().max().map(|id| id.incremented()).unwrap_or_default()
+    }
+
     fn insert(&mut self, new_entry: EntryPatch) -> anyhow::Result<EntryId> {
         let id = self.next_id();
 

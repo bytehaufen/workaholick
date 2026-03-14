@@ -26,10 +26,6 @@ impl<STORE: EntryReader + EntryWriter> ValidatedEntryStore<STORE> {
 }
 
 impl<STORE: EntryReader + EntryWriter> EntryReader for ValidatedEntryStore<STORE> {
-    fn next_id(&self) -> EntryId {
-        self.store.next_id()
-    }
-
     fn iter(&self) -> Box<dyn Iterator<Item = &Entry> + '_> {
         self.store.iter()
     }
@@ -40,6 +36,10 @@ impl<STORE: EntryReader + EntryWriter> EntryReader for ValidatedEntryStore<STORE
 }
 
 impl<STORE: EntryReader + EntryWriter> EntryWriter for ValidatedEntryStore<STORE> {
+    fn next_id(&self) -> EntryId {
+        self.store.next_id()
+    }
+
     fn insert(&mut self, entry: EntryPatch) -> anyhow::Result<EntryId> {
         let entries = self.entries();
         let indexed_entries = Self::indexed_entries(&entries);
@@ -125,10 +125,6 @@ mod tests {
     }
 
     impl EntryReader for FakeEntryStore {
-        fn next_id(&self) -> EntryId {
-            EntryId::from(self.next_id)
-        }
-
         fn iter(&self) -> Box<dyn Iterator<Item = &Entry> + '_> {
             self.calls.borrow_mut().push(StoreCall::Iter);
             Box::new(self.entries.iter().map(|(_, entry)| entry))
@@ -141,6 +137,10 @@ mod tests {
     }
 
     impl EntryWriter for FakeEntryStore {
+        fn next_id(&self) -> EntryId {
+            EntryId::from(self.next_id)
+        }
+
         fn insert(&mut self, patch: EntryPatch) -> Result<EntryId> {
             self.calls.borrow_mut().push(StoreCall::Insert);
 

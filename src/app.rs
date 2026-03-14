@@ -124,10 +124,6 @@ mod tests {
     }
 
     impl EntryReader for FakeStore {
-        fn next_id(&self) -> EntryId {
-            self.next_id.into()
-        }
-
         fn iter(&self) -> Box<dyn Iterator<Item = &Entry> + '_> {
             Box::new(self.entries.iter().map(|(_, entry)| entry))
         }
@@ -138,6 +134,10 @@ mod tests {
     }
 
     impl EntryWriter for FakeStore {
+        fn next_id(&self) -> EntryId {
+            self.next_id.into()
+        }
+
         fn insert(&mut self, entry: EntryPatch) -> Result<EntryId> {
             let id = EntryId::from(self.next_id);
             self.next_id += 1;
