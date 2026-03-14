@@ -24,11 +24,16 @@ impl<STORE: EntryStore> ValidatedEntryStore<STORE> {
 impl<STORE: EntryStore> EntryStore for ValidatedEntryStore<STORE> {
     fn insert(&mut self, entry: EntryPatch) -> anyhow::Result<EntryId> {
         let entries = self.entries();
-        EntryValidationIndex::validate(&entries, EntryMutation::Insert { patch: &entry })?;
+        let new_id = self.store.next_id();
+        EntryValidationIndex::validate(&entries, EntryMutation::Insert { patch: &entry, new_id })?;
 
         let id = self.store.insert(entry)?;
 
         Ok(id)
+    }
+
+    fn next_id(&self) -> EntryId {
+        self.store.next_id()
     }
 
     fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)> {
@@ -116,6 +121,10 @@ mod tests {
             Ok(id)
         }
 
+        fn next_id(&self) -> EntryId {
+            EntryId::from(self.next_id)
+        }
+
         fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)> {
             self.calls.borrow_mut().push(StoreCall::Iter);
             self.entries.iter().map(|(id, entry)| (id, entry))
@@ -176,6 +185,39 @@ mod tests {
         let calls = calls.borrow();
         assert!(calls.contains(&StoreCall::Iter));
         assert!(calls.contains(&StoreCall::Insert));
+    }
+
+    #[test]
+    fn insert_reports_next_id_in_validation_error() {
+        let day_1_start = Local.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap();
+        let day_1_end = Local.with_ymd_and_hms(2026, 1, 10, 10, 0, 0).unwrap();
+        let day_2 = Local.with_ymd_and_hms(2026, 1, 11, 10, 0, 0).unwrap();
+
+        let store = FakeEntryStore::default().seed(vec![
+            (
+                1.into(),
+                EntryPatch::new(
+                    day_1_start,
+                    Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
+                ),
+            ),
+            (
+                2.into(),
+                EntryPatch::new(day_1_end, Command::End { title: "".into(), description: None }),
+            ),
+        ]);
+
+        let mut store = ValidatedEntryStore::new(store).unwrap();
+
+        let err = store
+            .insert(EntryPatch::new(
+                day_2,
+                Command::Log { title: "standup".into(), description: None },
+            ))
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(err, "Day entries validation failed: Entry 3 - cannot log while idle");
     }
 
     #[test]

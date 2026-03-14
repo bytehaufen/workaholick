@@ -7,7 +7,7 @@ use super::{EntryId, EntryPatch};
 
 #[derive(Debug, Clone, Copy)]
 pub enum EntryMutation<'a> {
-    Insert { patch: &'a EntryPatch },
+    Insert { patch: &'a EntryPatch, new_id: EntryId },
     Remove { id: &'a EntryId },
     Update { id: &'a EntryId, patch: &'a EntryPatch },
 }
@@ -519,9 +519,11 @@ mod tests {
                 Command::Log { title: "late log".into(), description: None },
             );
 
-            let err = by_day.validate_insert_entry(&entries, &patch).unwrap_err().to_string();
+            let new_id: EntryId = 5.into();
+            let err =
+                by_day.validate_insert_entry(&entries, &patch, new_id).unwrap_err().to_string();
 
-            assert_eq!(err, "Day entries validation failed: Entry 0 - cannot log while idle");
+            assert_eq!(err, "Day entries validation failed: Entry 5 - cannot log while idle");
         }
 
         #[test]
@@ -563,7 +565,8 @@ mod tests {
                 Command::Log { title: "note".into(), description: None },
             );
 
-            assert!(by_day.validate_insert_entry(&entries, &patch).is_ok());
+            let new_id: EntryId = 5.into();
+            assert!(by_day.validate_insert_entry(&entries, &patch, new_id).is_ok());
         }
 
         #[test]

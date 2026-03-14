@@ -171,7 +171,7 @@ impl JsonlFileStore {
 
 impl EntryStore for JsonlFileStore {
     fn insert(&mut self, new_entry: EntryPatch) -> anyhow::Result<EntryId> {
-        let id = self.entries.keys().max().map(|id| id.incremented()).unwrap_or_default();
+        let id = self.next_id();
 
         let new_entry = Entry::from_patch(id, VERSION.into(), new_entry);
 
@@ -180,6 +180,10 @@ impl EntryStore for JsonlFileStore {
         self.persist()?;
 
         Ok(id)
+    }
+
+    fn next_id(&self) -> EntryId {
+        self.entries.keys().max().map(|id| id.incremented()).unwrap_or_default()
     }
 
     fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)> {

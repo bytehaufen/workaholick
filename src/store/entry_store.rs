@@ -4,6 +4,7 @@ use anyhow::Result;
 
 pub trait EntryStore {
     fn insert(&mut self, entry: EntryPatch) -> Result<EntryId>;
+    fn next_id(&self) -> EntryId;
     /// This is sorted by timestamp
     fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)>;
     fn remove(&mut self, id: &EntryId) -> Result<Entry>;

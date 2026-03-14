@@ -20,7 +20,9 @@ impl EntryValidationIndex {
         let entries_by_day = Self::try_new(entries)?;
 
         match mutation {
-            EntryMutation::Insert { patch } => entries_by_day.validate_insert_entry(entries, patch),
+            EntryMutation::Insert { patch, new_id } => {
+                entries_by_day.validate_insert_entry(entries, patch, new_id)
+            }
             EntryMutation::Remove { id } => entries_by_day.validate_remove_entry(entries, id),
             EntryMutation::Update { id, patch } => {
                 entries_by_day.validate_update_entry(entries, id, patch)
@@ -36,9 +38,10 @@ impl EntryValidationIndex {
         &self,
         entries: &[(&EntryId, &Entry)],
         patch: &EntryPatch,
+        new_entry_id: EntryId,
     ) -> anyhow::Result<()> {
         let date = patch.timestamp().date_naive();
-        let dummy = Entry::from_patch(EntryId::default(), EntryVersion::default(), patch.clone());
+        let dummy = Entry::from_patch(new_entry_id, EntryVersion::default(), patch.clone());
 
         let mut relevant_entries: Vec<(&EntryId, &Entry)> = Vec::new();
 
@@ -64,8 +67,7 @@ impl EntryValidationIndex {
             );
         }
 
-        let dummy_id = EntryId::default();
-        relevant_entries.push((&dummy_id, &dummy));
+        relevant_entries.push((&new_entry_id, &dummy));
 
         // Next day
         if let Some((_, next_day)) =
@@ -156,7 +158,7 @@ impl EntryValidationIndex {
             entries_without_target.retain(|(entry_id, _)| *entry_id != id);
 
             let by_day_without_target = Self::try_new(&entries_without_target)?;
-            by_day_without_target.validate_insert_entry(&entries_without_target, patch)?;
+            by_day_without_target.validate_insert_entry(&entries_without_target, patch, *id)?;
         } else {
             let updated = Entry::from_patch(*id, EntryVersion::default(), patch.clone());
             let resolve = |entry_id| -> anyhow::Result<(&EntryId, &Entry)> {
