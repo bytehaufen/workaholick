@@ -6,18 +6,9 @@ pub(crate) use validation::{
     CommandLabel, DayEntryValidationError, DayEntryValidationIssue, TransitionReason,
 };
 
-use super::{EntryId, EntryPatch};
-
-#[derive(Debug, Clone, Copy)]
-pub enum EntryMutation<'a> {
-    Insert { patch: &'a EntryPatch, new_id: EntryId },
-    Remove { id: &'a EntryId },
-    Update { id: &'a EntryId, patch: &'a EntryPatch },
-}
-
 #[cfg(test)]
 mod tests {
-    use super::super::{ActivityKind, Command, Entry, WorkContext};
+    use super::super::{ActivityKind, Command, Entry, EntryId, EntryPatch, WorkContext};
     use super::*;
     use index::index_entries_by_date;
     use validation::{DayEntryInfo, State, validate_day_entries};
@@ -1003,15 +994,7 @@ mod tests {
 
             let entries = vec![entry1.clone()];
             let entries = id_refs(&entries);
-
-            let patch = EntryPatch::from_entry(&entry1);
-
-            let err = EntryValidationIndex::validate(
-                &entries,
-                EntryMutation::Update { id: &3.into(), patch: &patch },
-            )
-            .unwrap_err()
-            .to_string();
+            let err = EntryValidationIndex::try_new(&entries).unwrap_err().to_string();
 
             assert!(err.contains("cannot end while idle"));
         }

@@ -14,7 +14,8 @@ pub fn style_error(err: Error) -> Error {
 }
 
 fn find_validation_error(err: &Error) -> Option<&DayEntryValidationError> {
-    err.chain().find_map(|cause| cause.downcast_ref::<DayEntryValidationError>())
+    err.downcast_ref::<DayEntryValidationError>()
+        .or_else(|| err.chain().find_map(|cause| cause.downcast_ref::<DayEntryValidationError>()))
 }
 
 fn render_colored_validation_error(issue: DayEntryValidationIssue) -> String {
@@ -114,7 +115,7 @@ mod tests {
         );
         let entries = vec![&entry];
 
-        let err = EntryValidationIndex::validate_snapshot(&entries).unwrap_err();
+        let err = EntryValidationIndex::try_new(&entries).unwrap_err();
         let styled = style_error(err);
 
         control::unset_override();

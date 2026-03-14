@@ -1,28 +1,44 @@
-use crate::domain::{Entry, EntryId, EntryMutation, EntryPatch, EntryValidationIndex};
+use crate::domain::{Entry, EntryId, EntryPatch, EntryValidationIndex};
 
 use super::{EntryReader, EntryWriter};
 
 #[derive(Debug)]
 pub struct ValidatedEntryStore<STORE> {
     store: STORE,
+    entries: Vec<Entry>,
+    index: EntryValidationIndex,
 }
 
 impl<STORE: EntryReader + EntryWriter> ValidatedEntryStore<STORE> {
     pub fn new(store: STORE) -> anyhow::Result<Self> {
-        let entries: Vec<&Entry> = store.iter().collect();
-        EntryValidationIndex::validate_snapshot(&entries)?;
+        let entries: Vec<Entry> = store.iter().cloned().collect();
+        let index = Self::build_index(&entries)?;
 
-        Ok(Self { store })
+        Ok(Self { store, entries, index })
     }
 
     fn entries(&self) -> Vec<&Entry> {
-        self.store.iter().collect()
+        self.entries.iter().collect()
+    }
+
+    fn build_index(entries: &[Entry]) -> anyhow::Result<EntryValidationIndex> {
+        let refs: Vec<&Entry> = entries.iter().collect();
+        EntryValidationIndex::try_new(&refs)
+    }
+
+    fn refresh_index(&mut self) -> anyhow::Result<()> {
+        self.index = Self::build_index(&self.entries)?;
+        Ok(())
+    }
+
+    fn sort_entries(&mut self) {
+        self.entries.sort_by_key(|entry| entry.sort_key());
     }
 }
 
 impl<STORE: EntryReader + EntryWriter> EntryReader for ValidatedEntryStore<STORE> {
     fn iter(&self) -> Box<dyn Iterator<Item = &Entry> + '_> {
-        self.store.iter()
+        Box::new(self.entries.iter())
     }
 
     fn get(&self, id: &EntryId) -> Option<&Entry> {
@@ -38,27 +54,51 @@ impl<STORE: EntryReader + EntryWriter> EntryWriter for ValidatedEntryStore<STORE
     fn insert(&mut self, entry: EntryPatch) -> anyhow::Result<EntryId> {
         let entries = self.entries();
         let new_id = self.store.next_id();
-        EntryValidationIndex::validate(&entries, EntryMutation::Insert { patch: &entry, new_id })?;
+        self.index.validate_insert_entry(&entries, &entry, new_id)?;
 
         let id = self.store.insert(entry)?;
+        let entry = self
+            .store
+            .get(&id)
+            .ok_or_else(|| anyhow::anyhow!("entry {id} missing after insert"))?
+            .clone();
+        self.entries.push(entry);
+        self.sort_entries();
+        self.refresh_index()?;
 
         Ok(id)
     }
 
     fn remove(&mut self, id: &EntryId) -> anyhow::Result<Entry> {
         let entries = self.entries();
-        EntryValidationIndex::validate(&entries, EntryMutation::Remove { id })?;
+        self.index.validate_remove_entry(&entries, id)?;
 
         let entry = self.store.remove(id)?;
+        let idx = self
+            .entries
+            .iter()
+            .position(|existing| existing.id() == id)
+            .ok_or_else(|| anyhow::anyhow!("entry {id} missing in validation cache"))?;
+        self.entries.remove(idx);
+        self.refresh_index()?;
 
         Ok(entry)
     }
 
     fn update(&mut self, id: &EntryId, patch: EntryPatch) -> anyhow::Result<()> {
         let entries = self.entries();
-        EntryValidationIndex::validate(&entries, EntryMutation::Update { id, patch: &patch })?;
+        self.index.validate_update_entry(&entries, id, &patch)?;
 
-        self.store.update(id, patch)?;
+        self.store.update(id, patch.clone())?;
+        let idx = self
+            .entries
+            .iter()
+            .position(|existing| existing.id() == id)
+            .ok_or_else(|| anyhow::anyhow!("entry {id} missing in validation cache"))?;
+        let version = *self.entries[idx].version();
+        self.entries[idx] = Entry::from_patch(*id, version, patch);
+        self.sort_entries();
+        self.refresh_index()?;
 
         Ok(())
     }

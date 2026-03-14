@@ -4,7 +4,6 @@ use chrono::NaiveDate;
 
 use crate::domain::{Entry, EntryId, EntryPatch, entry::EntryVersion};
 
-use super::EntryMutation;
 use super::validation::{DayEntryInfo, DayEntryValidationError, State};
 
 #[derive(Debug, PartialEq)]
@@ -13,25 +12,7 @@ pub(crate) struct EntryValidationIndex {
 }
 
 impl EntryValidationIndex {
-    pub fn validate(entries: &[&Entry], mutation: EntryMutation<'_>) -> anyhow::Result<()> {
-        let entries_by_day = Self::try_new(entries)?;
-
-        match mutation {
-            EntryMutation::Insert { patch, new_id } => {
-                entries_by_day.validate_insert_entry(entries, patch, new_id)
-            }
-            EntryMutation::Remove { id } => entries_by_day.validate_remove_entry(entries, id),
-            EntryMutation::Update { id, patch } => {
-                entries_by_day.validate_update_entry(entries, id, patch)
-            }
-        }
-    }
-
-    pub fn validate_snapshot(entries: &[&Entry]) -> anyhow::Result<()> {
-        Self::try_new(entries).map(|_| ())
-    }
-
-    pub(super) fn validate_insert_entry(
+    pub(crate) fn validate_insert_entry(
         &self,
         entries: &[&Entry],
         patch: &EntryPatch,
@@ -71,7 +52,7 @@ impl EntryValidationIndex {
         Ok(())
     }
 
-    pub(super) fn validate_remove_entry(
+    pub(crate) fn validate_remove_entry(
         &self,
         entries: &[&Entry],
         id: &EntryId,
@@ -113,7 +94,7 @@ impl EntryValidationIndex {
         Ok(())
     }
 
-    pub(super) fn validate_update_entry(
+    pub(crate) fn validate_update_entry(
         &self,
         entries: &[&Entry],
         id: &EntryId,
@@ -172,7 +153,7 @@ impl EntryValidationIndex {
         Ok(())
     }
 
-    pub(super) fn try_new(entries: &[&Entry]) -> anyhow::Result<Self> {
+    pub(crate) fn try_new(entries: &[&Entry]) -> anyhow::Result<Self> {
         let days = index_entries_by_date(entries)?;
 
         Ok(Self { days })
