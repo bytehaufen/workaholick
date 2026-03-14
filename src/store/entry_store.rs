@@ -5,7 +5,7 @@ use anyhow::Result;
 pub trait EntryReader {
     fn next_id(&self) -> EntryId;
     /// This is sorted by timestamp
-    fn iter(&self) -> impl Iterator<Item = &Entry>;
+    fn iter(&self) -> Box<dyn Iterator<Item = &Entry> + '_>;
     fn get(&self, id: &EntryId) -> Option<&Entry>;
 }
 

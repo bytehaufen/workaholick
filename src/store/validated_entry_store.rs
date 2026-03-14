@@ -30,7 +30,7 @@ impl<STORE: EntryReader + EntryWriter> EntryReader for ValidatedEntryStore<STORE
         self.store.next_id()
     }
 
-    fn iter(&self) -> impl Iterator<Item = &Entry> {
+    fn iter(&self) -> Box<dyn Iterator<Item = &Entry> + '_> {
         self.store.iter()
     }
 
@@ -129,9 +129,9 @@ mod tests {
             EntryId::from(self.next_id)
         }
 
-        fn iter(&self) -> impl Iterator<Item = &Entry> {
+        fn iter(&self) -> Box<dyn Iterator<Item = &Entry> + '_> {
             self.calls.borrow_mut().push(StoreCall::Iter);
-            self.entries.iter().map(|(_, entry)| entry)
+            Box::new(self.entries.iter().map(|(_, entry)| entry))
         }
 
         fn get(&self, id: &EntryId) -> Option<&Entry> {

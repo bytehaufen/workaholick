@@ -128,8 +128,8 @@ mod tests {
             self.next_id.into()
         }
 
-        fn iter(&self) -> impl Iterator<Item = &Entry> {
-            self.entries.iter().map(|(_, entry)| entry)
+        fn iter(&self) -> Box<dyn Iterator<Item = &Entry> + '_> {
+            Box::new(self.entries.iter().map(|(_, entry)| entry))
         }
 
         fn get(&self, id: &EntryId) -> Option<&Entry> {

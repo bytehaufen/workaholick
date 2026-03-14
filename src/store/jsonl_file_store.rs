@@ -175,8 +175,8 @@ impl EntryReader for JsonlFileStore {
         self.entries.keys().max().map(|id| id.incremented()).unwrap_or_default()
     }
 
-    fn iter(&self) -> impl Iterator<Item = &Entry> {
-        self.entries.values()
+    fn iter(&self) -> Box<dyn Iterator<Item = &Entry> + '_> {
+        Box::new(self.entries.values())
     }
 
     fn get(&self, id: &EntryId) -> Option<&Entry> {
