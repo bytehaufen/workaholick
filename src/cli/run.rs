@@ -16,10 +16,6 @@ macro_rules! append_and_print {
 }
 
 pub fn run<S: EntryStore, E: Editor>(app: &mut App<S, E>, cli: Cli) -> Result<()> {
-    if let Some(ref config_path) = cli.config {
-        println!("Value for config: {}", config_path.display());
-    }
-
     match cli.command {
         CliCommand::Web => web::run(app),
 

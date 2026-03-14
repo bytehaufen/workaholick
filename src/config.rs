@@ -25,6 +25,26 @@ impl Default for Config {
 
 pub fn init() -> Result<PathBuf> {
     let path = config_path()?;
+    init_at(&path)
+}
+
+pub fn load() -> Result<Config> {
+    let path = existing_config_path()?;
+    load_from(&path)
+}
+
+pub fn show() -> Result<String> {
+    let path = existing_config_path()?;
+    show_from(&path)
+}
+
+pub fn edit(editor: &dyn Editor) -> Result<()> {
+    let path = config_path()?;
+    edit_at(&path, editor)
+}
+
+pub fn init_at(path: impl AsRef<Path>) -> Result<PathBuf> {
+    let path = path.as_ref();
 
     if path.exists() {
         anyhow::bail!("Config already exists at {} --aborting", path.display())
@@ -36,24 +56,27 @@ pub fn init() -> Result<PathBuf> {
     }
 
     let cfg = Config::default();
-    save(&path, &cfg)?;
+    save(path, &cfg)?;
 
-    Ok(path)
+    Ok(path.to_path_buf())
 }
 
-pub fn load() -> Result<Config> {
-    let path = existing_config_path()?;
-    confy::load_path(&path).with_context(|| format!("reading config file {}", path.display()))
+pub fn load_from(path: impl AsRef<Path>) -> Result<Config> {
+    let path = path.as_ref();
+    ensure_exists(path)?;
+    confy::load_path(path).with_context(|| format!("reading config file {}", path.display()))
 }
 
-pub fn show() -> Result<String> {
-    let path = existing_config_path()?;
-    fs::read_to_string(&path).with_context(|| format!("reading config file {}", path.display()))
+pub fn show_from(path: impl AsRef<Path>) -> Result<String> {
+    let path = path.as_ref();
+    ensure_exists(path)?;
+    fs::read_to_string(path).with_context(|| format!("reading config file {}", path.display()))
 }
 
-pub fn edit(editor: &dyn Editor) -> Result<()> {
-    let path = config_path()?;
-    let original = fs::read_to_string(&path)
+pub fn edit_at(path: impl AsRef<Path>, editor: &dyn Editor) -> Result<()> {
+    let path = path.as_ref();
+    ensure_exists(path)?;
+    let original = fs::read_to_string(path)
         .with_context(|| format!("reading config file {}", path.display()))?;
 
     let header = format!(
@@ -64,7 +87,7 @@ pub fn edit(editor: &dyn Editor) -> Result<()> {
 
     let editored = editor.edit(&(header + &original), FileType::Toml).context("opening editor")?;
     let cfg: Config = toml::from_str(&editored).context("config TOML is invalid (not saving)")?;
-    save(&path, &cfg)?;
+    save(path, &cfg)?;
 
     Ok(())
 }
@@ -105,6 +128,14 @@ fn existing_config_path() -> Result<PathBuf> {
     Ok(path)
 }
 
+fn ensure_exists(path: &Path) -> Result<()> {
+    if !path.exists() {
+        anyhow::bail!("Config file does not exist at {}", path.display());
+    }
+
+    Ok(())
+}
+
 fn default_store_path() -> PathBuf {
     let home = UserDirs::new()
         .map(|user_dirs| user_dirs.home_dir().to_path_buf())
@@ -116,6 +147,19 @@ fn default_store_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use crate::config::APP_NAME;
+
+    #[test]
+    fn init_load_show_custom_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("custom-config.toml");
+
+        super::init_at(&path).unwrap();
+        let loaded = super::load_from(&path).unwrap();
+        let shown = super::show_from(&path).unwrap();
+
+        assert_eq!(loaded.store_path, super::Config::default().store_path);
+        assert!(shown.contains("store_path"));
+    }
 
     #[test]
     fn app_name_is_set() {

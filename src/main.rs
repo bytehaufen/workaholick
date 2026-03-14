@@ -10,24 +10,41 @@ fn main() -> Result<()> {
 
     let editor = ShellEditor::real();
 
-    if let CliCommand::Config { command } = cli.command {
-        match command.unwrap_or(ConfigCommand::Show) {
+    if let CliCommand::Config { command } = &cli.command {
+        let config_override = cli.config.as_deref();
+        match command.as_ref().unwrap_or(&ConfigCommand::Show) {
             ConfigCommand::Show => {
-                println!("{}", config::show()?);
+                if let Some(path) = config_override {
+                    println!("{}", config::show_from(path)?);
+                } else {
+                    println!("{}", config::show()?);
+                }
                 return Ok(());
             }
             ConfigCommand::Edit => {
-                config::edit(&editor)?;
+                if let Some(path) = config_override {
+                    config::edit_at(path, &editor)?;
+                } else {
+                    config::edit(&editor)?;
+                }
                 return Ok(());
             }
             ConfigCommand::Init => {
-                config::init()?;
+                if let Some(path) = config_override {
+                    config::init_at(path)?;
+                } else {
+                    config::init()?;
+                }
                 return Ok(());
             }
         }
     }
 
-    let cfg = config::load()?;
+    let cfg = if let Some(path) = cli.config.as_deref() {
+        config::load_from(path)?
+    } else {
+        config::load()?
+    };
     let store = JsonlFileStore::new(&cfg.store_path)?;
 
     let mut app = App::new(cfg, store, editor)?;
