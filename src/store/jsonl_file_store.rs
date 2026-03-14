@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 use indexmap::IndexMap;
 
-use crate::EntryStore;
 use crate::domain::{Entry, EntryId, EntryPatch};
+
+use super::{EntryReader, EntryWriter};
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
 const VERSION: u8 = 1;
@@ -169,7 +170,21 @@ impl JsonlFileStore {
     }
 }
 
-impl EntryStore for JsonlFileStore {
+impl EntryReader for JsonlFileStore {
+    fn next_id(&self) -> EntryId {
+        self.entries.keys().max().map(|id| id.incremented()).unwrap_or_default()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)> {
+        self.entries.iter()
+    }
+
+    fn get(&self, id: &EntryId) -> Option<&Entry> {
+        self.entries.get(id)
+    }
+}
+
+impl EntryWriter for JsonlFileStore {
     fn insert(&mut self, new_entry: EntryPatch) -> anyhow::Result<EntryId> {
         let id = self.next_id();
 
@@ -180,14 +195,6 @@ impl EntryStore for JsonlFileStore {
         self.persist()?;
 
         Ok(id)
-    }
-
-    fn next_id(&self) -> EntryId {
-        self.entries.keys().max().map(|id| id.incremented()).unwrap_or_default()
-    }
-
-    fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)> {
-        self.entries.iter()
     }
 
     fn remove(&mut self, id: &EntryId) -> anyhow::Result<Entry> {
@@ -210,10 +217,6 @@ impl EntryStore for JsonlFileStore {
         self.persist()?;
 
         Ok(())
-    }
-
-    fn get(&self, id: &EntryId) -> Option<&Entry> {
-        self.entries.get(id)
     }
 }
 

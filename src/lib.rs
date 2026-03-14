@@ -7,5 +7,7 @@ mod store;
 mod web;
 
 pub use crate::app::App;
+pub use crate::store::EntryReader;
 pub use crate::store::EntryStore;
+pub use crate::store::EntryWriter;
 pub use crate::store::JsonlFileStore;

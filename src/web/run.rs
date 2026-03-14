@@ -1,7 +1,7 @@
 use anyhow::Result;
 
-use crate::{EntryStore, app::App};
+use crate::{EntryReader, EntryWriter, app::App};
 
-pub fn run<S: EntryStore>(_app: &App<S>) -> Result<()> {
+pub fn run<S: EntryReader + EntryWriter>(_app: &App<S>) -> Result<()> {
     todo!("Web frontend not implemented yet");
 }

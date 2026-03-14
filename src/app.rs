@@ -3,7 +3,7 @@ use chrono::{DateTime, Local, NaiveDate};
 use crate::{
     config::Config,
     domain::{Command, Entry, EntryId, EntryPatch},
-    store::{EntryStore, ValidatedEntryStore},
+    store::{EntryReader, EntryWriter, ValidatedEntryStore},
 };
 
 use anyhow::{Context, Result};
@@ -22,19 +22,19 @@ impl Clock for SystemClock {
 }
 
 #[derive(Debug)]
-pub struct App<S: EntryStore, C: Clock = SystemClock> {
+pub struct App<S: EntryReader + EntryWriter, C: Clock = SystemClock> {
     config: Config,
     v_store: ValidatedEntryStore<S>,
     clock: C,
 }
 
-impl<STORE: EntryStore> App<STORE, SystemClock> {
+impl<STORE: EntryReader + EntryWriter> App<STORE, SystemClock> {
     pub fn new(config: Config, store: STORE) -> Result<Self> {
         Self::new_with_clock(config, store, SystemClock)
     }
 }
 
-impl<STORE: EntryStore, C: Clock> App<STORE, C> {
+impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
     pub fn new_with_clock(config: Config, store: STORE, clock: C) -> Result<Self> {
         Ok(Self { config, v_store: ValidatedEntryStore::new(store)?, clock })
     }

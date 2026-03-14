@@ -4,7 +4,7 @@ use super::validation_error;
 use crate::App;
 use crate::domain::Command;
 use crate::editor::{Editor, system::FileType};
-use crate::{EntryStore, web};
+use crate::{EntryReader, EntryWriter, web};
 
 use anyhow::Result;
 
@@ -17,11 +17,19 @@ macro_rules! append_and_print {
     }};
 }
 
-pub fn run<S: EntryStore>(app: &mut App<S>, cli: Cli, editor: &dyn Editor) -> Result<()> {
+pub fn run<S: EntryReader + EntryWriter>(
+    app: &mut App<S>,
+    cli: Cli,
+    editor: &dyn Editor,
+) -> Result<()> {
     run_inner(app, cli, editor).map_err(validation_error::style_error)
 }
 
-fn run_inner<S: EntryStore>(app: &mut App<S>, cli: Cli, editor: &dyn Editor) -> Result<()> {
+fn run_inner<S: EntryReader + EntryWriter>(
+    app: &mut App<S>,
+    cli: Cli,
+    editor: &dyn Editor,
+) -> Result<()> {
     match cli.command {
         CliCommand::Web => web::run(app),
 

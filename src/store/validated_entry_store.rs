@@ -1,14 +1,13 @@
-use crate::{
-    EntryStore,
-    domain::{Entry, EntryId, EntryMutation, EntryPatch, EntryValidationIndex},
-};
+use crate::domain::{Entry, EntryId, EntryMutation, EntryPatch, EntryValidationIndex};
+
+use super::{EntryReader, EntryWriter};
 
 #[derive(Debug)]
 pub struct ValidatedEntryStore<STORE> {
     store: STORE,
 }
 
-impl<STORE: EntryStore> ValidatedEntryStore<STORE> {
+impl<STORE: EntryReader + EntryWriter> ValidatedEntryStore<STORE> {
     pub fn new(store: STORE) -> anyhow::Result<Self> {
         let entries: Vec<(&EntryId, &Entry)> = store.iter().collect();
         EntryValidationIndex::validate_snapshot(&entries)?;
@@ -21,7 +20,21 @@ impl<STORE: EntryStore> ValidatedEntryStore<STORE> {
     }
 }
 
-impl<STORE: EntryStore> EntryStore for ValidatedEntryStore<STORE> {
+impl<STORE: EntryReader + EntryWriter> EntryReader for ValidatedEntryStore<STORE> {
+    fn next_id(&self) -> EntryId {
+        self.store.next_id()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)> {
+        self.store.iter()
+    }
+
+    fn get(&self, id: &EntryId) -> Option<&Entry> {
+        self.store.get(id)
+    }
+}
+
+impl<STORE: EntryReader + EntryWriter> EntryWriter for ValidatedEntryStore<STORE> {
     fn insert(&mut self, entry: EntryPatch) -> anyhow::Result<EntryId> {
         let entries = self.entries();
         let new_id = self.store.next_id();
@@ -30,14 +43,6 @@ impl<STORE: EntryStore> EntryStore for ValidatedEntryStore<STORE> {
         let id = self.store.insert(entry)?;
 
         Ok(id)
-    }
-
-    fn next_id(&self) -> EntryId {
-        self.store.next_id()
-    }
-
-    fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)> {
-        self.store.iter()
     }
 
     fn remove(&mut self, id: &EntryId) -> anyhow::Result<Entry> {
@@ -56,10 +61,6 @@ impl<STORE: EntryStore> EntryStore for ValidatedEntryStore<STORE> {
         self.store.update(id, patch)?;
 
         Ok(())
-    }
-
-    fn get(&self, id: &EntryId) -> Option<&Entry> {
-        self.store.get(id)
     }
 }
 
@@ -109,7 +110,23 @@ mod tests {
         }
     }
 
-    impl EntryStore for FakeEntryStore {
+    impl EntryReader for FakeEntryStore {
+        fn next_id(&self) -> EntryId {
+            EntryId::from(self.next_id)
+        }
+
+        fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)> {
+            self.calls.borrow_mut().push(StoreCall::Iter);
+            self.entries.iter().map(|(id, entry)| (id, entry))
+        }
+
+        fn get(&self, id: &EntryId) -> Option<&Entry> {
+            self.calls.borrow_mut().push(StoreCall::Get);
+            self.entries.iter().find(|(entry_id, _)| entry_id == id).map(|(_, entry)| entry)
+        }
+    }
+
+    impl EntryWriter for FakeEntryStore {
         fn insert(&mut self, patch: EntryPatch) -> Result<EntryId> {
             self.calls.borrow_mut().push(StoreCall::Insert);
 
@@ -119,15 +136,6 @@ mod tests {
             self.sort_by_timestamp();
 
             Ok(id)
-        }
-
-        fn next_id(&self) -> EntryId {
-            EntryId::from(self.next_id)
-        }
-
-        fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)> {
-            self.calls.borrow_mut().push(StoreCall::Iter);
-            self.entries.iter().map(|(id, entry)| (id, entry))
         }
 
         fn remove(&mut self, id: &EntryId) -> Result<Entry> {
@@ -151,11 +159,6 @@ mod tests {
             self.entries[idx].1 = Entry::from_patch(*id, version, patch);
             self.sort_by_timestamp();
             Ok(())
-        }
-
-        fn get(&self, id: &EntryId) -> Option<&Entry> {
-            self.calls.borrow_mut().push(StoreCall::Get);
-            self.entries.iter().find(|(entry_id, _)| entry_id == id).map(|(_, entry)| entry)
         }
     }
 
