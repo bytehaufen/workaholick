@@ -61,7 +61,11 @@ fn colorize_attempted(attempted: CommandLabel) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ActivityKind, CommandLabel, EntryId};
+    use crate::domain::{
+        ActivityKind, Command, CommandLabel, Entry, EntryId, EntryValidationIndex,
+    };
+    use anyhow::anyhow;
+    use chrono::{Local, TimeZone};
     use colored::control;
 
     #[test]
@@ -87,5 +91,37 @@ mod tests {
 
         assert!(text.contains("\u{1b}["));
         assert!(text.contains("Entry 42 - cannot"));
+    }
+
+    #[test]
+    fn style_error_passes_through_non_validation_errors() {
+        let err = anyhow!("plain error");
+        let styled = style_error(err);
+
+        assert_eq!(styled.to_string(), "plain error");
+    }
+
+    #[test]
+    fn style_error_reformats_validation_errors() {
+        control::set_override(true);
+
+        let ts = Local.with_ymd_and_hms(2026, 1, 12, 10, 0, 0).unwrap();
+        let entry = Entry::new(
+            1.into(),
+            1.into(),
+            ts,
+            Command::Log { title: "status".into(), description: None },
+        );
+        let entries = vec![(entry.id(), &entry)];
+
+        let err = EntryValidationIndex::validate_snapshot(&entries).unwrap_err();
+        let styled = style_error(err);
+
+        control::unset_override();
+
+        let text = styled.to_string();
+        assert!(text.contains("Day entries validation failed"));
+        assert!(text.contains("Entry 1 - cannot"));
+        assert!(text.contains("\u{1b}["));
     }
 }
