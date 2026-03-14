@@ -7,6 +7,14 @@ use crate::domain::{EntryPatch, entry::EntryVersion};
 
 use super::{ActivityKind, Command, Entry, EntryId};
 
+#[derive(Debug, PartialEq, Clone, Copy, Default)]
+enum State {
+    #[default]
+    Idle,
+    Active(ActivityKind),
+    Breaking(ActivityKind),
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum EntryMutation<'a> {
     Insert { patch: &'a EntryPatch },
@@ -16,7 +24,7 @@ pub enum EntryMutation<'a> {
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct EntryValidationIndex {
-    days: BTreeMap<NaiveDate, DayEntryIds>,
+    days: BTreeMap<NaiveDate, DayEntryInfo>,
 }
 
 impl EntryValidationIndex {
@@ -57,7 +65,7 @@ impl EntryValidationIndex {
         if let Some((_, prev_day)) = self.days.range(..date).next_back() {
             relevant_entries.extend(
                 prev_day
-                    .inner
+                    .ids
                     .iter()
                     .map(resolve)
                     .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
@@ -67,10 +75,7 @@ impl EntryValidationIndex {
         // Current day (inclusive new one)
         if let Some(day) = self.days.get(&date) {
             relevant_entries.extend(
-                day.inner
-                    .iter()
-                    .map(resolve)
-                    .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
+                day.ids.iter().map(resolve).collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
             );
         }
 
@@ -83,7 +88,7 @@ impl EntryValidationIndex {
         {
             relevant_entries.extend(
                 next_day
-                    .inner
+                    .ids
                     .iter()
                     .map(resolve)
                     .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
@@ -112,7 +117,7 @@ impl EntryValidationIndex {
         if let Some((_, prev_day)) = self.days.range(..date).next_back() {
             relevant_entries.extend(
                 prev_day
-                    .inner
+                    .ids
                     .iter()
                     .map(resolve)
                     .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
@@ -122,7 +127,7 @@ impl EntryValidationIndex {
         // Current day, excluding the removed one
         let day = self.days.get(&date).expect("current day should exist");
         relevant_entries.extend(
-            day.inner
+            day.ids
                 .iter()
                 .filter(|&entry_id| entry_id != id)
                 .map(resolve)
@@ -135,7 +140,7 @@ impl EntryValidationIndex {
         {
             relevant_entries.extend(
                 next_day
-                    .inner
+                    .ids
                     .iter()
                     .map(resolve)
                     .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
@@ -179,7 +184,7 @@ impl EntryValidationIndex {
             if let Some((_, prev_day)) = self.days.range(..&patch.date()).next_back() {
                 relevant_entries.extend(
                     prev_day
-                        .inner
+                        .ids
                         .iter()
                         .map(resolve)
                         .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
@@ -189,7 +194,7 @@ impl EntryValidationIndex {
             // Current day
             let day = self.days.get(&patch.date()).expect("current day should exist");
             relevant_entries.extend(
-                day.inner
+                day.ids
                     .iter()
                     .filter(|entry_id| *entry_id != id)
                     .map(resolve)
@@ -203,7 +208,7 @@ impl EntryValidationIndex {
             {
                 relevant_entries.extend(
                     next_day
-                        .inner
+                        .ids
                         .iter()
                         .map(resolve)
                         .collect::<anyhow::Result<Vec<(&EntryId, &Entry)>>>()?,
@@ -218,31 +223,6 @@ impl EntryValidationIndex {
 
     fn try_new(entries: &[(&EntryId, &Entry)]) -> anyhow::Result<Self> {
         let days = index_entries_by_date(entries)?;
-        let dates: Vec<_> = days.keys().collect();
-
-        // Iterate over dates to check that the date before ends with `Command::End`
-        dates.windows(2).try_for_each(|window| {
-            let date = window[0];
-            let day = &days[date];
-
-            let last_id = day
-                .inner
-                .last()
-                .expect("invariant violated: indexed day must contain at least one entry");
-
-            let last_entry = Self::resolve_entry(entries, last_id)?;
-
-            match last_entry.command() {
-                Command::End { .. } => {}
-                _ => anyhow::bail!(
-                    "Day {} must end with {}",
-                    date.to_string().yellow(),
-                    "End".yellow()
-                ),
-            }
-
-            Ok(())
-        })?;
 
         Ok(Self { days })
     }
@@ -261,127 +241,112 @@ impl EntryValidationIndex {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-struct DayEntryIds {
-    inner: Vec<EntryId>,
+struct DayEntryInfo {
+    ids: Vec<EntryId>,
+    end_state: State,
 }
 
-impl TryFrom<&Vec<&Entry>> for DayEntryIds {
-    type Error = DayEntryValidationError;
-
-    fn try_from(entries: &Vec<&Entry>) -> Result<Self, DayEntryValidationError> {
+impl DayEntryInfo {
+    fn try_new(entries: &Vec<&Entry>, prev_state: &State) -> Result<Self, DayEntryValidationError> {
         if entries.is_empty() {
-            return Err(DayEntryValidationError {
-                errors: vec!["entries must not be empty".into()],
-            });
+            return Err(DayEntryValidationError("entries must not be empty".into()));
         }
         let first_date = entries[0].date();
 
         if !entries.iter().all(|entry| entry.date() == first_date) {
-            return Err(DayEntryValidationError {
-                errors: vec!["entries must all be of the same date".into()],
-            });
+            return Err(DayEntryValidationError("entries must all be of the same date".into()));
         }
 
-        validate_day_entries(entries)?;
+        let end_state = validate_day_entries(entries, prev_state)?;
 
         let ids = entries.iter().map(|entry| *entry.id()).collect();
-        Ok(Self { inner: ids })
+        Ok(Self { end_state, ids })
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("Day entries validation failed with {} error(s):\n{}", errors.len(), errors.iter().map(|e| format!(" - {}", e)).collect::<Vec<_>>().join("\n"))]
-struct DayEntryValidationError {
-    errors: Vec<String>,
-}
+#[error("Day entries validation failed: {0}")]
+struct DayEntryValidationError(String);
 
-fn validate_day_entries(entries: &[&Entry]) -> Result<(), DayEntryValidationError> {
-    #[derive(Clone, Copy)]
-    enum State {
-        Idle,
-        Active(ActivityKind),
-        Breaking(ActivityKind),
-    }
-
+fn validate_day_entries(
+    entries: &[&Entry],
+    prev_state: &State,
+) -> Result<State, DayEntryValidationError> {
     use State::*;
 
-    let (_, errors) = entries.iter().fold((Idle, Vec::new()), |(mut state, mut errors), entry| {
-        let result = match (state, entry.command()) {
-            (Idle, Command::Start { kind, .. }) => Ok(Active(*kind)),
-            (Idle, command) => {
-                Err(format!("cannot {} while {}", command.to_string().yellow(), "idle".yellow()))
-            }
+    entries.iter().try_fold(*prev_state, |state, entry| match (state, entry.command()) {
+        (Idle, Command::Start { kind, .. }) => Ok(Active(*kind)),
+        (Idle, command) => Err(DayEntryValidationError(format!(
+            "Entry {} - cannot {} while {}",
+            entry.id(),
+            command.to_string().yellow(),
+            "idle".yellow()
+        ))),
 
-            (Active(_), Command::Log { .. }) => Ok(state),
+        (Active(_), Command::Log { .. }) => Ok(state),
 
-            (Active(kind), Command::BreakStart) => Ok(Breaking(kind)),
-            (Breaking(kind), Command::BreakEnd { .. }) => Ok(Active(kind)),
+        (Active(kind), Command::BreakStart) => Ok(Breaking(kind)),
+        (Breaking(kind), Command::BreakEnd { .. }) => Ok(Active(kind)),
 
-            (Active(_), Command::End { .. }) => Ok(Idle),
+        (Active(_), Command::End { .. }) => Ok(Idle),
 
-            (Active(activity_kind), Command::Start { kind }) => Err(format!(
-                "cannot {} while already active ({})",
-                format!("start {kind}").yellow(),
-                activity_kind.to_string().yellow()
-            )),
+        (Active(activity_kind), Command::Start { kind }) => Err(DayEntryValidationError(format!(
+            "Entry {} - cannot {} while already active ({})",
+            entry.id(),
+            format!("start {kind}").yellow(),
+            activity_kind.to_string().yellow()
+        ))),
 
-            (Active(_), Command::BreakEnd { .. }) => {
-                Err(format!("cannot {} when {}", "end break".yellow(), "not breaking".yellow()))
-            }
+        (Active(_), Command::BreakEnd { .. }) => Err(DayEntryValidationError(format!(
+            "Entry {} - cannot {} when {}",
+            entry.id(),
+            "end break".yellow(),
+            "not breaking".yellow()
+        ))),
 
-            (Breaking(_), Command::Start { .. } | Command::End { .. } | Command::Log { .. }) => {
-                Err(format!(
-                    "cannot {} while {}",
-                    entry.command().to_string().yellow(),
-                    "breaking".yellow()
-                ))
-            }
-
-            (Breaking(_), Command::BreakStart) => Err(format!(
-                "cannot {} while already {}",
-                "start break".yellow(),
+        (Breaking(_), Command::Start { .. } | Command::End { .. } | Command::Log { .. }) => {
+            Err(DayEntryValidationError(format!(
+                "Entry {} - cannot {} while {}",
+                entry.id(),
+                entry.command().to_string().yellow(),
                 "breaking".yellow()
-            )),
-        };
-
-        match result {
-            Err(error) => errors.push(format!("Entry {}: {}", entry.id(), error)),
-            Ok(new_state) => state = new_state,
+            )))
         }
-        (state, errors)
-    });
 
-    if errors.is_empty() { Ok(()) } else { Err(DayEntryValidationError { errors }) }
+        (Breaking(_), Command::BreakStart) => Err(DayEntryValidationError(format!(
+            "Entry {} - cannot {} while already {}",
+            entry.id(),
+            "start break".yellow(),
+            "breaking".yellow()
+        ))),
+    })
 }
 
 fn index_entries_by_date(
     entries: &[(&EntryId, &Entry)],
-) -> Result<BTreeMap<NaiveDate, DayEntryIds>, DayEntryValidationError> {
+) -> Result<BTreeMap<NaiveDate, DayEntryInfo>, DayEntryValidationError> {
     let mut entries_by_date: BTreeMap<NaiveDate, Vec<&Entry>> =
         entries.iter().fold(BTreeMap::new(), |mut acc, (_entry_id, entry)| {
             acc.entry(entry.date()).or_default().push(entry);
             acc
         });
 
-    entries_by_date
-        .values_mut()
-        .for_each(|entries| entries.sort_by_key(|entry| *entry.timestamp()));
+    entries_by_date.values_mut().for_each(|entries| entries.sort_by_key(|entry| entry.sort_key()));
+    let initial_state = State::Idle;
 
-    let (day_entries, errors) = entries_by_date.iter().fold(
-        (BTreeMap::new(), Vec::new()),
-        |(mut day_entries, mut errors), (date, entries)| {
-            match DayEntryIds::try_from(entries) {
-                Ok(day_entry) => {
-                    day_entries.insert(*date, day_entry);
-                }
-                Err(validation_err) => errors.extend(validation_err.errors),
-            };
+    let (day_entries, _) = entries_by_date.iter().try_fold(
+        (BTreeMap::new(), initial_state),
+        |(mut day_entries, last_state), (date, entries)| {
+            let day_entry = DayEntryInfo::try_new(entries, &last_state)?;
 
-            (day_entries, errors)
+            let next_state = day_entry.end_state;
+            day_entries.insert(*date, day_entry);
+
+            Ok((day_entries, next_state))
         },
-    );
+    )?;
 
-    if errors.is_empty() { Ok(day_entries) } else { Err(DayEntryValidationError { errors }) }
+    Ok(day_entries)
 }
 
 #[cfg(test)]
@@ -432,12 +397,11 @@ mod tests {
 
         #[test]
         fn try_from_empty_returns_error() {
-            let err = DayEntryIds::try_from(&Vec::new()).unwrap_err();
+            let err = DayEntryInfo::try_new(&Vec::new(), &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 "\
-Day entries validation failed with 1 error(s):
- - entries must not be empty"
+Day entries validation failed: entries must not be empty"
             );
         }
 
@@ -447,12 +411,12 @@ Day entries validation failed with 1 error(s):
             let entry2 =
                 entry(2, Local.with_ymd_and_hms(4025, 1, 4, 16, 9, 0).unwrap(), Command::default());
 
-            let err = DayEntryIds::try_from(&vec![&entry1, &entry2]).unwrap_err();
+            let err =
+                DayEntryInfo::try_new(&vec![&entry1, &entry2], &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 "\
-Day entries validation failed with 1 error(s):
- - entries must all be of the same date"
+Day entries validation failed: entries must all be of the same date"
             );
         }
     }
@@ -478,12 +442,27 @@ Day entries validation failed with 1 error(s):
                 entry(2, Local.with_ymd_and_hms(2026, 1, 4, 9, 0, 0).unwrap(), Command::BreakStart);
             let entry3 = entry(
                 3,
+                Local.with_ymd_and_hms(2026, 1, 4, 9, 30, 0).unwrap(),
+                Command::BreakEnd { description: None },
+            );
+            let entry4 = entry(
+                4,
+                Local.with_ymd_and_hms(2026, 1, 4, 10, 0, 0).unwrap(),
+                Command::End { title: "".into(), description: None },
+            );
+            let entry5 = entry(
+                5,
                 Local.with_ymd_and_hms(2026, 1, 5, 10, 0, 0).unwrap(),
                 Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
             );
 
-            let entries: Vec<(&EntryId, &Entry)> =
-                vec![(entry1.id(), &entry1), (entry2.id(), &entry2), (entry3.id(), &entry3)];
+            let entries: Vec<(&EntryId, &Entry)> = vec![
+                (entry1.id(), &entry1),
+                (entry2.id(), &entry2),
+                (entry3.id(), &entry3),
+                (entry4.id(), &entry4),
+                (entry5.id(), &entry5),
+            ];
             let by_date = index_entries_by_date(&entries).unwrap();
 
             assert_eq!(by_date.len(), 2);
@@ -492,44 +471,27 @@ Day entries validation failed with 1 error(s):
 
             let day1 = by_date.get(&entry1.timestamp().date_naive()).unwrap();
             let day1_timestamps: Vec<_> = day1
-                .inner
+                .ids
                 .iter()
                 .map(|id| *entries.iter().find(|(e_id, _)| *e_id == id).unwrap().1.timestamp())
                 .collect();
-            assert_eq!(day1_timestamps, vec![*entry1.timestamp(), *entry2.timestamp()]);
-
-            let day2 = by_date.get(&entry3.timestamp().date_naive()).unwrap();
-            let day2_timestamps: Vec<_> = day2
-                .inner
-                .iter()
-                .map(|id| *entries.iter().find(|(e_id, _)| *e_id == id).unwrap().1.timestamp())
-                .collect();
-            assert_eq!(day2_timestamps, vec![*entry3.timestamp()]);
-        }
-
-        #[test]
-        fn returns_collected_errors_message_snapshot() {
-            let entries = [
-                make_entry(1, 0, Command::Start { kind: Default::default() }),
-                make_entry(2, 5, Command::Start { kind: Default::default() }),
-                make_entry(3, 5, Command::Start { kind: Default::default() }),
-                make_entry(5, 6, Command::Start { kind: Default::default() }),
-                make_entry(6, 7, Command::Start { kind: Default::default() }),
-                make_entry(7, 8, Command::Start { kind: Default::default() }),
-            ];
-            let entries: Vec<(&EntryId, &Entry)> = entries.iter().map(|e| (e.id(), e)).collect();
-
-            let errors = index_entries_by_date(&entries).unwrap_err().to_string();
             assert_eq!(
-                errors,
-                "\
-Day entries validation failed with 5 error(s):
- - Entry 2: cannot start work while already active (work)
- - Entry 3: cannot start work while already active (work)
- - Entry 5: cannot start work while already active (work)
- - Entry 6: cannot start work while already active (work)
- - Entry 7: cannot start work while already active (work)"
+                day1_timestamps,
+                vec![
+                    *entry1.timestamp(),
+                    *entry2.timestamp(),
+                    *entry3.timestamp(),
+                    *entry4.timestamp()
+                ]
             );
+
+            let day2 = by_date.get(&entry5.timestamp().date_naive()).unwrap();
+            let day2_timestamps: Vec<_> = day2
+                .ids
+                .iter()
+                .map(|id| *entries.iter().find(|(e_id, _)| *e_id == id).unwrap().1.timestamp())
+                .collect();
+            assert_eq!(day2_timestamps, vec![*entry5.timestamp()]);
         }
     }
 
@@ -551,7 +513,7 @@ Day entries validation failed with 5 error(s):
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            assert!(validate_day_entries(&entries).is_ok());
+            assert!(validate_day_entries(&entries, &Default::default()).is_ok());
         }
 
         #[test]
@@ -569,7 +531,7 @@ Day entries validation failed with 5 error(s):
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            assert!(validate_day_entries(&entries).is_ok());
+            assert!(validate_day_entries(&entries, &Default::default()).is_ok());
         }
 
         #[test]
@@ -581,12 +543,10 @@ Day entries validation failed with 5 error(s):
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries).unwrap_err();
+            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
-                "\
-Day entries validation failed with 1 error(s):
- - Entry 2: cannot start work while already active (work)"
+                "Day entries validation failed: Entry 2 - cannot start work while already active (work)"
             )
         }
 
@@ -596,12 +556,10 @@ Day entries validation failed with 1 error(s):
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries).unwrap_err();
+            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
-                "\
-Day entries validation failed with 1 error(s):
- - Entry 1: cannot end while idle"
+                "Day entries validation failed: Entry 1 - cannot end while idle"
             );
         }
 
@@ -611,12 +569,10 @@ Day entries validation failed with 1 error(s):
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries).unwrap_err();
+            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
-                "\
-Day entries validation failed with 1 error(s):
- - Entry 1: cannot log while idle"
+                "Day entries validation failed: Entry 1 - cannot log while idle"
             )
         }
 
@@ -626,12 +582,10 @@ Day entries validation failed with 1 error(s):
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries).unwrap_err();
+            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
-                "\
-Day entries validation failed with 1 error(s):
- - Entry 1: cannot start break while idle"
+                "Day entries validation failed: Entry 1 - cannot start break while idle"
             );
         }
 
@@ -644,12 +598,10 @@ Day entries validation failed with 1 error(s):
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries).unwrap_err();
+            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
-                "\
-Day entries validation failed with 1 error(s):
- - Entry 2: cannot end break when not breaking"
+                "Day entries validation failed: Entry 2 - cannot end break when not breaking"
             );
         }
 
@@ -663,12 +615,10 @@ Day entries validation failed with 1 error(s):
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries).unwrap_err();
+            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
-                "\
-Day entries validation failed with 1 error(s):
- - Entry 3: cannot end while breaking"
+                "Day entries validation failed: Entry 3 - cannot end while breaking"
             );
         }
 
@@ -682,12 +632,10 @@ Day entries validation failed with 1 error(s):
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries).unwrap_err();
+            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
-                "\
-Day entries validation failed with 1 error(s):
- - Entry 3: cannot log while breaking"
+                "Day entries validation failed: Entry 3 - cannot log while breaking"
             );
         }
 
@@ -701,13 +649,39 @@ Day entries validation failed with 1 error(s):
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries).unwrap_err();
+            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
-                "\
-Day entries validation failed with 1 error(s):
- - Entry 3: cannot start break while already breaking"
+                "Day entries validation failed: Entry 3 - cannot start break while already breaking"
             );
+        }
+
+        #[test]
+        fn given_active_prev_state_allows_log_then_end() {
+            let cmds = [
+                Command::Log { title: "handoff".into(), description: None },
+                Command::End { title: "wrap".into(), description: None },
+            ];
+            let entries = entries_at_same_day(&cmds);
+            let entries = refs(&entries);
+            let prev_state = State::Active(ActivityKind::Work { context: WorkContext::Office });
+
+            let end_state = validate_day_entries(&entries, &prev_state).unwrap();
+            assert_eq!(end_state, State::Idle);
+        }
+
+        #[test]
+        fn given_breaking_prev_state_allows_break_end_then_end() {
+            let cmds = [
+                Command::BreakEnd { description: None },
+                Command::End { title: "wrap".into(), description: None },
+            ];
+            let entries = entries_at_same_day(&cmds);
+            let entries = refs(&entries);
+            let prev_state = State::Breaking(ActivityKind::Work { context: WorkContext::Office });
+
+            let end_state = validate_day_entries(&entries, &prev_state).unwrap();
+            assert_eq!(end_state, State::Idle);
         }
     }
 
@@ -715,7 +689,7 @@ Day entries validation failed with 1 error(s):
         use super::*;
 
         #[test]
-        fn try_new_rejects_if_previous_day_missing_end() {
+        fn try_new_rejects_start_when_previous_day_is_active() {
             let day1 = [entry(
                 1,
                 Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
@@ -741,7 +715,66 @@ Day entries validation failed with 1 error(s):
             let entries = id_refs(&all);
 
             let err = EntryValidationIndex::try_new(&entries).unwrap_err().to_string();
-            assert!(err.contains("must end with End"));
+            assert_eq!(
+                err.to_string(),
+                "Day entries validation failed: Entry 2 - cannot start work while already active (work)"
+            );
+        }
+
+        #[test]
+        fn try_new_allows_spanning_open_sessions_over_day_boundary() {
+            let day1 = vec![entry(
+                0,
+                Local.with_ymd_and_hms(2026, 1, 11, 5, 4, 19).unwrap(),
+                Command::Start { kind: Default::default() },
+            )];
+            let day2 = vec![
+                entry(
+                    1,
+                    Local.with_ymd_and_hms(2026, 1, 14, 20, 39, 15).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+                entry(
+                    2,
+                    Local.with_ymd_and_hms(2026, 1, 14, 21, 9, 40).unwrap(),
+                    Command::Start { kind: Default::default() },
+                ),
+                entry(
+                    3,
+                    Local.with_ymd_and_hms(2026, 1, 14, 21, 9, 47).unwrap(),
+                    Command::End { title: "".into(), description: None },
+                ),
+            ];
+            let day3 = vec![entry(
+                4,
+                Local.with_ymd_and_hms(2026, 1, 18, 6, 4, 54).unwrap(),
+                Command::Start { kind: Default::default() },
+            )];
+
+            let mut all = Vec::new();
+            all.extend_from_slice(&day1);
+            all.extend_from_slice(&day2);
+            all.extend_from_slice(&day3);
+            let entries = id_refs(&all);
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+
+            let mut expected: BTreeMap<NaiveDate, DayEntryInfo> = BTreeMap::new();
+            let day_entries_1 = DayEntryInfo {
+                ids: day1.iter().map(|e| *e.id()).collect(),
+                end_state: State::Active(Default::default()),
+            };
+            let day_entries_2 = DayEntryInfo {
+                ids: day2.iter().map(|e| *e.id()).collect(),
+                end_state: State::Idle,
+            };
+            let day_entries_3 = DayEntryInfo {
+                ids: day3.iter().map(|e| *e.id()).collect(),
+                end_state: State::Active(Default::default()),
+            };
+            expected.insert(NaiveDate::from_ymd_opt(2026, 1, 11).unwrap(), day_entries_1);
+            expected.insert(NaiveDate::from_ymd_opt(2026, 1, 14).unwrap(), day_entries_2);
+            expected.insert(NaiveDate::from_ymd_opt(2026, 1, 18).unwrap(), day_entries_3);
+            assert_eq!(by_day.days, expected);
         }
 
         #[test]
@@ -769,9 +802,15 @@ Day entries validation failed with 1 error(s):
             let entries = id_refs(&all);
             let by_day = EntryValidationIndex::try_new(&entries).unwrap();
 
-            let mut expected: BTreeMap<NaiveDate, DayEntryIds> = BTreeMap::new();
-            let day_entries_1 = DayEntryIds { inner: day1.iter().map(|e| *e.id()).collect() };
-            let day_entries_2 = DayEntryIds { inner: day2.iter().map(|e| *e.id()).collect() };
+            let mut expected: BTreeMap<NaiveDate, DayEntryInfo> = BTreeMap::new();
+            let day_entries_1 = DayEntryInfo {
+                ids: day1.iter().map(|e| *e.id()).collect(),
+                end_state: State::Idle,
+            };
+            let day_entries_2 = DayEntryInfo {
+                ids: day2.iter().map(|e| *e.id()).collect(),
+                end_state: State::Active(Default::default()),
+            };
             expected.insert(ts1.date_naive(), day_entries_1);
             expected.insert(ts4.date_naive(), day_entries_2);
             let expected = EntryValidationIndex { days: expected };
@@ -820,10 +859,7 @@ Day entries validation failed with 1 error(s):
 
             let err = by_day.validate_insert_entry(&entries, &patch).unwrap_err().to_string();
 
-            assert_eq!(
-                err,
-                "Day entries validation failed with 1 error(s):\n - Entry 0: cannot log while idle"
-            );
+            assert_eq!(err, "Day entries validation failed: Entry 0 - cannot log while idle");
         }
 
         #[test]
@@ -903,7 +939,10 @@ Day entries validation failed with 1 error(s):
             let by_day = EntryValidationIndex::try_new(&entries).unwrap();
 
             let err = by_day.validate_remove_entry(&entries, day1[1].id()).unwrap_err().to_string();
-            assert!(err.contains("must end with End"));
+            assert_eq!(
+                err,
+                "Day entries validation failed: Entry 3 - cannot start work while already active (work)"
+            );
         }
 
         #[test]
@@ -1290,42 +1329,6 @@ Day entries validation failed with 1 error(s):
                 .unwrap_err()
                 .to_string();
             assert!(err.contains("cannot log while idle"));
-        }
-
-        #[test]
-        fn validate_update_entry_rejects_move_to_new_day_if_old_previous_day_not_closed() {
-            let day1 = [
-                entry(
-                    1,
-                    Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
-                ),
-                entry(
-                    2,
-                    Local.with_ymd_and_hms(2025, 1, 10, 9, 5, 0).unwrap(),
-                    Command::Log { title: Default::default(), description: None },
-                ),
-                entry(
-                    3,
-                    Local.with_ymd_and_hms(2025, 1, 10, 9, 10, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
-                ),
-            ];
-
-            let mut all = Vec::new();
-            all.extend_from_slice(&day1);
-
-            let entries = id_refs(&all);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
-
-            let patch = EntryPatch::new(
-                Local.with_ymd_and_hms(2025, 1, 11, 9, 10, 0).unwrap(),
-                Command::Start { kind: Default::default() },
-            );
-
-            let err =
-                by_day.validate_update_entry(&entries, &3.into(), &patch).unwrap_err().to_string();
-            assert!(err.contains("must end with End"));
         }
 
         #[test]

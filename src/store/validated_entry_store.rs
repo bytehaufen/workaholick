@@ -151,7 +151,7 @@ mod tests {
     }
 
     #[test]
-    fn insert_when_validation_would_break_is_rejected_before_store_insert() {
+    fn insert_allows_cross_day_log_when_previous_day_is_active() {
         let day_1 = Local.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap();
         let day_2 = Local.with_ymd_and_hms(2026, 1, 11, 10, 0, 0).unwrap();
 
@@ -171,11 +171,11 @@ mod tests {
             Command::Log { title: "standup".into(), description: None },
         ));
 
-        result.expect_err("expected validation error before write");
+        assert!(result.is_ok());
 
         let calls = calls.borrow();
         assert!(calls.contains(&StoreCall::Iter));
-        assert!(!calls.contains(&StoreCall::Insert));
+        assert!(calls.contains(&StoreCall::Insert));
     }
 
     #[test]
