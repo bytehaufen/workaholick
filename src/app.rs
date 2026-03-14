@@ -1,18 +1,13 @@
-mod edit_format;
-
 use chrono::{DateTime, Local, NaiveDate};
 
 use crate::{
-    app::edit_format::{parse_edited, render_for_edit},
     config::Config,
     domain::{Command, Entry, EntryId, EntryPatch},
-    editor::{Editor, system::FileType},
     store::{EntryStore, ValidatedEntryStore},
 };
 
 use anyhow::{Context, Result};
 
-// TODO: Move editor to Cli
 #[derive(Debug)]
 pub struct App<S: EntryStore> {
     config: Config,
@@ -56,14 +51,15 @@ impl<STORE: EntryStore> App<STORE> {
         Ok(())
     }
 
-    pub fn edit(&mut self, id: u64, editor: &dyn Editor) -> Result<()> {
-        let entry: EntryPatch = EntryPatch::from_entry(
+    pub fn get_entry_patch(&self, id: u64) -> Result<EntryPatch> {
+        let patch = EntryPatch::from_entry(
             self.v_store.get(&id.into()).with_context(|| format!("find ID {id}"))?,
         );
 
-        let initial = render_for_edit(&entry)?;
-        let edited = editor.edit(&initial, FileType::Ron)?;
-        let patch = parse_edited(&edited)?;
+        Ok(patch)
+    }
+
+    pub fn update_entry(&mut self, id: u64, patch: EntryPatch) -> Result<()> {
         self.v_store.update(&id.into(), patch)?;
 
         Ok(())

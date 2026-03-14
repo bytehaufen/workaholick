@@ -1,7 +1,8 @@
 use super::args::{Cli, CliCommand};
+use super::edit_format::{parse_edited, render_for_edit};
 use crate::App;
 use crate::domain::Command;
-use crate::editor::Editor;
+use crate::editor::{Editor, system::FileType};
 use crate::{EntryStore, web};
 
 use anyhow::Result;
@@ -38,7 +39,13 @@ pub fn run<S: EntryStore>(app: &mut App<S>, cli: Cli, editor: &dyn Editor) -> Re
             println!("🗑️ Entry deleted:\n{entry:#?}");
             Ok(())
         }
-        CliCommand::Edit { id } => app.edit(id, editor),
+        CliCommand::Edit { id } => {
+            let entry = app.get_entry_patch(id)?;
+            let initial = render_for_edit(&entry)?;
+            let edited = editor.edit(&initial, FileType::Ron)?;
+            let patch = parse_edited(&edited)?;
+            app.update_entry(id, patch)
+        }
 
         CliCommand::Status => {
             // FIXME: implement

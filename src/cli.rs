@@ -1,4 +1,5 @@
 mod args;
+mod edit_format;
 mod run;
 mod shell_editor;
 
