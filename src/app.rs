@@ -21,6 +21,19 @@ impl Clock for SystemClock {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DayEntryView {
+    pub id: EntryId,
+    pub timestamp: DateTime<Local>,
+    pub command: Command,
+}
+
+impl From<&Entry> for DayEntryView {
+    fn from(entry: &Entry) -> Self {
+        Self { id: *entry.id(), timestamp: *entry.timestamp(), command: entry.command().clone() }
+    }
+}
+
 #[derive(Debug)]
 pub struct App<S: EntryReader + EntryWriter, C: Clock = SystemClock> {
     config: Config,
@@ -64,11 +77,11 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
     //     summary(&entries, SummaryRequest::Day(today()))
     // }
 
-    pub fn day(&self, date: NaiveDate) -> Result<Vec<Entry>> {
+    pub fn day(&self, date: NaiveDate) -> Result<Vec<DayEntryView>> {
         let entries = self
             .v_store
             .iter()
-            .filter_map(|entry| (entry.date() == date).then_some(entry.clone()))
+            .filter_map(|entry| (entry.date() == date).then_some(DayEntryView::from(entry)))
             .collect();
 
         Ok(entries)
@@ -179,9 +192,9 @@ mod tests {
 
         let entries = app.day(fixed_now.date_naive()).unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(*entries[0].timestamp(), fixed_now);
+        assert_eq!(entries[0].timestamp, fixed_now);
         assert_eq!(
-            *entries[0].command(),
+            entries[0].command,
             Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } }
         );
     }
@@ -228,6 +241,10 @@ mod tests {
 
         let day_1_entries = app.day(day_1_start.date_naive()).unwrap();
         assert_eq!(day_1_entries.len(), 2);
-        assert!(day_1_entries.iter().all(|entry| entry.date() == day_1_start.date_naive()));
+        assert!(
+            day_1_entries
+                .iter()
+                .all(|entry| entry.timestamp.date_naive() == day_1_start.date_naive())
+        );
     }
 }

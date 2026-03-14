@@ -7,6 +7,7 @@ mod store;
 mod web;
 
 pub use crate::app::App;
+pub use crate::app::DayEntryView;
 pub use crate::store::EntryReader;
 pub use crate::store::EntryStore;
 pub use crate::store::EntryWriter;
