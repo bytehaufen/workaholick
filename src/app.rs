@@ -68,7 +68,7 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
         let entries = self
             .v_store
             .iter()
-            .filter_map(|(_, entry)| (entry.date() == date).then_some(entry.clone()))
+            .filter_map(|entry| (entry.date() == date).then_some(entry.clone()))
             .collect();
 
         Ok(entries)
@@ -128,8 +128,8 @@ mod tests {
             self.next_id.into()
         }
 
-        fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)> {
-            self.entries.iter().map(|(id, entry)| (id, entry))
+        fn iter(&self) -> impl Iterator<Item = &Entry> {
+            self.entries.iter().map(|(_, entry)| entry)
         }
 
         fn get(&self, id: &EntryId) -> Option<&Entry> {

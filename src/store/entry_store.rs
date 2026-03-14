@@ -5,7 +5,7 @@ use anyhow::Result;
 pub trait EntryReader {
     fn next_id(&self) -> EntryId;
     /// This is sorted by timestamp
-    fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)>;
+    fn iter(&self) -> impl Iterator<Item = &Entry>;
     fn get(&self, id: &EntryId) -> Option<&Entry>;
 }
 

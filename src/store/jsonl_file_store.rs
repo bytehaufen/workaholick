@@ -175,8 +175,8 @@ impl EntryReader for JsonlFileStore {
         self.entries.keys().max().map(|id| id.incremented()).unwrap_or_default()
     }
 
-    fn iter(&self) -> impl Iterator<Item = (&EntryId, &Entry)> {
-        self.entries.iter()
+    fn iter(&self) -> impl Iterator<Item = &Entry> {
+        self.entries.values()
     }
 
     fn get(&self, id: &EntryId) -> Option<&Entry> {
@@ -533,7 +533,7 @@ mod tests {
             ))
             .unwrap();
 
-        let hours: Vec<u32> = store.iter().map(|(_, e)| e.timestamp().hour()).collect();
+        let hours: Vec<u32> = store.iter().map(|entry| entry.timestamp().hour()).collect();
         assert_eq!(hours, vec![10, 11, 12]);
     }
 
@@ -734,8 +734,8 @@ mod tests {
 
         let mut iter = store.iter();
 
-        assert_eq!(*iter.next().unwrap().1.id(), EntryId::from(2));
-        assert_eq!(*iter.next().unwrap().1.id(), EntryId::from(1));
+        assert_eq!(*iter.next().unwrap().id(), EntryId::from(2));
+        assert_eq!(*iter.next().unwrap().id(), EntryId::from(1));
         assert!(iter.next().is_none());
     }
 
@@ -753,8 +753,8 @@ mod tests {
 
         let mut iter = store.iter();
 
-        assert_eq!(*iter.next().unwrap().1.id(), EntryId::from(1));
-        assert_eq!(*iter.next().unwrap().1.id(), EntryId::from(2));
+        assert_eq!(*iter.next().unwrap().id(), EntryId::from(1));
+        assert_eq!(*iter.next().unwrap().id(), EntryId::from(2));
         assert!(iter.next().is_none());
     }
 
@@ -772,7 +772,7 @@ mod tests {
 
         let store = JsonlFileStore::new(&store_file_path).unwrap();
 
-        let ids: Vec<_> = store.iter().map(|(id, _)| id.value()).collect();
+        let ids: Vec<_> = store.iter().map(|entry| entry.id().value()).collect();
         assert_eq!(ids, vec![3, 2, 0, 1]);
     }
 }
