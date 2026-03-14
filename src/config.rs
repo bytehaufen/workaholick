@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 
-use crate::editor::{Editor, system::FileType};
+use crate::editor::{Editor, ports::FileType};
 
 const APP_NAME: &str = env!("CARGO_PKG_NAME");
 const CONFIG_NAME: &str = "config";

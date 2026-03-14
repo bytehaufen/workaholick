@@ -3,7 +3,7 @@ use super::edit_format::{parse_edited, render_for_edit};
 use super::validation_error;
 use crate::App;
 use crate::domain::Command;
-use crate::editor::{Editor, system::FileType};
+use crate::editor::{Editor, ports::FileType};
 use crate::{EntryReader, EntryWriter, web};
 
 use anyhow::Result;

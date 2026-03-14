@@ -1,4 +1,4 @@
 pub(crate) mod command;
-pub(crate) mod system;
+pub(crate) mod ports;
 
-pub use system::Editor;
+pub use ports::Editor;
