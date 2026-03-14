@@ -48,11 +48,12 @@ fn run_inner<S: EntryReader + EntryWriter>(
         }
 
         CliCommand::Delete { id } => {
-            let entry = app.delete(id)?;
+            let entry = app.delete(id.into())?;
             println!("🗑️ Entry deleted:\n{entry:#?}");
             Ok(())
         }
         CliCommand::Edit { id } => {
+            let id = id.into();
             let entry = app.get_entry_patch(id)?;
             let initial = render_for_edit(&entry)?;
             let edited = editor.edit(&initial, FileType::Ron)?;

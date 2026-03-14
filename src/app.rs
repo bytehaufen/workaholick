@@ -47,8 +47,8 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
         self.v_store.insert(entry)
     }
 
-    pub fn delete(&mut self, id: u64) -> Result<Entry> {
-        self.v_store.remove(&id.into())
+    pub fn delete(&mut self, id: EntryId) -> Result<Entry> {
+        self.v_store.remove(&id)
     }
 
     // FIXME: Disabled for refactoring
@@ -74,16 +74,15 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
         Ok(entries)
     }
 
-    pub fn get_entry_patch(&self, id: u64) -> Result<EntryPatch> {
-        let patch = EntryPatch::from_entry(
-            self.v_store.get(&id.into()).with_context(|| format!("find ID {id}"))?,
-        );
+    pub fn get_entry_patch(&self, id: EntryId) -> Result<EntryPatch> {
+        let patch =
+            EntryPatch::from_entry(self.v_store.get(&id).with_context(|| format!("find ID {id}"))?);
 
         Ok(patch)
     }
 
-    pub fn update_entry(&mut self, id: u64, patch: EntryPatch) -> Result<()> {
-        self.v_store.update(&id.into(), patch)?;
+    pub fn update_entry(&mut self, id: EntryId, patch: EntryPatch) -> Result<()> {
+        self.v_store.update(&id, patch)?;
 
         Ok(())
     }
