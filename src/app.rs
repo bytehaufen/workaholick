@@ -78,6 +78,10 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
     // }
 
     pub fn day(&self, date: NaiveDate) -> Result<Vec<DayEntryView>> {
+        if self.v_store.len() == 0 {
+            anyhow::bail!("No entries in store.")
+        }
+
         let entries = self
             .v_store
             .iter()
@@ -98,6 +102,10 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
         self.v_store.update(&id, patch)?;
 
         Ok(())
+    }
+
+    pub fn last_date(&self) -> Option<NaiveDate> {
+        self.v_store.iter().map(Entry::timestamp).map(DateTime::date_naive).last()
     }
 }
 
@@ -254,5 +262,16 @@ mod tests {
                 .iter()
                 .all(|entry| entry.timestamp.date_naive() == day_1_start.date_naive())
         );
+    }
+
+    #[test]
+    fn day_errors_when_store_is_empty() {
+        let store = FakeStore::default();
+        let app = App::new(Config::default(), store).unwrap();
+
+        let err = app
+            .day(Local.with_ymd_and_hms(2026, 3, 15, 6, 14, 0).unwrap().date_naive())
+            .unwrap_err();
+        assert_eq!(err.to_string(), "No entries in store.");
     }
 }

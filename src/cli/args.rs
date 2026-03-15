@@ -83,8 +83,8 @@ pub enum CliCommand {
     /// Inspect a day (arbitrary date)
     #[command(visible_alias = "d")]
     Day {
-        /// Date to inspect (YYYY-MM-DD)
-        date: NaiveDate,
+        /// Date to inspect (YYYY-MM-DD), latest day if left empty
+        date: Option<NaiveDate>,
     },
 
     // TODO: Check necessity

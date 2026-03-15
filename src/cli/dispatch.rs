@@ -68,11 +68,17 @@ fn run_inner<S: EntryReader + EntryWriter>(
             //     None => println!("No status for today"),
             // };
 
-            Ok(())
+            todo!();
         }
+
         CliCommand::Day { date } => {
+            let Some(date) = date.or_else(|| app.last_date()) else {
+                anyhow::bail!("There are no entries.");
+            };
+
             let entries = app.day(date)?;
             println!("{entries:#?}");
+
             Ok(())
         }
         CliCommand::Report {} => todo!(),
