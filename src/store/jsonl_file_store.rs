@@ -738,8 +738,6 @@ mod tests {
 
         let store = JsonlFileStore::new(&store_file_path).unwrap();
 
-        dbg!(&store.entries);
-
         let mut iter = store.iter();
 
         assert_eq!(*iter.next().unwrap().id(), EntryId::from(2));
