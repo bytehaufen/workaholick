@@ -143,6 +143,14 @@ mod tests {
         fn get(&self, id: &EntryId) -> Option<&Entry> {
             self.entries.iter().find(|(entry_id, _)| entry_id == id).map(|(_, entry)| entry)
         }
+
+        fn len(&self) -> usize {
+            self.entries.len()
+        }
+
+        fn is_empty(&self) -> bool {
+            todo!()
+        }
     }
 
     impl EntryWriter for FakeStore {

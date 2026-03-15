@@ -6,6 +6,8 @@ pub trait EntryReader {
     /// This is sorted by timestamp
     fn iter(&self) -> Box<dyn Iterator<Item = &Entry> + '_>;
     fn get(&self, id: &EntryId) -> Option<&Entry>;
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool;
 }
 
 pub trait EntryWriter {

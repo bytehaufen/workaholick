@@ -178,6 +178,14 @@ impl EntryReader for JsonlFileStore {
     fn get(&self, id: &EntryId) -> Option<&Entry> {
         self.entries.get(id)
     }
+
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 impl EntryWriter for JsonlFileStore {
@@ -774,5 +782,28 @@ mod tests {
 
         let ids: Vec<_> = store.iter().map(|entry| entry.id().value()).collect();
         assert_eq!(ids, vec![3, 2, 0, 1]);
+    }
+
+    #[test]
+    fn len_and_is_empty_reflect_store_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
+
+        let mut store = JsonlFileStore::new(&file_path).unwrap();
+        assert_eq!(store.len(), 0);
+        assert!(store.is_empty());
+
+        let id = store
+            .insert(EntryPatch::new(
+                Local.with_ymd_and_hms(2026, 3, 15, 5, 15, 0).unwrap(),
+                Default::default(),
+            ))
+            .unwrap();
+        assert_eq!(store.len(), 1);
+        assert!(!store.is_empty());
+
+        store.remove(&id).unwrap();
+        assert_eq!(store.len(), 0);
+        assert!(store.is_empty());
     }
 }

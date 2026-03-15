@@ -44,6 +44,14 @@ impl<STORE: EntryReader + EntryWriter> EntryReader for ValidatedEntryStore<STORE
     fn get(&self, id: &EntryId) -> Option<&Entry> {
         self.store.get(id)
     }
+
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 impl<STORE: EntryReader + EntryWriter> EntryWriter for ValidatedEntryStore<STORE> {
@@ -159,6 +167,14 @@ mod tests {
         fn get(&self, id: &EntryId) -> Option<&Entry> {
             self.calls.borrow_mut().push(StoreCall::Get);
             self.entries.iter().find(|(entry_id, _)| entry_id == id).map(|(_, entry)| entry)
+        }
+
+        fn len(&self) -> usize {
+            self.entries.len()
+        }
+
+        fn is_empty(&self) -> bool {
+            self.entries.is_empty()
         }
     }
 
@@ -317,5 +333,27 @@ mod tests {
         let calls = calls.borrow();
         assert!(calls.contains(&StoreCall::Iter));
         assert!(!calls.contains(&StoreCall::Update));
+    }
+
+    #[test]
+    fn len_and_is_empty_reflect_store_state() {
+        let mut store = ValidatedEntryStore::new(FakeEntryStore::default()).unwrap();
+        assert!(store.is_empty());
+        assert_eq!(store.len(), 0);
+
+        store
+            .insert(EntryPatch::new(
+                Local.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap(),
+                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
+            ))
+            .unwrap();
+
+        assert!(!store.is_empty());
+        assert_eq!(store.len(), 1);
+
+        store.remove(&EntryId::from(0)).unwrap();
+
+        assert!(store.is_empty());
+        assert_eq!(store.len(), 0);
     }
 }
