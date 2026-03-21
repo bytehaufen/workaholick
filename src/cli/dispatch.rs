@@ -1,7 +1,9 @@
 use super::args::{Cli, CliCommand};
 use super::edit_format::{parse_edited, render_for_edit};
+use super::format;
 use super::validation_error;
 use crate::App;
+use crate::config::OutputFormatter;
 use crate::domain::Command;
 use crate::editor::{Editor, ports::FileType};
 use crate::{EntryReader, EntryWriter, web};
@@ -21,14 +23,16 @@ pub fn run<S: EntryReader + EntryWriter>(
     app: &mut App<S>,
     cli: Cli,
     editor: &dyn Editor,
+    formatter: OutputFormatter,
 ) -> Result<()> {
-    run_inner(app, cli, editor).map_err(validation_error::style_error)
+    run_inner(app, cli, editor, formatter).map_err(validation_error::style_error)
 }
 
 fn run_inner<S: EntryReader + EntryWriter>(
     app: &mut App<S>,
     cli: Cli,
     editor: &dyn Editor,
+    formatter: OutputFormatter,
 ) -> Result<()> {
     match cli.command {
         CliCommand::Web => web::run(app),
@@ -77,9 +81,12 @@ fn run_inner<S: EntryReader + EntryWriter>(
             };
 
             let entries = app.day(date)?;
-            println!("{entries:#?}");
+            if entries.is_empty() {
+                println!("No entries for {date}.");
+                return Ok(());
+            }
 
-            Ok(())
+            format::print_day(formatter, date, &entries)
         }
         CliCommand::Report {} => todo!(),
     }

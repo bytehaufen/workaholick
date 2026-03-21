@@ -1,5 +1,10 @@
 # Workaholick 👅
 
+## Configuration
+
+- Path to data
+- Output format 'markdown' \| 'plain'
+
 ## TODO
 
 - Error handling

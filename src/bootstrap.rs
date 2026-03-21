@@ -46,9 +46,10 @@ pub fn run_app() -> Result<()> {
     } else {
         config::load()?
     };
+    let formatter = cfg.cli.formatter;
     let store = JsonlFileStore::new(&cfg.store_path)?;
 
     let mut app = App::new(cfg, store)?;
 
-    cli::run(&mut app, cli, &editor)
+    cli::run(&mut app, cli, &editor, formatter)
 }

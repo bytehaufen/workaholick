@@ -15,11 +15,28 @@ const CONFIG_NAME: &str = "config";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub store_path: PathBuf,
+    #[serde(default)]
+    pub cli: CliConfig,
+}
+
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CliConfig {
+    #[serde(default)]
+    pub formatter: OutputFormatter,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutputFormatter {
+    #[default]
+    Plain,
+    Markdown,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { store_path: default_store_path() }
+        Self { store_path: default_store_path(), cli: CliConfig::default() }
     }
 }
 
@@ -146,7 +163,7 @@ fn default_store_path() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::APP_NAME;
+    use crate::config::{APP_NAME, OutputFormatter};
 
     #[test]
     fn init_load_show_custom_path() {
@@ -158,6 +175,9 @@ mod tests {
         let shown = super::show_from(&path).unwrap();
 
         assert_eq!(loaded.store_path, super::Config::default().store_path);
+        assert_eq!(loaded.cli.formatter, OutputFormatter::Plain);
+        assert!(shown.contains("[cli]"));
+        assert!(shown.contains("formatter"));
         assert!(shown.contains("store_path"));
     }
 
