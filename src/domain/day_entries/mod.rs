@@ -14,23 +14,13 @@ mod tests {
     use validation::{DayEntryInfo, State, validate_day_entries};
 
     use chrono::{Local, NaiveDate, TimeZone};
-    use colored::control;
     use std::collections::BTreeMap;
-    use std::sync::Once;
-
-    fn disable_colors_for_tests() {
-        static INIT: Once = Once::new();
-        INIT.call_once(|| {
-            control::set_override(false);
-        });
-    }
 
     fn ts(day: u32, hour: u32, min: u32) -> chrono::DateTime<Local> {
         Local.with_ymd_and_hms(2025, 1, day, hour, min, 0).unwrap()
     }
 
     fn entry(id: u64, ts: chrono::DateTime<Local>, cmd: Command) -> Entry {
-        disable_colors_for_tests();
         Entry::new(id.into(), 1.into(), ts, cmd)
     }
 

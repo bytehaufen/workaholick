@@ -68,6 +68,18 @@ mod tests {
     use anyhow::anyhow;
     use chrono::{Local, TimeZone};
     use colored::control;
+    use std::sync::{Mutex, OnceLock};
+
+    fn with_color_override<T>(enabled: bool, test: impl FnOnce() -> T) -> T {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let lock = LOCK.get_or_init(|| Mutex::new(()));
+        let _guard = lock.lock().unwrap();
+
+        control::set_override(enabled);
+        let result = test();
+        control::unset_override();
+        result
+    }
 
     #[test]
     fn keeps_structural_errors_plain() {
@@ -78,17 +90,15 @@ mod tests {
 
     #[test]
     fn colorizes_transition_errors() {
-        control::set_override(true);
-
-        let text = render_colored_validation_error(DayEntryValidationIssue::InvalidTransition {
-            entry_id: EntryId::from(42),
-            attempted: CommandLabel::StartWithKind(ActivityKind::Vacation),
-            reason: TransitionReason::AlreadyActive(ActivityKind::Work {
-                context: crate::domain::WorkContext::Office,
-            }),
+        let text = with_color_override(true, || {
+            render_colored_validation_error(DayEntryValidationIssue::InvalidTransition {
+                entry_id: EntryId::from(42),
+                attempted: CommandLabel::StartWithKind(ActivityKind::Vacation),
+                reason: TransitionReason::AlreadyActive(ActivityKind::Work {
+                    context: crate::domain::WorkContext::Office,
+                }),
+            })
         });
-
-        control::unset_override();
 
         assert!(text.contains("\u{1b}["));
         assert!(text.contains("Entry 42 - cannot"));
@@ -104,23 +114,21 @@ mod tests {
 
     #[test]
     fn style_error_reformats_validation_errors() {
-        control::set_override(true);
+        let text = with_color_override(true, || {
+            let ts = Local.with_ymd_and_hms(2026, 1, 12, 10, 0, 0).unwrap();
+            let entry = Entry::new(
+                1.into(),
+                1.into(),
+                ts,
+                Command::Log { title: "status".into(), description: None },
+            );
+            let entries = vec![&entry];
 
-        let ts = Local.with_ymd_and_hms(2026, 1, 12, 10, 0, 0).unwrap();
-        let entry = Entry::new(
-            1.into(),
-            1.into(),
-            ts,
-            Command::Log { title: "status".into(), description: None },
-        );
-        let entries = vec![&entry];
+            let err = EntryValidationIndex::try_new(&entries).unwrap_err();
+            let styled = style_error(err);
+            styled.to_string()
+        });
 
-        let err = EntryValidationIndex::try_new(&entries).unwrap_err();
-        let styled = style_error(err);
-
-        control::unset_override();
-
-        let text = styled.to_string();
         assert!(text.contains("Day entries validation failed"));
         assert!(text.contains("Entry 1 - cannot"));
         assert!(text.contains("\u{1b}["));
