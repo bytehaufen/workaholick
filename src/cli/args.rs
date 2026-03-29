@@ -1,8 +1,8 @@
 use chrono::NaiveDate;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, arg};
 use std::path::PathBuf;
 
-use crate::domain::{ActivityKind, Period, WorkContext};
+use crate::domain::{ActivityKind, Period, SummaryScope, WorkContext};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -89,10 +89,8 @@ pub enum CliCommand {
 
     // TODO: Check necessity
     /// Show summaries
-    #[command(visible_alias = "r")]
-    Report {
-        // TODO: implement
-    },
+    #[command(visible_alias = "sum")]
+    Summary(SummaryArgs),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Subcommand)]
@@ -148,6 +146,33 @@ pub enum ConfigCommand {
     Init,
 }
 
+#[derive(Args, Debug, Clone)]
+#[command(group(ArgGroup::new("summary_scope").args(["period", "from"]).required(false)))]
+pub struct SummaryArgs {
+    /// Preset period to summarize
+    #[arg(value_enum, conflicts_with_all = ["from", "to"])]
+    pub period: Option<PeriodArg>,
+
+    /// Start date for an explicit range (YYYY-MM-DD)
+    #[arg(long, requires = "to", conflicts_with = "period")]
+    pub from: Option<NaiveDate>,
+
+    /// End date for an explicit range (YYYY-MM-DD)
+    #[arg(long, requires = "from", conflicts_with = "period")]
+    pub to: Option<NaiveDate>,
+}
+
+impl SummaryArgs {
+    pub fn scope(&self) -> SummaryScope {
+        match (self.period, self.from, self.to) {
+            (Some(period), None, None) => SummaryScope::Period(Period::from(period)),
+            (None, Some(from), Some(to)) => SummaryScope::Range { from, to },
+            (None, None, None) => SummaryScope::Period(Period::Today),
+            _ => unreachable!("clap validation should prevent invalid summary arguments"),
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum PeriodArg {
     /// Today (default)
@@ -155,8 +180,8 @@ pub enum PeriodArg {
     Today,
 
     /// Previous logged day
-    #[value(alias = "y")]
-    PrevDay,
+    #[value(alias = "l")]
+    LastDay,
 
     /// This week
     #[value(alias = "w")]
@@ -165,15 +190,20 @@ pub enum PeriodArg {
     /// This month
     #[value(alias = "m")]
     Month,
+
+    /// This month
+    #[value(alias = "m")]
+    Year,
 }
 
 impl From<PeriodArg> for Period {
     fn from(p: PeriodArg) -> Self {
         match p {
             PeriodArg::Today => Period::Today,
-            PeriodArg::PrevDay => Period::PrevDay,
+            PeriodArg::LastDay => Period::LastDay,
             PeriodArg::Week => Period::Week,
             PeriodArg::Month => Period::Month,
+            PeriodArg::Year => Period::Year,
         }
     }
 }

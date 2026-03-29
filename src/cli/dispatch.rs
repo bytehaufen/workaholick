@@ -88,6 +88,11 @@ fn run_inner<S: EntryReader + EntryWriter>(
 
             format::print_day(formatter, date, &entries)
         }
-        CliCommand::Report {} => todo!(),
+
+        CliCommand::Summary(summary_args) => {
+            let _summary = app.summary(summary_args.scope())?;
+
+            Ok(())
+        }
     }
 }

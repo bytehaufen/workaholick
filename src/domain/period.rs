@@ -1,7 +1,8 @@
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Period {
     Today,
-    PrevDay,
+    LastDay,
     Week,
     Month,
+    Year,
 }

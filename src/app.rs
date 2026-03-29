@@ -1,14 +1,17 @@
-use chrono::{DateTime, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Days, Local, NaiveDate, TimeZone};
 
 use crate::{
     config::Config,
-    domain::{Command, Entry, EntryId, EntryPatch},
+    domain::{
+        Command, Entry, EntryId, EntryPatch, Period, Summary, SummaryScope, SummaryWindow, summary,
+    },
     store::{EntryReader, EntryWriter, ValidatedEntryStore},
 };
 
 use anyhow::{Context, Result};
 
 pub trait Clock {
+    fn today(&self) -> NaiveDate;
     fn now(&self) -> DateTime<Local>;
 }
 
@@ -18,6 +21,10 @@ pub struct SystemClock;
 impl Clock for SystemClock {
     fn now(&self) -> DateTime<Local> {
         Local::now()
+    }
+
+    fn today(&self) -> NaiveDate {
+        self.now().date_naive()
     }
 }
 
@@ -64,19 +71,6 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
         self.v_store.remove(&id)
     }
 
-    // FIXME: Disabled for refactoring
-    // pub fn status(&self) -> anyhow::Result<Option<Summary<'_>>> {
-    //     let entries = self
-    //         .store
-    //         .entries()
-    //         .iter()
-    //         .filter(|entry| *entry.date() == today());
-    //
-    //     let entries: Vec<&Entry> = entries.collect();
-    //
-    //     summary(&entries, SummaryRequest::Day(today()))
-    // }
-
     pub fn day(&self, date: NaiveDate) -> Result<Vec<DayEntryView>> {
         if self.v_store.len() == 0 {
             anyhow::bail!("No entries in store.")
@@ -85,7 +79,8 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
         let entries = self
             .v_store
             .iter()
-            .filter_map(|entry| (entry.date() == date).then_some(DayEntryView::from(entry)))
+            .filter(|entry| entry.date() == date)
+            .map(DayEntryView::from)
             .collect();
 
         Ok(entries)
@@ -107,6 +102,86 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
     pub fn last_date(&self) -> Option<NaiveDate> {
         self.v_store.iter().map(Entry::timestamp).map(DateTime::date_naive).last()
     }
+
+    pub fn summary(&self, scope: SummaryScope) -> anyhow::Result<Summary> {
+        let Some(window) = self.summary_window(scope) else {
+            return Ok(Summary::default());
+        };
+
+        let entries = self.collect_entries(|entry| *entry.timestamp() < window.end());
+
+        summary(&entries, window)
+    }
+
+    fn collect_entries<F: Fn(&&Entry) -> bool>(&self, predicate: F) -> Vec<DayEntryView> {
+        self.v_store.iter().filter(predicate).map(DayEntryView::from).collect()
+    }
+
+    fn summary_window(&self, scope: SummaryScope) -> Option<SummaryWindow> {
+        let now = self.clock.now();
+        let today = self.clock.today();
+
+        let window = match scope {
+            SummaryScope::Period(Period::Today) => SummaryWindow::new(start_of_day(today), now),
+            SummaryScope::Period(Period::LastDay) => {
+                let date = self.last_date()?;
+
+                day_window(date, now)
+            }
+            SummaryScope::Period(Period::Week) => {
+                let start = today
+                    .checked_sub_days(Days::new(today.weekday().num_days_from_monday().into()))
+                    .expect("week start should be representable");
+                let end = start.checked_add_days(Days::new(7)).expect("week end should exist");
+
+                date_window(start, end, now)
+            }
+            SummaryScope::Period(Period::Month) => {
+                let start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
+                    .expect("month start should be valid");
+                let (year, month) = if today.month() == 12 {
+                    (today.year() + 1, 1)
+                } else {
+                    (today.year(), today.month() + 1)
+                };
+                let end = NaiveDate::from_ymd_opt(year, month, 1)
+                    .expect("next month start should be valid");
+
+                date_window(start, end, now)
+            }
+            SummaryScope::Period(Period::Year) => {
+                let start = NaiveDate::from_ymd_opt(today.year(), 1, 1)
+                    .expect("year start should be valid");
+                let end = NaiveDate::from_ymd_opt(today.year() + 1, 1, 1)
+                    .expect("next year start should be valid");
+
+                date_window(start, end, now)
+            }
+            SummaryScope::Range { from, to } => {
+                let end = next_day(to);
+
+                date_window(from, end, now)
+            }
+        };
+
+        (!window.is_empty()).then_some(window)
+    }
+}
+
+fn start_of_day(date: NaiveDate) -> DateTime<Local> {
+    Local.with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0).unwrap()
+}
+
+fn next_day(date: NaiveDate) -> NaiveDate {
+    date.succ_opt().expect("summary range end should have a successor day")
+}
+
+fn day_window(date: NaiveDate, now: DateTime<Local>) -> SummaryWindow {
+    date_window(date, next_day(date), now)
+}
+
+fn date_window(start: NaiveDate, end: NaiveDate, now: DateTime<Local>) -> SummaryWindow {
+    SummaryWindow::new(start_of_day(start), start_of_day(end).min(now))
 }
 
 #[cfg(test)]
@@ -118,11 +193,18 @@ mod tests {
     use crate::domain::{ActivityKind, WorkContext};
 
     #[derive(Clone, Copy)]
-    struct FixedClock(DateTime<Local>);
+    struct FixedClock {
+        now: DateTime<Local>,
+        today: NaiveDate,
+    }
 
     impl Clock for FixedClock {
         fn now(&self) -> DateTime<Local> {
-            self.0
+            self.now
+        }
+
+        fn today(&self) -> NaiveDate {
+            self.today
         }
     }
 
@@ -157,7 +239,7 @@ mod tests {
         }
 
         fn is_empty(&self) -> bool {
-            todo!()
+            self.entries.is_empty()
         }
     }
 
@@ -199,7 +281,7 @@ mod tests {
     #[test]
     fn append_uses_injected_clock_timestamp() {
         let fixed_now = Local.with_ymd_and_hms(2026, 1, 10, 9, 30, 0).unwrap();
-        let clock = FixedClock(fixed_now);
+        let clock = FixedClock { now: fixed_now, today: fixed_now.date_naive() };
         let store = FakeStore::default();
         let mut app = App::new_with_clock(Config::default(), store, clock).unwrap();
 
@@ -253,7 +335,12 @@ mod tests {
             ),
         ]);
 
-        let app = App::new_with_clock(Config::default(), store, FixedClock(day_1_start)).unwrap();
+        let app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now: day_1_start, today: day_1_start.date_naive() },
+        )
+        .unwrap();
 
         let day_1_entries = app.day(day_1_start.date_naive()).unwrap();
         assert_eq!(day_1_entries.len(), 2);
@@ -273,5 +360,116 @@ mod tests {
             .day(Local.with_ymd_and_hms(2026, 3, 15, 6, 14, 0).unwrap().date_naive())
             .unwrap_err();
         assert_eq!(err.to_string(), "No entries in store.");
+    }
+
+    fn ts(day: u32, hour: u32) -> DateTime<Local> {
+        Local.with_ymd_and_hms(2026, 1, day, hour, 0, 0).unwrap()
+    }
+
+    fn date(day: u32) -> NaiveDate {
+        ts(day, 0).date_naive()
+    }
+
+    #[test]
+    fn summary_window_for_historical_range_ends_at_next_midnight() {
+        let now = ts(15, 12);
+        let app = App::new_with_clock(
+            Config::default(),
+            FakeStore::default(),
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let window =
+            app.summary_window(SummaryScope::Range { from: date(10), to: date(12) }).unwrap();
+
+        assert_eq!(window.start(), ts(10, 0));
+        assert_eq!(window.end(), ts(13, 0));
+    }
+
+    #[test]
+    fn summary_window_for_range_including_today_clamps_end_to_now() {
+        let now = ts(15, 12);
+        let app = App::new_with_clock(
+            Config::default(),
+            FakeStore::default(),
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let window =
+            app.summary_window(SummaryScope::Range { from: date(10), to: date(15) }).unwrap();
+
+        assert_eq!(window.start(), ts(10, 0));
+        assert_eq!(window.end(), now);
+    }
+
+    #[test]
+    fn summary_window_for_last_day_uses_last_logged_date() {
+        let now = ts(15, 12);
+        let store = FakeStore::default().seed(vec![(
+            1.into(),
+            EntryPatch::new(
+                ts(10, 9),
+                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
+            ),
+        )]);
+        let app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let window = app.summary_window(SummaryScope::Period(Period::LastDay)).unwrap();
+
+        assert_eq!(window.start(), ts(10, 0));
+        assert_eq!(window.end(), ts(11, 0));
+    }
+
+    #[test]
+    fn summary_for_historical_range_closes_open_day_at_midnight() {
+        let now = ts(15, 12);
+        let kind = ActivityKind::Work { context: WorkContext::Office };
+        let store = FakeStore::default()
+            .seed(vec![(1.into(), EntryPatch::new(ts(10, 8), Command::Start { kind }))]);
+        let app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let summary = app.summary(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
+
+        assert_eq!(summary.active_time(kind), chrono::TimeDelta::hours(16));
+        assert_eq!(summary.break_time(kind), chrono::TimeDelta::zero());
+    }
+
+    #[test]
+    fn summary_for_range_uses_entries_before_scope_for_carry_in_state() {
+        let now = ts(15, 12);
+        let kind = ActivityKind::Work { context: WorkContext::Office };
+        let store = FakeStore::default().seed(vec![
+            (1.into(), EntryPatch::new(ts(9, 20), Command::Start { kind })),
+            (
+                2.into(),
+                EntryPatch::new(
+                    ts(10, 10),
+                    Command::End { title: "done".into(), description: None },
+                ),
+            ),
+        ]);
+        let app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let summary = app.summary(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
+
+        assert_eq!(summary.active_time(kind), chrono::TimeDelta::hours(10));
+        assert_eq!(summary.break_time(kind), chrono::TimeDelta::zero());
     }
 }

@@ -4,7 +4,7 @@ mod day_entries;
 mod entry;
 mod period;
 mod serde_datetime;
-// mod summary;
+mod summary;
 mod work_context;
 
 pub(crate) use activity_kind::ActivityKind;
@@ -15,5 +15,5 @@ pub(crate) use day_entries::{
 };
 pub(crate) use entry::{Entry, EntryId, EntryPatch};
 pub(crate) use period::Period;
-// pub(crate) use summary::{Summary, SummaryRequest, summary};
+pub(crate) use summary::{Summary, SummaryScope, SummaryWindow, summary};
 pub(crate) use work_context::WorkContext;
