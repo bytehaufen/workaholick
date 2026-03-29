@@ -1,6 +1,8 @@
+mod day_state;
 mod index;
 mod validation;
 
+pub(crate) use day_state::DayState;
 pub(crate) use index::EntryValidationIndex;
 pub(crate) use validation::{
     CommandLabel, DayEntryValidationError, DayEntryValidationIssue, TransitionReason,
@@ -11,7 +13,7 @@ mod tests {
     use super::super::{ActivityKind, Command, Entry, EntryId, EntryPatch, WorkContext};
     use super::*;
     use index::index_entries_by_date;
-    use validation::{DayEntryInfo, State, validate_day_entries};
+    use validation::{DayEntryInfo, validate_day_entries};
 
     use chrono::{Local, NaiveDate, TimeZone};
     use std::collections::BTreeMap;
@@ -304,10 +306,10 @@ mod tests {
             ];
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
-            let prev_state = State::Active(ActivityKind::Work { context: WorkContext::Office });
+            let prev_state = DayState::Active(ActivityKind::Work { context: WorkContext::Office });
 
             let end_state = validate_day_entries(&entries, &prev_state).unwrap();
-            assert_eq!(end_state, State::Idle);
+            assert_eq!(end_state, DayState::Idle);
         }
 
         #[test]
@@ -318,10 +320,11 @@ mod tests {
             ];
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
-            let prev_state = State::Breaking(ActivityKind::Work { context: WorkContext::Office });
+            let prev_state =
+                DayState::Breaking(ActivityKind::Work { context: WorkContext::Office });
 
             let end_state = validate_day_entries(&entries, &prev_state).unwrap();
-            assert_eq!(end_state, State::Idle);
+            assert_eq!(end_state, DayState::Idle);
         }
     }
 
@@ -401,15 +404,15 @@ mod tests {
             let mut expected: BTreeMap<NaiveDate, DayEntryInfo> = BTreeMap::new();
             let day_entries_1 = DayEntryInfo {
                 ids: day1.iter().map(|e| *e.id()).collect(),
-                end_state: State::Active(Default::default()),
+                end_state: DayState::Active(Default::default()),
             };
             let day_entries_2 = DayEntryInfo {
                 ids: day2.iter().map(|e| *e.id()).collect(),
-                end_state: State::Idle,
+                end_state: DayState::Idle,
             };
             let day_entries_3 = DayEntryInfo {
                 ids: day3.iter().map(|e| *e.id()).collect(),
-                end_state: State::Active(Default::default()),
+                end_state: DayState::Active(Default::default()),
             };
             expected.insert(NaiveDate::from_ymd_opt(2026, 1, 11).unwrap(), day_entries_1);
             expected.insert(NaiveDate::from_ymd_opt(2026, 1, 14).unwrap(), day_entries_2);
@@ -445,11 +448,11 @@ mod tests {
             let mut expected: BTreeMap<NaiveDate, DayEntryInfo> = BTreeMap::new();
             let day_entries_1 = DayEntryInfo {
                 ids: day1.iter().map(|e| *e.id()).collect(),
-                end_state: State::Idle,
+                end_state: DayState::Idle,
             };
             let day_entries_2 = DayEntryInfo {
                 ids: day2.iter().map(|e| *e.id()).collect(),
-                end_state: State::Active(Default::default()),
+                end_state: DayState::Active(Default::default()),
             };
             expected.insert(ts1.date_naive(), day_entries_1);
             expected.insert(ts4.date_naive(), day_entries_2);

@@ -2,9 +2,9 @@ use std::{collections::BTreeMap, ops::Bound};
 
 use chrono::NaiveDate;
 
-use crate::domain::{Entry, EntryId, EntryPatch, entry::EntryVersion};
+use crate::domain::{Entry, EntryId, EntryPatch, day_entries::DayState, entry::EntryVersion};
 
-use super::validation::{DayEntryInfo, DayEntryValidationError, State};
+use super::validation::{DayEntryInfo, DayEntryValidationError};
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct EntryValidationIndex {
@@ -179,7 +179,7 @@ pub(super) fn index_entries_by_date(
         });
 
     entries_by_date.values_mut().for_each(|entries| entries.sort_by_key(|entry| entry.sort_key()));
-    let initial_state = State::Idle;
+    let initial_state = DayState::Idle;
 
     let (day_entries, _) = entries_by_date.iter().try_fold(
         (BTreeMap::new(), initial_state),

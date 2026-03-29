@@ -1,25 +1,17 @@
 use std::fmt::{Display, Formatter};
 
-use crate::domain::{ActivityKind, Command, Entry, EntryId};
-
-#[derive(Debug, PartialEq, Clone, Copy, Default)]
-pub(super) enum State {
-    #[default]
-    Idle,
-    Active(ActivityKind),
-    Breaking(ActivityKind),
-}
+use crate::domain::{ActivityKind, Command, Entry, EntryId, day_entries::DayState};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(super) struct DayEntryInfo {
     pub(super) ids: Vec<EntryId>,
-    pub(super) end_state: State,
+    pub(super) end_state: DayState,
 }
 
 impl DayEntryInfo {
     pub(super) fn try_new(
         entries: &Vec<&Entry>,
-        prev_state: &State,
+        prev_state: &DayState,
     ) -> Result<Self, DayEntryValidationError> {
         if entries.is_empty() {
             return Err(DayEntryValidationError::new(DayEntryValidationIssue::EmptyEntries));
@@ -128,20 +120,20 @@ pub(crate) struct DayEntryValidationError {
 }
 
 impl DayEntryValidationError {
-    fn new(issue: DayEntryValidationIssue) -> Self {
+    pub fn new(issue: DayEntryValidationIssue) -> Self {
         Self { issue }
     }
 
-    pub(crate) fn issue(&self) -> DayEntryValidationIssue {
+    pub fn issue(&self) -> DayEntryValidationIssue {
         self.issue
     }
 }
 
 pub(super) fn validate_day_entries(
     entries: &[&Entry],
-    prev_state: &State,
-) -> Result<State, DayEntryValidationError> {
-    use State::*;
+    prev_state: &DayState,
+) -> Result<DayState, DayEntryValidationError> {
+    use DayState::*;
 
     entries.iter().try_fold(*prev_state, |state, entry| match (state, entry.command()) {
         (Idle, Command::Start { kind, .. }) => Ok(Active(*kind)),
