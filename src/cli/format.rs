@@ -4,7 +4,7 @@ mod plain_formatter;
 mod port;
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
 
 use crate::{DayEntryView, config::OutputFormatter};
 
@@ -15,7 +15,7 @@ pub use port::Formatter;
 #[allow(unused_imports)]
 pub use markdown_formatter::MarkdownFormatter;
 
-use crate::domain::{ActivityKind, Command};
+use crate::domain::{ActivityKind, Command, SummaryReport, SummaryWindow};
 
 pub fn print_day(
     formatter: OutputFormatter,
@@ -32,6 +32,31 @@ pub fn print_day(
             #[cfg(feature = "markdown")]
             {
                 let rendered = MarkdownFormatter::format_day(date, entries);
+                MarkdownFormatter::print(&rendered);
+                Ok(())
+            }
+
+            #[cfg(not(feature = "markdown"))]
+            {
+                anyhow::bail!(
+                    "Config sets formatter to `markdown`, but this binary was built without the `markdown` feature"
+                )
+            }
+        }
+    }
+}
+
+pub fn print_summary(formatter: OutputFormatter, report: &SummaryReport) -> Result<()> {
+    match formatter {
+        OutputFormatter::Plain => {
+            let rendered = PlainFormatter::format_summary(report);
+            PlainFormatter::print(&rendered);
+            Ok(())
+        }
+        OutputFormatter::Markdown => {
+            #[cfg(feature = "markdown")]
+            {
+                let rendered = MarkdownFormatter::format_summary(report);
                 MarkdownFormatter::print(&rendered);
                 Ok(())
             }
@@ -81,7 +106,7 @@ fn escape_inline_text(text: &str) -> String {
     text.replace('\\', r"\\").replace('"', r#"\""#)
 }
 
-fn format_activity_kind(kind: &ActivityKind) -> String {
+pub(super) fn format_activity_kind(kind: &ActivityKind) -> String {
     match kind {
         ActivityKind::Work { context } => format!("work ({context})"),
         ActivityKind::Vacation => "vacation".to_string(),
@@ -91,9 +116,201 @@ fn format_activity_kind(kind: &ActivityKind) -> String {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SummaryDisplay {
+    pub title: String,
+    pub rows: Vec<SummaryDisplayRow>,
+    pub total: SummaryDisplayRow,
+    pub weekly_days: Vec<SummaryDayDisplay>,
+    pub target: Option<String>,
+    pub balance: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SummaryDisplayRow {
+    pub activity: String,
+    pub active: String,
+    pub break_time: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SummaryDayDisplay {
+    pub day: String,
+    pub active: String,
+}
+
+pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
+    let mut rows = report
+        .summary()
+        .iter()
+        .filter(|(_, bucket)| bucket.has_time())
+        .map(|(kind, bucket)| {
+            let active_minutes = duration_minutes(bucket.active_time());
+            let break_minutes = duration_minutes(bucket.break_time());
+
+            PreparedSummaryRow {
+                activity: format_activity_kind(&kind),
+                active_minutes,
+                break_minutes,
+            }
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| left.activity.cmp(&right.activity));
+
+    let total_active_minutes = rows.iter().map(|row| row.active_minutes).sum();
+    let total_break_minutes = rows.iter().map(|row| row.break_minutes).sum();
+    let weekly_days = report
+        .weekly_days()
+        .iter()
+        .map(|day| SummaryDayDisplay {
+            day: format_summary_day(day.date()),
+            active: format_summary_duration(day.active_minutes()),
+        })
+        .collect();
+
+    SummaryDisplay {
+        title: format_summary_title(report.window()),
+        rows: rows.into_iter().map(SummaryDisplayRow::from).collect(),
+        total: SummaryDisplayRow::from(PreparedSummaryRow {
+            activity: "TOTAL".to_string(),
+            active_minutes: total_active_minutes,
+            break_minutes: total_break_minutes,
+        }),
+        weekly_days,
+        target: report.weekly_target_minutes().map(format_hour_summary_duration),
+        balance: report.balance_minutes().map(format_signed_hour_summary_duration),
+    }
+}
+
+pub(super) fn format_summary_title(window: SummaryWindow) -> String {
+    format!("Summary {}", format_summary_window(window))
+}
+
+pub(super) fn format_summary_window(window: SummaryWindow) -> String {
+    let start = window.start();
+    let end = window.end();
+
+    if is_midnight(start) && is_midnight(end) && end > start {
+        let start_date = start.date_naive();
+        let end_date = end.date_naive().pred_opt().unwrap_or_else(|| end.date_naive());
+
+        return if start_date == end_date {
+            start_date.to_string()
+        } else {
+            format!("{start_date} .. {end_date}")
+        };
+    }
+
+    let start = format_summary_boundary(start);
+    let end = format_summary_boundary(end);
+
+    if start == end { start } else { format!("{start} .. {end}") }
+}
+
+pub(super) fn format_summary_boundary(boundary: DateTime<Local>) -> String {
+    if is_midnight(boundary) {
+        boundary.date_naive().to_string()
+    } else {
+        boundary.format("%Y-%m-%d %H:%M").to_string()
+    }
+}
+
+pub(super) fn format_summary_day(date: NaiveDate) -> String {
+    format!("{} {}", date.weekday(), date)
+}
+
+pub(super) fn format_summary_duration(total_minutes: i64) -> String {
+    if total_minutes <= 0 {
+        return "0m".to_string();
+    }
+
+    let minutes_per_day = 24 * 60;
+    let days = total_minutes / minutes_per_day;
+    let hours = (total_minutes % minutes_per_day) / 60;
+    let minutes = total_minutes % 60;
+
+    let mut parts = Vec::new();
+    if days > 0 {
+        parts.push(format!("{days}d"));
+    }
+    if hours > 0 {
+        parts.push(format!("{hours}h"));
+    }
+    if minutes > 0 {
+        parts.push(format!("{minutes}m"));
+    }
+
+    if parts.is_empty() { "0m".to_string() } else { parts.join(" ") }
+}
+
+#[cfg(test)]
+pub(super) fn format_signed_summary_duration(total_minutes: i64) -> String {
+    match total_minutes.cmp(&0) {
+        std::cmp::Ordering::Less => format!("-{}", format_summary_duration(-total_minutes)),
+        std::cmp::Ordering::Equal => "0m".to_string(),
+        std::cmp::Ordering::Greater => format!("+{}", format_summary_duration(total_minutes)),
+    }
+}
+
+fn format_hour_summary_duration(total_minutes: i64) -> String {
+    if total_minutes <= 0 {
+        return "0m".to_string();
+    }
+
+    let hours = total_minutes / 60;
+    let minutes = total_minutes % 60;
+
+    let mut parts = Vec::new();
+    if hours > 0 {
+        parts.push(format!("{hours}h"));
+    }
+    if minutes > 0 {
+        parts.push(format!("{minutes}m"));
+    }
+
+    if parts.is_empty() { "0m".to_string() } else { parts.join(" ") }
+}
+
+fn format_signed_hour_summary_duration(total_minutes: i64) -> String {
+    match total_minutes.cmp(&0) {
+        std::cmp::Ordering::Less => format!("-{}", format_hour_summary_duration(-total_minutes)),
+        std::cmp::Ordering::Equal => "0m".to_string(),
+        std::cmp::Ordering::Greater => format!("+{}", format_hour_summary_duration(total_minutes)),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreparedSummaryRow {
+    activity: String,
+    active_minutes: i64,
+    break_minutes: i64,
+}
+
+impl From<PreparedSummaryRow> for SummaryDisplayRow {
+    fn from(row: PreparedSummaryRow) -> Self {
+        Self {
+            activity: row.activity,
+            active: format_summary_duration(row.active_minutes),
+            break_time: format_summary_duration(row.break_minutes),
+        }
+    }
+}
+
+fn duration_minutes(duration: chrono::TimeDelta) -> i64 {
+    duration.num_minutes().max(0)
+}
+
+fn is_midnight(boundary: DateTime<Local>) -> bool {
+    boundary.hour() == 0 && boundary.minute() == 0 && boundary.second() == 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{
+        ActivityKind, SummaryDay, SummaryReport, SummaryWindow, WorkContext, summary,
+    };
+    use chrono::{Local, TimeZone};
 
     #[test]
     fn format_day_command_includes_optional_description() {
@@ -106,5 +323,117 @@ mod tests {
             format_day_command(&command),
             "END   \"Implement day output\" (handles markdown fallback)"
         );
+    }
+
+    #[test]
+    fn format_summary_duration_uses_compact_day_hour_minute_units() {
+        assert_eq!(format_summary_duration(0), "0m");
+        assert_eq!(format_summary_duration(12), "12m");
+        assert_eq!(format_summary_duration(4 * 60 + 12), "4h 12m");
+        assert_eq!(format_summary_duration(2 * 24 * 60 + 4 * 60 + 12), "2d 4h 12m");
+        assert_eq!(format_summary_duration(24 * 60), "1d");
+    }
+
+    #[test]
+    fn format_signed_summary_duration_includes_sign() {
+        assert_eq!(format_signed_summary_duration(-(4 * 60 + 12)), "-4h 12m");
+        assert_eq!(format_signed_summary_duration(0), "0m");
+        assert_eq!(format_signed_summary_duration(4 * 60 + 12), "+4h 12m");
+    }
+
+    #[test]
+    fn format_hour_summary_duration_keeps_large_weekly_values_in_hours() {
+        assert_eq!(format_hour_summary_duration(40 * 60), "40h");
+        assert_eq!(format_signed_hour_summary_duration(-(34 * 60 + 15)), "-34h 15m");
+        assert_eq!(format_signed_hour_summary_duration(0), "0m");
+        assert_eq!(format_signed_hour_summary_duration(34 * 60 + 15), "+34h 15m");
+    }
+
+    #[test]
+    fn format_summary_window_uses_inclusive_dates_for_full_day_ranges() {
+        let window = SummaryWindow::new(ts(10, 0, 0), ts(13, 0, 0));
+
+        assert_eq!(format_summary_window(window), "2026-01-10 .. 2026-01-12");
+    }
+
+    #[test]
+    fn format_summary_window_keeps_partial_boundaries_exact() {
+        let window = SummaryWindow::new(ts(10, 0, 0), ts(12, 14, 15));
+
+        assert_eq!(format_summary_window(window), "2026-01-10 .. 2026-01-12 14:15");
+    }
+
+    #[test]
+    fn prepare_summary_sorts_rows_and_builds_total() {
+        let work = ActivityKind::Work { context: WorkContext::Home };
+        let holiday = ActivityKind::Holiday;
+        let window = SummaryWindow::new(ts(12, 0, 0), ts(15, 0, 0));
+        let entries = vec![
+            day_entry(1, ts(12, 0, 0), Command::Start { kind: work }),
+            day_entry(2, ts(12, 2, 15), Command::End { title: "done".into(), description: None }),
+            day_entry(3, ts(13, 4, 0), Command::Start { kind: holiday }),
+            day_entry(4, ts(13, 6, 0), Command::BreakStart),
+            day_entry(5, ts(13, 6, 30), Command::BreakEnd { description: None }),
+            day_entry(6, ts(13, 8, 0), Command::End { title: "done".into(), description: None }),
+        ];
+        let report = SummaryReport::with_weekly_balance(
+            window,
+            summary(&entries, window).unwrap(),
+            40 * 60,
+            vec![
+                SummaryDay::new(ts(12, 0, 0).date_naive(), 8 * 60),
+                SummaryDay::new(ts(13, 0, 0).date_naive(), 6 * 60),
+                SummaryDay::new(ts(14, 0, 0).date_naive(), 0),
+            ],
+        );
+
+        let display = prepare_summary(&report);
+
+        assert_eq!(display.title, "Summary 2026-01-12 .. 2026-01-14");
+        assert_eq!(
+            display.rows,
+            vec![
+                SummaryDisplayRow {
+                    activity: "holiday".into(),
+                    active: "3h 30m".into(),
+                    break_time: "30m".into(),
+                },
+                SummaryDisplayRow {
+                    activity: "work (home)".into(),
+                    active: "2h 15m".into(),
+                    break_time: "0m".into(),
+                },
+            ]
+        );
+        assert_eq!(
+            display.total,
+            SummaryDisplayRow {
+                activity: "TOTAL".into(),
+                active: "5h 45m".into(),
+                break_time: "30m".into(),
+            }
+        );
+        assert_eq!(
+            display.weekly_days,
+            vec![
+                SummaryDayDisplay { day: "Mon 2026-01-12".into(), active: "8h".into() },
+                SummaryDayDisplay { day: "Tue 2026-01-13".into(), active: "6h".into() },
+                SummaryDayDisplay { day: "Wed 2026-01-14".into(), active: "0m".into() },
+            ]
+        );
+        assert_eq!(display.target, Some("40h".into()));
+        assert_eq!(display.balance, Some("-34h 15m".into()));
+    }
+
+    fn ts(day: u32, hour: u32, minute: u32) -> chrono::DateTime<Local> {
+        Local.with_ymd_and_hms(2026, 1, day, hour, minute, 0).unwrap()
+    }
+
+    fn day_entry(
+        id: u64,
+        timestamp: chrono::DateTime<Local>,
+        command: Command,
+    ) -> crate::DayEntryView {
+        crate::DayEntryView { id: id.into(), timestamp, command }
     }
 }

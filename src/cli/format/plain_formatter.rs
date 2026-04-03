@@ -1,8 +1,9 @@
 use chrono::NaiveDate;
 
 use super::Formatter;
-use super::format_day_command;
+use super::{format_day_command, prepare_summary};
 use crate::DayEntryView;
+use crate::domain::SummaryReport;
 
 pub struct PlainFormatter;
 
@@ -44,6 +45,91 @@ impl Formatter for PlainFormatter {
 
         output
     }
+
+    fn format_summary(report: &SummaryReport) -> String {
+        let summary = prepare_summary(report);
+        let mut output = String::new();
+        output.push_str(&summary.title);
+        output.push_str("\n\n");
+
+        if summary.rows.is_empty() {
+            output.push_str("No tracked time.\n");
+        } else {
+            let activity_width = summary
+                .rows
+                .iter()
+                .chain(std::iter::once(&summary.total))
+                .map(|row| row.activity.len())
+                .max()
+                .unwrap_or("Activity".len())
+                .max("Activity".len());
+            let active_width = summary
+                .rows
+                .iter()
+                .chain(std::iter::once(&summary.total))
+                .map(|row| row.active.len())
+                .max()
+                .unwrap_or("Active".len())
+                .max("Active".len());
+            let break_width = summary
+                .rows
+                .iter()
+                .chain(std::iter::once(&summary.total))
+                .map(|row| row.break_time.len())
+                .max()
+                .unwrap_or("Break".len())
+                .max("Break".len());
+            output.push_str(&format!(
+                "{:<activity_width$}  {:>active_width$}  {:>break_width$}\n",
+                "Activity", "Active", "Break",
+            ));
+            output.push_str(&format!(
+                "{:-<activity_width$}  {:-<active_width$}  {:-<break_width$}\n",
+                "", "", "",
+            ));
+
+            for row in summary.rows.iter().chain(std::iter::once(&summary.total)) {
+                output.push_str(&format!(
+                    "{:<activity_width$}  {:>active_width$}  {:>break_width$}\n",
+                    row.activity, row.active, row.break_time,
+                ));
+            }
+        }
+
+        if !summary.weekly_days.is_empty() {
+            output.push('\n');
+
+            let day_width = summary
+                .weekly_days
+                .iter()
+                .map(|row| row.day.len())
+                .max()
+                .unwrap_or("Day".len())
+                .max("Day".len());
+            let worked_width = summary
+                .weekly_days
+                .iter()
+                .map(|row| row.active.len())
+                .max()
+                .unwrap_or("Worked".len())
+                .max("Worked".len());
+            output.push_str(&format!("{:<day_width$}  {:>worked_width$}\n", "Day", "Worked"));
+            output.push_str(&format!("{:-<day_width$}  {:-<worked_width$}\n", "", ""));
+
+            for row in &summary.weekly_days {
+                output
+                    .push_str(&format!("{:<day_width$}  {:>worked_width$}\n", row.day, row.active));
+            }
+        }
+
+        if let (Some(target), Some(balance)) = (&summary.target, &summary.balance) {
+            output.push('\n');
+            output.push_str(&format!("Week Target: {}\n", target));
+            output.push_str(&format!("Balance:     {}\n", balance));
+        }
+
+        output
+    }
 }
 
 fn format_day_entry(entry: &DayEntryView, id_width: usize) -> String {
@@ -56,7 +142,9 @@ fn format_day_entry(entry: &DayEntryView, id_width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ActivityKind, Command};
+    use crate::domain::{
+        ActivityKind, Command, SummaryDay, SummaryReport, SummaryWindow, WorkContext, summary,
+    };
     use chrono::{Local, TimeZone};
 
     #[test]
@@ -112,5 +200,114 @@ mod tests {
 09:30  18446744073709551615  START work (home)
 "#
         );
+    }
+
+    #[test]
+    fn plain_format_summary_renders_sorted_rows_and_totals() {
+        let report = summary_report(vec![
+            day_entry(
+                1,
+                Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
+                Command::Start { kind: ActivityKind::Work { context: WorkContext::Home } },
+            ),
+            day_entry(
+                2,
+                Local.with_ymd_and_hms(2026, 1, 12, 2, 15, 0).unwrap(),
+                Command::End { title: "done".into(), description: None },
+            ),
+            day_entry(
+                3,
+                Local.with_ymd_and_hms(2026, 1, 13, 4, 0, 0).unwrap(),
+                Command::Start { kind: ActivityKind::Holiday },
+            ),
+            day_entry(
+                4,
+                Local.with_ymd_and_hms(2026, 1, 13, 6, 0, 0).unwrap(),
+                Command::BreakStart,
+            ),
+            day_entry(
+                5,
+                Local.with_ymd_and_hms(2026, 1, 13, 6, 30, 0).unwrap(),
+                Command::BreakEnd { description: None },
+            ),
+            day_entry(
+                6,
+                Local.with_ymd_and_hms(2026, 1, 13, 8, 0, 0).unwrap(),
+                Command::End { title: "done".into(), description: None },
+            ),
+        ]);
+
+        let rendered = PlainFormatter::format_summary(&report);
+
+        assert_eq!(
+            &rendered,
+            r#"Summary 2026-01-12 .. 2026-01-14
+
+Activity     Active  Break
+-----------  ------  -----
+holiday      3h 30m    30m
+work (home)  2h 15m     0m
+TOTAL        5h 45m    30m
+
+Day             Worked
+--------------  ------
+Mon 2026-01-12      8h
+Tue 2026-01-13      6h
+Wed 2026-01-14      0m
+
+Week Target: 40h
+Balance:     -34h 15m
+"#
+        );
+    }
+
+    #[test]
+    fn plain_format_summary_prints_empty_state() {
+        let window = SummaryWindow::new(
+            Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
+            Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
+        );
+        let report = SummaryReport::new(window, summary(&[], window).unwrap());
+
+        let rendered = PlainFormatter::format_summary(&report);
+
+        assert_eq!(
+            &rendered,
+            r#"Summary 2026-01-10
+
+No tracked time.
+"#
+        );
+    }
+
+    fn summary_report(entries: Vec<DayEntryView>) -> SummaryReport {
+        let window = SummaryWindow::new(
+            Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
+            Local.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap(),
+        );
+
+        SummaryReport::with_weekly_balance(
+            window,
+            summary(&entries, window).unwrap(),
+            40 * 60,
+            vec![
+                SummaryDay::new(
+                    Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap().date_naive(),
+                    8 * 60,
+                ),
+                SummaryDay::new(
+                    Local.with_ymd_and_hms(2026, 1, 13, 0, 0, 0).unwrap().date_naive(),
+                    6 * 60,
+                ),
+                SummaryDay::new(
+                    Local.with_ymd_and_hms(2026, 1, 14, 0, 0, 0).unwrap().date_naive(),
+                    0,
+                ),
+            ],
+        )
+    }
+
+    fn day_entry(id: u64, timestamp: chrono::DateTime<Local>, command: Command) -> DayEntryView {
+        DayEntryView { id: id.into(), timestamp, command }
     }
 }

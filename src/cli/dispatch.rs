@@ -90,9 +90,8 @@ fn run_inner<S: EntryReader + EntryWriter>(
         }
 
         CliCommand::Summary(summary_args) => {
-            let _summary = app.summary(summary_args.scope())?;
-
-            Ok(())
+            let report = app.summary(summary_args.scope())?;
+            format::print_summary(formatter, &report)
         }
     }
 }

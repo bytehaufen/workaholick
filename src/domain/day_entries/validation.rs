@@ -129,17 +129,18 @@ impl DayEntryValidationError {
     }
 }
 
-pub(super) fn validate_day_entries(
-    entries: &[&Entry],
-    prev_state: &DayState,
+pub(crate) fn transition_day_state(
+    state: DayState,
+    entry_id: EntryId,
+    command: &Command,
 ) -> Result<DayState, DayEntryValidationError> {
     use DayState::*;
 
-    entries.iter().try_fold(*prev_state, |state, entry| match (state, entry.command()) {
+    match (state, command) {
         (Idle, Command::Start { kind, .. }) => Ok(Active(*kind)),
         (Idle, command) => {
             Err(DayEntryValidationError::new(DayEntryValidationIssue::InvalidTransition {
-                entry_id: *entry.id(),
+                entry_id,
                 attempted: command.into(),
                 reason: TransitionReason::WhileIdle,
             }))
@@ -154,7 +155,7 @@ pub(super) fn validate_day_entries(
 
         (Active(activity_kind), Command::Start { kind }) => {
             Err(DayEntryValidationError::new(DayEntryValidationIssue::InvalidTransition {
-                entry_id: *entry.id(),
+                entry_id,
                 attempted: CommandLabel::StartWithKind(*kind),
                 reason: TransitionReason::AlreadyActive(activity_kind),
             }))
@@ -162,7 +163,7 @@ pub(super) fn validate_day_entries(
 
         (Active(_), Command::BreakEnd { .. }) => {
             Err(DayEntryValidationError::new(DayEntryValidationIssue::InvalidTransition {
-                entry_id: *entry.id(),
+                entry_id,
                 attempted: CommandLabel::BreakEnd,
                 reason: TransitionReason::NotBreaking,
             }))
@@ -170,18 +171,27 @@ pub(super) fn validate_day_entries(
 
         (Breaking(_), Command::Start { .. } | Command::End { .. } | Command::Log { .. }) => {
             Err(DayEntryValidationError::new(DayEntryValidationIssue::InvalidTransition {
-                entry_id: *entry.id(),
-                attempted: entry.command().into(),
+                entry_id,
+                attempted: command.into(),
                 reason: TransitionReason::WhileBreaking,
             }))
         }
 
         (Breaking(_), Command::BreakStart) => {
             Err(DayEntryValidationError::new(DayEntryValidationIssue::InvalidTransition {
-                entry_id: *entry.id(),
+                entry_id,
                 attempted: CommandLabel::BreakStart,
                 reason: TransitionReason::AlreadyBreaking,
             }))
         }
+    }
+}
+
+pub(super) fn validate_day_entries(
+    entries: &[&Entry],
+    prev_state: &DayState,
+) -> Result<DayState, DayEntryValidationError> {
+    entries.iter().try_fold(*prev_state, |state, entry| {
+        transition_day_state(state, *entry.id(), entry.command())
     })
 }

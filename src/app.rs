@@ -3,7 +3,8 @@ use chrono::{DateTime, Datelike, Days, Local, NaiveDate, TimeZone};
 use crate::{
     config::Config,
     domain::{
-        Command, Entry, EntryId, EntryPatch, Period, Summary, SummaryScope, SummaryWindow, summary,
+        Command, Entry, EntryId, EntryPatch, Period, SummaryDay, SummaryReport, SummaryScope,
+        SummaryWindow, summary,
     },
     store::{EntryReader, EntryWriter, ValidatedEntryStore},
 };
@@ -103,28 +104,38 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
         self.v_store.iter().map(Entry::timestamp).map(DateTime::date_naive).last()
     }
 
-    pub fn summary(&self, scope: SummaryScope) -> anyhow::Result<Summary> {
-        let Some(window) = self.summary_window(scope) else {
-            return Ok(Summary::default());
-        };
-
+    pub fn summary(&self, scope: SummaryScope) -> anyhow::Result<SummaryReport> {
+        let window = self.summary_window(scope.clone())?;
         let entries = self.collect_entries(|entry| *entry.timestamp() < window.end());
+        let summary = summary(&entries, window)?;
 
-        summary(&entries, window)
+        match scope {
+            SummaryScope::Period(Period::Week) => {
+                let weekly_days = weekly_summary_days(&entries, window)?;
+                Ok(SummaryReport::with_weekly_balance(
+                    window,
+                    summary,
+                    self.config.weekly_target_minutes(),
+                    weekly_days,
+                ))
+            }
+            _ => Ok(SummaryReport::new(window, summary)),
+        }
     }
 
-    fn collect_entries<F: Fn(&&Entry) -> bool>(&self, predicate: F) -> Vec<DayEntryView> {
-        self.v_store.iter().filter(predicate).map(DayEntryView::from).collect()
+    fn collect_entries<F: Fn(&Entry) -> bool>(&self, predicate: F) -> Vec<DayEntryView> {
+        self.v_store.iter().filter(|entry| predicate(entry)).map(DayEntryView::from).collect()
     }
 
-    fn summary_window(&self, scope: SummaryScope) -> Option<SummaryWindow> {
+    fn summary_window(&self, scope: SummaryScope) -> anyhow::Result<SummaryWindow> {
         let now = self.clock.now();
         let today = self.clock.today();
 
         let window = match scope {
             SummaryScope::Period(Period::Today) => SummaryWindow::new(start_of_day(today), now),
             SummaryScope::Period(Period::LastDay) => {
-                let date = self.last_date()?;
+                let date =
+                    self.last_date().ok_or_else(|| anyhow::anyhow!("There are no entries."))?;
 
                 day_window(date, now)
             }
@@ -158,13 +169,16 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
                 date_window(start, end, now)
             }
             SummaryScope::Range { from, to } => {
+                anyhow::ensure!(from <= to, "Summary start date must be on or before end date.");
                 let end = next_day(to);
 
                 date_window(from, end, now)
             }
         };
 
-        (!window.is_empty()).then_some(window)
+        anyhow::ensure!(!window.is_empty(), "Summary range is empty.");
+
+        Ok(window)
     }
 }
 
@@ -182,6 +196,30 @@ fn day_window(date: NaiveDate, now: DateTime<Local>) -> SummaryWindow {
 
 fn date_window(start: NaiveDate, end: NaiveDate, now: DateTime<Local>) -> SummaryWindow {
     SummaryWindow::new(start_of_day(start), start_of_day(end).min(now))
+}
+
+fn weekly_summary_days(
+    entries: &[DayEntryView],
+    window: SummaryWindow,
+) -> anyhow::Result<Vec<SummaryDay>> {
+    let mut date = window.start().date_naive();
+    let last_date = window.end().date_naive();
+    let mut days = Vec::new();
+
+    while date <= last_date {
+        let day_start = start_of_day(date).max(window.start());
+        let day_end = start_of_day(next_day(date)).min(window.end());
+
+        if day_end > day_start {
+            let day_window = SummaryWindow::new(day_start, day_end);
+            let day_summary = summary(entries, day_window)?;
+            days.push(SummaryDay::new(date, day_summary.total_active_minutes()));
+        }
+
+        date = next_day(date);
+    }
+
+    Ok(days)
 }
 
 #[cfg(test)]
@@ -405,6 +443,126 @@ mod tests {
     }
 
     #[test]
+    fn summary_rejects_reversed_explicit_range() {
+        let now = ts(15, 12);
+        let app = App::new_with_clock(
+            Config::default(),
+            FakeStore::default(),
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let err = app.summary(SummaryScope::Range { from: date(12), to: date(10) }).unwrap_err();
+
+        assert_eq!(err.to_string(), "Summary start date must be on or before end date.");
+    }
+
+    #[test]
+    fn summary_rejects_future_explicit_range_without_overlap() {
+        let now = ts(15, 12);
+        let store = FakeStore::default().seed(vec![(
+            1.into(),
+            EntryPatch::new(
+                ts(10, 9),
+                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
+            ),
+        )]);
+        let app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let err = app.summary(SummaryScope::Range { from: date(16), to: date(17) }).unwrap_err();
+
+        assert_eq!(err.to_string(), "Summary range is empty.");
+    }
+
+    #[test]
+    fn weekly_summary_uses_configured_weekly_target_and_day_breakdown() {
+        let now = ts(18, 18);
+        let kind = ActivityKind::Work { context: WorkContext::Office };
+        let store = FakeStore::default().seed(vec![
+            (1.into(), EntryPatch::new(ts(12, 8), Command::Start { kind })),
+            (
+                2.into(),
+                EntryPatch::new(
+                    ts(12, 16),
+                    Command::End { title: "done".into(), description: None },
+                ),
+            ),
+            (3.into(), EntryPatch::new(ts(13, 8), Command::Start { kind })),
+            (
+                4.into(),
+                EntryPatch::new(
+                    ts(13, 16),
+                    Command::End { title: "done".into(), description: None },
+                ),
+            ),
+            (5.into(), EntryPatch::new(ts(14, 8), Command::Start { kind })),
+            (
+                6.into(),
+                EntryPatch::new(
+                    ts(14, 16),
+                    Command::End { title: "done".into(), description: None },
+                ),
+            ),
+            (7.into(), EntryPatch::new(ts(15, 8), Command::Start { kind })),
+            (
+                8.into(),
+                EntryPatch::new(
+                    ts(15, 16),
+                    Command::End { title: "done".into(), description: None },
+                ),
+            ),
+            (9.into(), EntryPatch::new(ts(16, 8), Command::Start { kind })),
+            (
+                10.into(),
+                EntryPatch::new(
+                    ts(16, 16),
+                    Command::End { title: "done".into(), description: None },
+                ),
+            ),
+        ]);
+        let mut config = Config::default();
+        config.weekly_target_hours = 40.0;
+        let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
+            .unwrap();
+
+        let report = app.summary(SummaryScope::Period(Period::Week)).unwrap();
+
+        assert_eq!(report.weekly_target_minutes(), Some(40 * 60));
+        assert_eq!(report.worked_minutes(), 40 * 60);
+        assert_eq!(report.balance_minutes(), Some(0));
+        assert_eq!(
+            report.weekly_days().iter().map(|day| day.active_minutes()).collect::<Vec<_>>(),
+            vec![8 * 60, 8 * 60, 8 * 60, 8 * 60, 8 * 60, 0, 0]
+        );
+    }
+
+    #[test]
+    fn non_week_summary_does_not_include_weekly_target() {
+        let now = ts(12, 12);
+        let kind = ActivityKind::Work { context: WorkContext::Office };
+        let store = FakeStore::default()
+            .seed(vec![(1.into(), EntryPatch::new(ts(12, 8), Command::Start { kind }))]);
+        let app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let report = app.summary(SummaryScope::Range { from: date(12), to: date(12) }).unwrap();
+
+        assert_eq!(report.weekly_target_minutes(), None);
+        assert_eq!(report.worked_minutes(), 4 * 60);
+        assert_eq!(report.balance_minutes(), None);
+        assert!(report.weekly_days().is_empty());
+    }
+
+    #[test]
     fn summary_window_for_last_day_uses_last_logged_date() {
         let now = ts(15, 12);
         let store = FakeStore::default().seed(vec![(
@@ -440,10 +598,10 @@ mod tests {
         )
         .unwrap();
 
-        let summary = app.summary(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
+        let report = app.summary(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
 
-        assert_eq!(summary.active_time(kind), chrono::TimeDelta::hours(16));
-        assert_eq!(summary.break_time(kind), chrono::TimeDelta::zero());
+        assert_eq!(report.summary().active_time(kind), chrono::TimeDelta::hours(16));
+        assert_eq!(report.summary().break_time(kind), chrono::TimeDelta::zero());
     }
 
     #[test]
@@ -467,9 +625,9 @@ mod tests {
         )
         .unwrap();
 
-        let summary = app.summary(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
+        let report = app.summary(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
 
-        assert_eq!(summary.active_time(kind), chrono::TimeDelta::hours(10));
-        assert_eq!(summary.break_time(kind), chrono::TimeDelta::zero());
+        assert_eq!(report.summary().active_time(kind), chrono::TimeDelta::hours(10));
+        assert_eq!(report.summary().break_time(kind), chrono::TimeDelta::zero());
     }
 }

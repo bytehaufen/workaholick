@@ -6,6 +6,7 @@ pub(crate) use day_state::DayState;
 pub(crate) use index::EntryValidationIndex;
 pub(crate) use validation::{
     CommandLabel, DayEntryValidationError, DayEntryValidationIssue, TransitionReason,
+    transition_day_state,
 };
 
 #[cfg(test)]

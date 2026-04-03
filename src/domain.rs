@@ -15,5 +15,5 @@ pub(crate) use day_entries::{
 };
 pub(crate) use entry::{Entry, EntryId, EntryPatch};
 pub(crate) use period::Period;
-pub(crate) use summary::{Summary, SummaryScope, SummaryWindow, summary};
+pub(crate) use summary::{SummaryDay, SummaryReport, SummaryScope, SummaryWindow, summary};
 pub(crate) use work_context::WorkContext;
