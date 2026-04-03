@@ -191,8 +191,8 @@ pub enum PeriodArg {
     #[value(alias = "m")]
     Month,
 
-    /// This month
-    #[value(alias = "m")]
+    /// This year
+    #[value(alias = "y")]
     Year,
 }
 
