@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, arg};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 use crate::domain::{ActivityKind, Period, SummaryScope, WorkContext};
@@ -149,6 +149,16 @@ pub struct SummaryArgs {
     #[arg(value_enum, conflicts_with_all = ["from", "to"])]
     pub period: Option<PeriodArg>,
 
+    /// Relative period offset (zero or negative), e.g. `-1` for the previous period
+    #[arg(
+        value_name = "OFFSET",
+        requires = "period",
+        conflicts_with_all = ["from", "to"],
+        allow_hyphen_values = true,
+        value_parser = parse_summary_period_offset
+    )]
+    pub offset: Option<i64>,
+
     /// Start date for an explicit range (YYYY-MM-DD)
     #[arg(long, requires = "to", conflicts_with = "period")]
     pub from: Option<NaiveDate>,
@@ -160,12 +170,24 @@ pub struct SummaryArgs {
 
 impl SummaryArgs {
     pub fn scope(&self) -> SummaryScope {
-        match (self.period, self.from, self.to) {
-            (Some(period), None, None) => SummaryScope::Period(Period::from(period)),
-            (None, Some(from), Some(to)) => SummaryScope::Range { from, to },
-            (None, None, None) => SummaryScope::Period(Period::Today),
+        match (self.period, self.offset, self.from, self.to) {
+            (Some(period), offset, None, None) => {
+                SummaryScope::Period { period: Period::from(period), offset: offset.unwrap_or(0) }
+            }
+            (None, None, Some(from), Some(to)) => SummaryScope::Range { from, to },
+            (None, None, None, None) => SummaryScope::Period { period: Period::Day, offset: 0 },
             _ => unreachable!("clap validation should prevent invalid summary arguments"),
         }
+    }
+}
+
+fn parse_summary_period_offset(value: &str) -> Result<i64, String> {
+    let offset = value.parse::<i64>().map_err(|_| format!("invalid integer: {value}"))?;
+
+    if offset > 0 {
+        Err("summary period offset must be zero or negative".to_string())
+    } else {
+        Ok(offset)
     }
 }
 
@@ -173,11 +195,7 @@ impl SummaryArgs {
 pub enum PeriodArg {
     /// Today (default)
     #[value(alias = "t")]
-    Today,
-
-    /// Previous logged day
-    #[value(alias = "l")]
-    LastDay,
+    Day,
 
     /// This week
     #[value(alias = "w")]
@@ -195,8 +213,7 @@ pub enum PeriodArg {
 impl From<PeriodArg> for Period {
     fn from(p: PeriodArg) -> Self {
         match p {
-            PeriodArg::Today => Period::Today,
-            PeriodArg::LastDay => Period::LastDay,
+            PeriodArg::Day => Period::Day,
             PeriodArg::Week => Period::Week,
             PeriodArg::Month => Period::Month,
             PeriodArg::Year => Period::Year,
@@ -206,4 +223,39 @@ impl From<PeriodArg> for Period {
 
 pub fn parse() -> Cli {
     Cli::parse()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn summary_scope_defaults_to_current_day() {
+        let cli = Cli::try_parse_from(["workaholick", "summary"]).unwrap();
+
+        let CliCommand::Summary(args) = cli.command else {
+            panic!("expected summary command");
+        };
+
+        assert_eq!(args.scope(), SummaryScope::Period { period: Period::Day, offset: 0 });
+    }
+
+    #[test]
+    fn summary_scope_parses_negative_period_offset() {
+        let cli = Cli::try_parse_from(["workaholick", "summary", "week", "-1"]).unwrap();
+
+        let CliCommand::Summary(args) = cli.command else {
+            panic!("expected summary command");
+        };
+
+        assert_eq!(args.scope(), SummaryScope::Period { period: Period::Week, offset: -1 });
+    }
+
+    #[test]
+    fn summary_scope_rejects_positive_period_offset() {
+        let err = Cli::try_parse_from(["workaholick", "summary", "month", "1"]).unwrap_err();
+
+        assert!(err.to_string().contains("summary period offset must be zero or negative"));
+    }
 }

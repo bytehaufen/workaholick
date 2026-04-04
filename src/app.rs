@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Days, Local, NaiveDate, TimeZone};
+use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate, TimeZone};
 
 use crate::{
     config::Config,
@@ -116,7 +116,7 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
         let summary = summary(&entries, window)?;
 
         match scope {
-            SummaryScope::Period(Period::Week) => {
+            SummaryScope::Period { period: Period::Week, .. } => {
                 let weekly_days = weekly_summary_days(&entries, window)?;
                 Ok(SummaryReport::with_weekly_balance(
                     window,
@@ -138,41 +138,8 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
         let today = self.clock.today();
 
         let window = match scope {
-            SummaryScope::Period(Period::Today) => SummaryWindow::new(start_of_day(today), now),
-            SummaryScope::Period(Period::LastDay) => {
-                let date =
-                    self.last_date().ok_or_else(|| anyhow::anyhow!("There are no entries."))?;
-
-                day_window(date, now)
-            }
-            SummaryScope::Period(Period::Week) => {
-                let start = today
-                    .checked_sub_days(Days::new(today.weekday().num_days_from_monday().into()))
-                    .expect("week start should be representable");
-                let end = start.checked_add_days(Days::new(7)).expect("week end should exist");
-
-                date_window(start, end, now)
-            }
-            SummaryScope::Period(Period::Month) => {
-                let start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
-                    .expect("month start should be valid");
-                let (year, month) = if today.month() == 12 {
-                    (today.year() + 1, 1)
-                } else {
-                    (today.year(), today.month() + 1)
-                };
-                let end = NaiveDate::from_ymd_opt(year, month, 1)
-                    .expect("next month start should be valid");
-
-                date_window(start, end, now)
-            }
-            SummaryScope::Period(Period::Year) => {
-                let start = NaiveDate::from_ymd_opt(today.year(), 1, 1)
-                    .expect("year start should be valid");
-                let end = NaiveDate::from_ymd_opt(today.year() + 1, 1, 1)
-                    .expect("next year start should be valid");
-
-                date_window(start, end, now)
+            SummaryScope::Period { period, offset } => {
+                period_summary_window(period, offset, today, now)?
             }
             SummaryScope::Range { from, to } => {
                 anyhow::ensure!(from <= to, "Summary start date must be on or before end date.");
@@ -196,8 +163,61 @@ fn next_day(date: NaiveDate) -> NaiveDate {
     date.succ_opt().expect("summary range end should have a successor day")
 }
 
-fn day_window(date: NaiveDate, now: DateTime<Local>) -> SummaryWindow {
-    date_window(date, next_day(date), now)
+fn period_summary_window(
+    period: Period,
+    offset: i64,
+    today: NaiveDate,
+    now: DateTime<Local>,
+) -> anyhow::Result<SummaryWindow> {
+    anyhow::ensure!(offset <= 0, "Summary period offset must be zero or negative.");
+
+    let window = match period {
+        Period::Day => {
+            let days_back = offset.unsigned_abs();
+            let start =
+                today.checked_sub_days(Days::new(days_back)).context("day offset is too large")?;
+
+            date_window(start, next_day(start), now)
+        }
+        Period::Week => {
+            let current_week_start = today
+                .checked_sub_days(Days::new(today.weekday().num_days_from_monday().into()))
+                .expect("week start should be representable");
+            let weeks_back = offset.unsigned_abs();
+            let days_back = weeks_back.checked_mul(7).context("week offset is too large")?;
+            let start = current_week_start
+                .checked_sub_days(Days::new(days_back))
+                .context("week offset is too large")?;
+            let end = start.checked_add_days(Days::new(7)).expect("week end should exist");
+
+            date_window(start, end, now)
+        }
+        Period::Month => {
+            let current_month_start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
+                .expect("month start should be valid");
+            let months_back =
+                u32::try_from(offset.unsigned_abs()).context("month offset is too large")?;
+            let start = current_month_start
+                .checked_sub_months(Months::new(months_back))
+                .context("month offset is too large")?;
+            let end =
+                start.checked_add_months(Months::new(1)).expect("next month start should be valid");
+
+            date_window(start, end, now)
+        }
+        Period::Year => {
+            let years_back =
+                i32::try_from(offset.unsigned_abs()).context("year offset is too large")?;
+            let year = today.year().checked_sub(years_back).context("year offset is too large")?;
+            let start = NaiveDate::from_ymd_opt(year, 1, 1).expect("year start should be valid");
+            let end =
+                NaiveDate::from_ymd_opt(year + 1, 1, 1).expect("next year start should be valid");
+
+            date_window(start, end, now)
+        }
+    };
+
+    Ok(window)
 }
 
 fn date_window(start: NaiveDate, end: NaiveDate, now: DateTime<Local>) -> SummaryWindow {
@@ -449,6 +469,91 @@ mod tests {
     }
 
     #[test]
+    fn summary_window_for_previous_day_uses_previous_day() {
+        let now = ts(15, 12);
+        let app = App::new_with_clock(
+            Config::default(),
+            FakeStore::default(),
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let window =
+            app.summary_window(SummaryScope::Period { period: Period::Day, offset: -1 }).unwrap();
+
+        assert_eq!(window.start(), ts(14, 0));
+        assert_eq!(window.end(), ts(15, 0));
+    }
+
+    #[test]
+    fn summary_window_for_previous_week_uses_previous_calendar_week() {
+        let now = ts(15, 12);
+        let app = App::new_with_clock(
+            Config::default(),
+            FakeStore::default(),
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let window =
+            app.summary_window(SummaryScope::Period { period: Period::Week, offset: -1 }).unwrap();
+
+        assert_eq!(window.start(), ts(5, 0));
+        assert_eq!(window.end(), ts(12, 0));
+    }
+
+    #[test]
+    fn summary_window_for_previous_month_uses_previous_calendar_month() {
+        let now = ts(15, 12);
+        let app = App::new_with_clock(
+            Config::default(),
+            FakeStore::default(),
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let window =
+            app.summary_window(SummaryScope::Period { period: Period::Month, offset: -1 }).unwrap();
+
+        assert_eq!(window.start(), Local.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap());
+        assert_eq!(window.end(), Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap());
+    }
+
+    #[test]
+    fn summary_window_for_previous_year_uses_previous_calendar_year() {
+        let now = ts(15, 12);
+        let app = App::new_with_clock(
+            Config::default(),
+            FakeStore::default(),
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let window =
+            app.summary_window(SummaryScope::Period { period: Period::Year, offset: -1 }).unwrap();
+
+        assert_eq!(window.start(), Local.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap());
+        assert_eq!(window.end(), Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap());
+    }
+
+    #[test]
+    fn summary_rejects_positive_period_offset() {
+        let now = ts(15, 12);
+        let app = App::new_with_clock(
+            Config::default(),
+            FakeStore::default(),
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let err = app
+            .summary_window(SummaryScope::Period { period: Period::Week, offset: 1 })
+            .unwrap_err();
+
+        assert_eq!(err.to_string(), "Summary period offset must be zero or negative.");
+    }
+
+    #[test]
     fn summary_rejects_reversed_explicit_range() {
         let now = ts(15, 12);
         let app = App::new_with_clock(
@@ -535,7 +640,7 @@ mod tests {
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 
-        let report = app.summary(SummaryScope::Period(Period::Week)).unwrap();
+        let report = app.summary(SummaryScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
         assert_eq!(report.weekly_target_minutes(), Some(40 * 60));
         assert_eq!(report.worked_minutes(), 40 * 60);
@@ -565,29 +670,6 @@ mod tests {
         assert_eq!(report.worked_minutes(), 4 * 60);
         assert_eq!(report.balance_minutes(), None);
         assert!(report.weekly_days().is_empty());
-    }
-
-    #[test]
-    fn summary_window_for_last_day_uses_last_logged_date() {
-        let now = ts(15, 12);
-        let store = FakeStore::default().seed(vec![(
-            1.into(),
-            EntryPatch::new(
-                ts(10, 9),
-                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
-            ),
-        )]);
-        let app = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap();
-
-        let window = app.summary_window(SummaryScope::Period(Period::LastDay)).unwrap();
-
-        assert_eq!(window.start(), ts(10, 0));
-        assert_eq!(window.end(), ts(11, 0));
     }
 
     #[test]

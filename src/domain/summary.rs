@@ -12,7 +12,7 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SummaryScope {
-    Period(Period),
+    Period { period: Period, offset: i64 },
     Range { from: NaiveDate, to: NaiveDate },
 }
 
