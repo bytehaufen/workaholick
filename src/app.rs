@@ -4,7 +4,7 @@ use crate::{
     config::Config,
     domain::{
         Command, Entry, EntryId, EntryPatch, Period, SummaryDay, SummaryReport, SummaryScope,
-        SummaryWindow, summary,
+        SummaryWeek, SummaryWindow, summary,
     },
     store::{EntryReader, EntryWriter, ValidatedEntryStore},
 };
@@ -125,6 +125,14 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
                     weekly_days,
                 ))
             }
+            SummaryScope::Period { period: Period::Month | Period::Year, .. } => {
+                let weekly_balances = weekly_balance_breakdown(
+                    &entries,
+                    window,
+                    self.config.weekly_target_minutes(),
+                )?;
+                Ok(SummaryReport::with_weekly_breakdown(window, summary, weekly_balances))
+            }
             _ => Ok(SummaryReport::new(window, summary)),
         }
     }
@@ -163,6 +171,11 @@ fn next_day(date: NaiveDate) -> NaiveDate {
     date.succ_opt().expect("summary range end should have a successor day")
 }
 
+fn start_of_week(date: NaiveDate) -> NaiveDate {
+    date.checked_sub_days(Days::new(date.weekday().num_days_from_monday().into()))
+        .expect("week start should be representable")
+}
+
 fn period_summary_window(
     period: Period,
     offset: i64,
@@ -180,9 +193,7 @@ fn period_summary_window(
             date_window(start, next_day(start), now)
         }
         Period::Week => {
-            let current_week_start = today
-                .checked_sub_days(Days::new(today.weekday().num_days_from_monday().into()))
-                .expect("week start should be representable");
+            let current_week_start = start_of_week(today);
             let weeks_back = offset.unsigned_abs();
             let days_back = weeks_back.checked_mul(7).context("week offset is too large")?;
             let start = current_week_start
@@ -224,28 +235,68 @@ fn date_window(start: NaiveDate, end: NaiveDate, now: DateTime<Local>) -> Summar
     SummaryWindow::new(start_of_day(start), start_of_day(end).min(now))
 }
 
+fn weekly_balance_breakdown(
+    entries: &[DayEntryView],
+    window: SummaryWindow,
+    weekly_target_minutes: i64,
+) -> anyhow::Result<Vec<SummaryWeek>> {
+    let first_week_start = start_of_week(window.start().date_naive());
+
+    std::iter::successors(Some(first_week_start), |week_start| {
+        week_start.checked_add_days(Days::new(7))
+    })
+    .take_while(|&week_start| start_of_day(week_start) < window.end())
+    .map(|week_start| {
+        let week_end =
+            week_start.checked_add_days(Days::new(7)).expect("week end should be representable");
+
+        let full_week_start = start_of_day(week_start);
+        let full_week_end = start_of_day(week_end);
+
+        let week_window = SummaryWindow::new(
+            full_week_start.max(window.start()),
+            full_week_end.min(window.end()),
+        );
+
+        let week_summary = summary(entries, week_window)?;
+
+        Ok(SummaryWeek::new(
+            week_start,
+            week_summary.total_active_minutes(),
+            (week_window.start() == full_week_start && week_window.end() == full_week_end)
+                .then_some(weekly_target_minutes),
+        ))
+    })
+    .collect()
+}
+
 fn weekly_summary_days(
     entries: &[DayEntryView],
     window: SummaryWindow,
 ) -> anyhow::Result<Vec<SummaryDay>> {
-    let mut date = window.start().date_naive();
+    let first_date = window.start().date_naive();
     let last_date = window.end().date_naive();
-    let mut days = Vec::new();
 
-    while date <= last_date {
-        let day_start = start_of_day(date).max(window.start());
-        let day_end = start_of_day(next_day(date)).min(window.end());
+    let days_summary = std::iter::successors(Some(first_date), |date| Some(next_day(*date)))
+        .take_while(|date| *date <= last_date)
+        .map(|date| -> anyhow::Result<Option<SummaryDay>> {
+            let day_start = start_of_day(date).max(window.start());
+            let day_end = start_of_day(next_day(date)).min(window.end());
 
-        if day_end > day_start {
-            let day_window = SummaryWindow::new(day_start, day_end);
-            let day_summary = summary(entries, day_window)?;
-            days.push(SummaryDay::new(date, day_summary.total_active_minutes()));
-        }
+            if day_end > day_start {
+                let day_window = SummaryWindow::new(day_start, day_end);
+                let day_summary = summary(entries, day_window)?;
+                Ok(Some(SummaryDay::new(date, day_summary.total_active_minutes())))
+            } else {
+                Ok(None)
+            }
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
 
-        date = next_day(date);
-    }
-
-    Ok(days)
+    Ok(days_summary)
 }
 
 #[cfg(test)]
@@ -649,6 +700,7 @@ mod tests {
             report.weekly_days().iter().map(|day| day.active_minutes()).collect::<Vec<_>>(),
             vec![8 * 60, 8 * 60, 8 * 60, 8 * 60, 8 * 60, 0, 0]
         );
+        assert!(report.weekly_balances().is_empty());
     }
 
     #[test]
@@ -670,6 +722,72 @@ mod tests {
         assert_eq!(report.worked_minutes(), 4 * 60);
         assert_eq!(report.balance_minutes(), None);
         assert!(report.weekly_days().is_empty());
+        assert!(report.weekly_balances().is_empty());
+    }
+
+    #[test]
+    fn month_summary_includes_weekly_balance_breakdown() {
+        let now = Local.with_ymd_and_hms(2026, 1, 15, 12, 0, 0).unwrap();
+        let kind = ActivityKind::Work { context: WorkContext::Office };
+        let store = FakeStore::default().seed(vec![
+            (1.into(), EntryPatch::new(ts(5, 8), Command::Start { kind })),
+            (
+                2.into(),
+                EntryPatch::new(
+                    ts(5, 16),
+                    Command::End { title: "done".into(), description: None },
+                ),
+            ),
+            (3.into(), EntryPatch::new(ts(12, 8), Command::Start { kind })),
+            (
+                4.into(),
+                EntryPatch::new(
+                    ts(12, 16),
+                    Command::End { title: "done".into(), description: None },
+                ),
+            ),
+        ]);
+        let config = Config { weekly_target_hours: 40.0, ..Config::default() };
+        let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
+            .unwrap();
+
+        let report =
+            app.summary(SummaryScope::Period { period: Period::Month, offset: 0 }).unwrap();
+
+        assert_eq!(
+            report
+                .weekly_balances()
+                .iter()
+                .map(|week| (
+                    week.start(),
+                    week.worked_minutes(),
+                    week.target_minutes(),
+                    week.balance_minutes()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
+                    0,
+                    None,
+                    None
+                ),
+                (
+                    Local.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap().date_naive(),
+                    8 * 60,
+                    Some(40 * 60),
+                    Some(-(32 * 60))
+                ),
+                (
+                    Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap().date_naive(),
+                    8 * 60,
+                    None,
+                    None
+                ),
+            ]
+        );
+        assert!(report.weekly_days().is_empty());
+        assert_eq!(report.weekly_target_minutes(), None);
     }
 
     #[test]

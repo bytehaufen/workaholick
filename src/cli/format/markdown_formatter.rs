@@ -1,4 +1,5 @@
 use chrono::NaiveDate;
+use termimad::Alignment;
 
 use crate::DayEntryView;
 use crate::domain::SummaryReport;
@@ -11,11 +12,8 @@ pub struct MarkdownFormatter;
 impl Formatter for MarkdownFormatter {
     fn print(markdown: &str) {
         let mut skin = termimad::MadSkin::default();
-        for h in &mut skin.headers {
-            use termimad::Alignment;
 
-            h.align = Alignment::Left;
-        }
+        skin.headers.iter_mut().for_each(|header| header.align = Alignment::Left);
 
         skin.print_text(markdown);
     }
@@ -50,19 +48,20 @@ impl Formatter for MarkdownFormatter {
         let summary = prepare_summary(report);
         let mut output = String::new();
         let has_weekly_days = !summary.weekly_days.is_empty();
+        let has_weekly_balances = !summary.weekly_balances.is_empty();
         let has_metrics = summary.target.is_some() && summary.balance.is_some();
         output.push_str(&format!("# {}\n\n", summary.title));
 
         if summary.rows.is_empty() {
             output.push_str("_No tracked time._\n");
-            if has_weekly_days || has_metrics {
+            if has_weekly_days || has_weekly_balances || has_metrics {
                 output.push('\n');
             }
         } else {
             output.push_str("| Activity | Days | Active | Break |\n");
             output.push_str("| :-- | --: | --: | --: |\n");
 
-            for row in summary.rows.iter().chain(std::iter::once(&summary.total)) {
+            summary.rows.iter().chain(std::iter::once(&summary.total)).for_each(|row| {
                 output.push_str(&format!(
                     "| {} | {} | {} | {} |\n",
                     escape_markdown_table_cell(&row.activity),
@@ -70,7 +69,7 @@ impl Formatter for MarkdownFormatter {
                     row.active,
                     row.break_time,
                 ));
-            }
+            });
 
             output.push('\n');
         }
@@ -79,13 +78,30 @@ impl Formatter for MarkdownFormatter {
             output.push_str("| Day | Worked |\n");
             output.push_str("| :-- | --: |\n");
 
-            for row in &summary.weekly_days {
+            summary.weekly_days.iter().for_each(|row| {
                 output.push_str(&format!(
                     "| {} | {} |\n",
                     escape_markdown_table_cell(&row.day),
                     row.active
                 ));
-            }
+            });
+
+            output.push('\n');
+        }
+
+        if has_weekly_balances {
+            output.push_str("| Week | Worked | Target | Balance |\n");
+            output.push_str("| :-- | --: | --: | --: |\n");
+
+            summary.weekly_balances.iter().for_each(|row| {
+                output.push_str(&format!(
+                    "| {} | {} | {} | {} |\n",
+                    escape_markdown_table_cell(&row.week),
+                    row.worked,
+                    row.target,
+                    row.balance,
+                ));
+            });
 
             output.push('\n');
         }
@@ -110,7 +126,8 @@ mod tests {
     use chrono::{Local, TimeZone};
 
     use crate::domain::{
-        ActivityKind, Command, SummaryDay, SummaryReport, SummaryWindow, WorkContext, summary,
+        ActivityKind, Command, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkContext,
+        summary,
     };
 
     use super::*;
@@ -255,6 +272,46 @@ mod tests {
             r#"# Summary 2026-01-10
 
 _No tracked time._
+"#
+        );
+    }
+
+    #[test]
+    fn markdown_format_summary_renders_weekly_balance_breakdown() {
+        let window = SummaryWindow::new(
+            Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            Local.with_ymd_and_hms(2026, 1, 16, 0, 0, 0).unwrap(),
+        );
+        let report = SummaryReport::with_weekly_breakdown(
+            window,
+            summary(&[], window).unwrap(),
+            vec![
+                SummaryWeek::new(
+                    Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
+                    8 * 60,
+                    None,
+                ),
+                SummaryWeek::new(
+                    Local.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap().date_naive(),
+                    40 * 60,
+                    Some(40 * 60),
+                ),
+            ],
+        );
+
+        let rendered = MarkdownFormatter::format_summary(&report);
+
+        assert_eq!(
+            &rendered,
+            r#"# Summary 2026-01-01 .. 2026-01-15
+
+_No tracked time._
+
+| Week | Worked | Target | Balance |
+| :-- | --: | --: | --: |
+| 2026-W01 | 8h | n/a | n/a |
+| 2026-W02 | 40h | 40h | 0m |
+
 "#
         );
     }

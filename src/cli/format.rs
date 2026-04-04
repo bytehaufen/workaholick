@@ -124,6 +124,7 @@ pub(super) struct SummaryDisplay {
     pub rows: Vec<SummaryDisplayRow>,
     pub total: SummaryDisplayRow,
     pub weekly_days: Vec<SummaryDayDisplay>,
+    pub weekly_balances: Vec<SummaryWeekDisplay>,
     pub target: Option<String>,
     pub balance: Option<String>,
 }
@@ -140,6 +141,14 @@ pub(super) struct SummaryDisplayRow {
 pub(super) struct SummaryDayDisplay {
     pub day: String,
     pub active: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SummaryWeekDisplay {
+    pub week: String,
+    pub worked: String,
+    pub target: String,
+    pub balance: String,
 }
 
 pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
@@ -171,6 +180,22 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
             active: format_summary_duration(day.active_minutes()),
         })
         .collect();
+    let weekly_balances = report
+        .weekly_balances()
+        .iter()
+        .map(|week| SummaryWeekDisplay {
+            week: format_summary_week(week.start()),
+            worked: format_summary_duration(week.worked_minutes()),
+            target: week
+                .target_minutes()
+                .map(format_summary_duration)
+                .unwrap_or_else(|| "n/a".to_string()),
+            balance: week
+                .balance_minutes()
+                .map(format_signed_summary_duration)
+                .unwrap_or_else(|| "n/a".to_string()),
+        })
+        .collect();
 
     SummaryDisplay {
         title: format_summary_title(report.window()),
@@ -182,6 +207,7 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
             break_minutes: total_break_minutes,
         }),
         weekly_days,
+        weekly_balances,
         target: report.weekly_target_minutes().map(format_summary_duration),
         balance: report.balance_minutes().map(format_signed_summary_duration),
     }
@@ -222,6 +248,11 @@ pub(super) fn format_summary_boundary(boundary: DateTime<Local>) -> String {
 
 pub(super) fn format_summary_day(date: NaiveDate) -> String {
     format!("{} {}", date.weekday(), date)
+}
+
+pub(super) fn format_summary_week(date: NaiveDate) -> String {
+    let iso = date.iso_week();
+    format!("{}-W{:02}", iso.year(), iso.week())
 }
 
 fn format_summary_day_count(dates: &HashSet<NaiveDate>) -> String {
@@ -286,7 +317,7 @@ fn is_midnight(boundary: DateTime<Local>) -> bool {
 mod tests {
     use super::*;
     use crate::domain::{
-        ActivityKind, SummaryDay, SummaryReport, SummaryWindow, WorkContext, summary,
+        ActivityKind, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkContext, summary,
     };
     use chrono::{Local, TimeZone};
 
@@ -331,6 +362,16 @@ mod tests {
         let window = SummaryWindow::new(ts(10, 0, 0), ts(12, 14, 15));
 
         assert_eq!(format_summary_window(window), "2026-01-10 .. 2026-01-12 14:15");
+    }
+
+    #[test]
+    fn format_summary_week_uses_iso_week_label() {
+        assert_eq!(
+            format_summary_week(
+                Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive()
+            ),
+            "2026-W01"
+        );
     }
 
     #[test]
@@ -394,8 +435,49 @@ mod tests {
                 SummaryDayDisplay { day: "Wed 2026-01-14".into(), active: "0m".into() },
             ]
         );
+        assert!(display.weekly_balances.is_empty());
         assert_eq!(display.target, Some("40h".into()));
         assert_eq!(display.balance, Some("-34h 15m".into()));
+    }
+
+    #[test]
+    fn prepare_summary_includes_weekly_balance_breakdown() {
+        let window = SummaryWindow::new(ts(1, 0, 0), ts(16, 0, 0));
+        let report = SummaryReport::with_weekly_breakdown(
+            window,
+            summary(&[], window).unwrap(),
+            vec![
+                SummaryWeek::new(
+                    Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
+                    8 * 60,
+                    None,
+                ),
+                SummaryWeek::new(ts(5, 0, 0).date_naive(), 40 * 60, Some(40 * 60)),
+            ],
+        );
+
+        let display = prepare_summary(&report);
+
+        assert_eq!(
+            display.weekly_balances,
+            vec![
+                SummaryWeekDisplay {
+                    week: "2026-W01".into(),
+                    worked: "8h".into(),
+                    target: "n/a".into(),
+                    balance: "n/a".into(),
+                },
+                SummaryWeekDisplay {
+                    week: "2026-W02".into(),
+                    worked: "40h".into(),
+                    target: "40h".into(),
+                    balance: "0m".into(),
+                },
+            ]
+        );
+        assert!(display.weekly_days.is_empty());
+        assert_eq!(display.target, None);
+        assert_eq!(display.balance, None);
     }
 
     fn ts(day: u32, hour: u32, minute: u32) -> chrono::DateTime<Local> {

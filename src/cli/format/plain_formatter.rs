@@ -130,6 +130,54 @@ impl Formatter for PlainFormatter {
             }
         }
 
+        if !summary.weekly_balances.is_empty() {
+            output.push('\n');
+
+            let week_width = summary
+                .weekly_balances
+                .iter()
+                .map(|row| row.week.len())
+                .max()
+                .unwrap_or("Week".len())
+                .max("Week".len());
+            let worked_width = summary
+                .weekly_balances
+                .iter()
+                .map(|row| row.worked.len())
+                .max()
+                .unwrap_or("Worked".len())
+                .max("Worked".len());
+            let target_width = summary
+                .weekly_balances
+                .iter()
+                .map(|row| row.target.len())
+                .max()
+                .unwrap_or("Target".len())
+                .max("Target".len());
+            let balance_width = summary
+                .weekly_balances
+                .iter()
+                .map(|row| row.balance.len())
+                .max()
+                .unwrap_or("Balance".len())
+                .max("Balance".len());
+            output.push_str(&format!(
+                "{:<week_width$}  {:>worked_width$}  {:>target_width$}  {:>balance_width$}\n",
+                "Week", "Worked", "Target", "Balance",
+            ));
+            output.push_str(&format!(
+                "{:-<week_width$}  {:-<worked_width$}  {:-<target_width$}  {:-<balance_width$}\n",
+                "", "", "", "",
+            ));
+
+            for row in &summary.weekly_balances {
+                output.push_str(&format!(
+                    "{:<week_width$}  {:>worked_width$}  {:>target_width$}  {:>balance_width$}\n",
+                    row.week, row.worked, row.target, row.balance,
+                ));
+            }
+        }
+
         if let (Some(target), Some(balance)) = (&summary.target, &summary.balance) {
             output.push('\n');
             output.push_str(&format!("Week Target: {}\n", target));
@@ -151,7 +199,8 @@ fn format_day_entry(entry: &DayEntryView, id_width: usize) -> String {
 mod tests {
     use super::*;
     use crate::domain::{
-        ActivityKind, Command, SummaryDay, SummaryReport, SummaryWindow, WorkContext, summary,
+        ActivityKind, Command, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkContext,
+        summary,
     };
     use chrono::{Local, TimeZone};
 
@@ -284,6 +333,45 @@ Balance:     -34h 15m
             r#"Summary 2026-01-10
 
 No tracked time.
+"#
+        );
+    }
+
+    #[test]
+    fn plain_format_summary_renders_weekly_balance_breakdown() {
+        let window = SummaryWindow::new(
+            Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            Local.with_ymd_and_hms(2026, 1, 16, 0, 0, 0).unwrap(),
+        );
+        let report = SummaryReport::with_weekly_breakdown(
+            window,
+            summary(&[], window).unwrap(),
+            vec![
+                SummaryWeek::new(
+                    Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
+                    8 * 60,
+                    None,
+                ),
+                SummaryWeek::new(
+                    Local.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap().date_naive(),
+                    40 * 60,
+                    Some(40 * 60),
+                ),
+            ],
+        );
+
+        let rendered = PlainFormatter::format_summary(&report);
+
+        assert_eq!(
+            &rendered,
+            r#"Summary 2026-01-01 .. 2026-01-15
+
+No tracked time.
+
+Week      Worked  Target  Balance
+--------  ------  ------  -------
+2026-W01      8h     n/a      n/a
+2026-W02     40h     40h       0m
 "#
         );
     }

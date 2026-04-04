@@ -64,17 +64,53 @@ impl SummaryDay {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SummaryWeek {
+    start: NaiveDate,
+    worked_minutes: i64,
+    target_minutes: Option<i64>,
+}
+
+impl SummaryWeek {
+    pub(crate) fn new(start: NaiveDate, worked_minutes: i64, target_minutes: Option<i64>) -> Self {
+        Self { start, worked_minutes, target_minutes }
+    }
+
+    pub(crate) fn start(&self) -> NaiveDate {
+        self.start
+    }
+
+    pub(crate) fn worked_minutes(&self) -> i64 {
+        self.worked_minutes
+    }
+
+    pub(crate) fn target_minutes(&self) -> Option<i64> {
+        self.target_minutes
+    }
+
+    pub(crate) fn balance_minutes(&self) -> Option<i64> {
+        self.target_minutes.map(|target| self.worked_minutes - target)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SummaryReport {
     window: SummaryWindow,
     summary: Summary,
     weekly_target_minutes: Option<i64>,
     weekly_days: Vec<SummaryDay>,
+    weekly_balances: Vec<SummaryWeek>,
 }
 
 impl SummaryReport {
     pub(crate) fn new(window: SummaryWindow, summary: Summary) -> Self {
-        Self { window, summary, weekly_target_minutes: None, weekly_days: Vec::new() }
+        Self {
+            window,
+            summary,
+            weekly_target_minutes: None,
+            weekly_days: Vec::new(),
+            weekly_balances: Vec::new(),
+        }
     }
 
     pub(crate) fn with_weekly_balance(
@@ -83,7 +119,27 @@ impl SummaryReport {
         weekly_target_minutes: i64,
         weekly_days: Vec<SummaryDay>,
     ) -> Self {
-        Self { window, summary, weekly_target_minutes: Some(weekly_target_minutes), weekly_days }
+        Self {
+            window,
+            summary,
+            weekly_target_minutes: Some(weekly_target_minutes),
+            weekly_days,
+            weekly_balances: Vec::new(),
+        }
+    }
+
+    pub(crate) fn with_weekly_breakdown(
+        window: SummaryWindow,
+        summary: Summary,
+        weekly_balances: Vec<SummaryWeek>,
+    ) -> Self {
+        Self {
+            window,
+            summary,
+            weekly_target_minutes: None,
+            weekly_days: Vec::new(),
+            weekly_balances,
+        }
     }
 
     pub(crate) fn window(&self) -> SummaryWindow {
@@ -108,6 +164,10 @@ impl SummaryReport {
 
     pub(crate) fn weekly_days(&self) -> &[SummaryDay] {
         &self.weekly_days
+    }
+
+    pub(crate) fn weekly_balances(&self) -> &[SummaryWeek] {
+        &self.weekly_balances
     }
 }
 
@@ -182,13 +242,13 @@ fn clipped_range(
 }
 
 fn add_dates(bucket: &mut TimeBucket, start: DateTime<Local>, end: DateTime<Local>) {
-    let mut date = start.date_naive();
+    let first_date = start.date_naive();
     let last_date = (end - TimeDelta::seconds(1)).date_naive();
 
-    while date <= last_date {
-        bucket.dates.insert(date);
-        date = date.succ_opt().expect("summary date should have a successor");
-    }
+    bucket.dates.extend(
+        std::iter::successors(Some(first_date), |date| date.succ_opt())
+            .take_while(|&date| date <= last_date),
+    );
 }
 
 fn add_time(
