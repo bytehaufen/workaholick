@@ -36,6 +36,12 @@ pub struct DayEntryView {
     pub command: Command,
 }
 
+impl DayEntryView {
+    pub fn date(&self) -> NaiveDate {
+        self.timestamp.date_naive()
+    }
+}
+
 impl From<&Entry> for DayEntryView {
     fn from(entry: &Entry) -> Self {
         Self { id: *entry.id(), timestamp: *entry.timestamp(), command: entry.command().clone() }

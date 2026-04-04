@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Local, NaiveDate, TimeDelta};
 
 use crate::{
     DayEntryView,
     domain::{
-        ActivityKind, Command, DayEntryValidationError, Period,
+        ActivityKind, DayEntryValidationError, Period,
         day_entries::{DayState, transition_day_state},
     },
 };
@@ -139,6 +139,7 @@ impl SummaryWindow {
 pub struct TimeBucket {
     active: TimeDelta,
     break_time: TimeDelta,
+    dates: HashSet<NaiveDate>,
 }
 
 impl TimeBucket {
@@ -148,6 +149,10 @@ impl TimeBucket {
 
     pub(crate) fn break_time(&self) -> TimeDelta {
         self.break_time
+    }
+
+    pub(crate) fn dates(&self) -> &HashSet<NaiveDate> {
+        &self.dates
     }
 
     pub(crate) fn has_time(&self) -> bool {
@@ -165,15 +170,25 @@ impl TimeBucket {
 
 type SummaryMap = HashMap<ActivityKind, TimeBucket>;
 
-fn clipped_duration(
+fn clipped_range(
     last_timestamp: Option<DateTime<Local>>,
     timestamp: DateTime<Local>,
     window: SummaryWindow,
-) -> TimeDelta {
+) -> Option<(DateTime<Local>, DateTime<Local>)> {
     let start = last_timestamp.unwrap_or(timestamp).max(window.start);
     let end = timestamp.min(window.end);
 
-    if end > start { end - start } else { TimeDelta::zero() }
+    (end > start).then_some((start, end))
+}
+
+fn add_dates(bucket: &mut TimeBucket, start: DateTime<Local>, end: DateTime<Local>) {
+    let mut date = start.date_naive();
+    let last_date = (end - TimeDelta::seconds(1)).date_naive();
+
+    while date <= last_date {
+        bucket.dates.insert(date);
+        date = date.succ_opt().expect("summary date should have a successor");
+    }
 }
 
 fn add_time(
@@ -184,10 +199,10 @@ fn add_time(
     timestamp: DateTime<Local>,
     window: SummaryWindow,
 ) {
-    let delta = clipped_duration(last_timestamp, timestamp, window);
-
-    if delta > TimeDelta::zero() {
-        *field(summary.entry(kind).or_default()) += delta;
+    if let Some((start, end)) = clipped_range(last_timestamp, timestamp, window) {
+        let bucket = summary.entry(kind).or_default();
+        *field(bucket) += end - start;
+        add_dates(bucket, start, end);
     }
 }
 
@@ -230,11 +245,11 @@ pub fn summary(
             let State { state, last_timestamp, mut summary } = fold_state;
             let next_state = transition_day_state(state, entry.id, &entry.command)?;
 
-            match (state, next_state, &entry.command) {
-                (DayState::Idle, DayState::Active(_), Command::Start { .. }) => {
+            match (state, next_state) {
+                (DayState::Idle, DayState::Active(_)) => {
                     Ok(State { state: next_state, last_timestamp: Some(entry.timestamp), summary })
                 }
-                (DayState::Active(kind), DayState::Breaking(_), Command::BreakStart) => {
+                (DayState::Active(kind), DayState::Breaking(_)) => {
                     add_time(
                         &mut summary,
                         kind,
@@ -245,7 +260,7 @@ pub fn summary(
                     );
                     Ok(State { state: next_state, last_timestamp: Some(entry.timestamp), summary })
                 }
-                (DayState::Breaking(kind), DayState::Active(_), Command::BreakEnd { .. }) => {
+                (DayState::Breaking(kind), DayState::Active(_)) => {
                     add_time(
                         &mut summary,
                         kind,
@@ -256,7 +271,7 @@ pub fn summary(
                     );
                     Ok(State { state: next_state, last_timestamp: Some(entry.timestamp), summary })
                 }
-                (DayState::Active(kind), DayState::Idle, Command::End { .. }) => {
+                (DayState::Active(kind), DayState::Idle) => {
                     add_time(
                         &mut summary,
                         kind,
@@ -268,7 +283,7 @@ pub fn summary(
                     Ok(State { state: next_state, last_timestamp: Some(entry.timestamp), summary })
                 }
 
-                (DayState::Active(_), DayState::Active(_), Command::Log { .. }) => {
+                (DayState::Active(_), DayState::Active(_)) => {
                     Ok(State { state, last_timestamp, summary })
                 }
                 _ => unreachable!("summary transitions should use the shared validator"),
@@ -284,6 +299,8 @@ pub fn summary(
 
 #[cfg(test)]
 mod test {
+    use crate::domain::Command;
+
     use super::*;
     use chrono::TimeZone;
 
@@ -322,6 +339,13 @@ mod test {
         assert_eq!(summary.break_time(kind), break_time);
     }
 
+    fn assert_bucket_dates(summary: &Summary, kind: ActivityKind, dates: &[NaiveDate]) {
+        let actual = summary.bucket(kind).dates;
+        let expected = dates.iter().copied().collect::<HashSet<_>>();
+
+        assert_eq!(actual, expected);
+    }
+
     #[test]
     fn summary_accumulates_completed_active_and_break_time() {
         let kind = ActivityKind::Vacation;
@@ -338,6 +362,7 @@ mod test {
         );
 
         assert_bucket(&summary, kind, hours(8), hours(1));
+        assert_bucket_dates(&summary, kind, &[NaiveDate::from_ymd_opt(2026, 1, 28).unwrap()]);
     }
 
     #[test]
@@ -380,6 +405,14 @@ mod test {
         );
 
         assert_bucket(&summary, kind, hours(36), TimeDelta::zero());
+        assert_bucket_dates(
+            &summary,
+            kind,
+            &[
+                NaiveDate::from_ymd_opt(2026, 1, 28).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 1, 29).unwrap(),
+            ],
+        );
     }
 
     #[test]
@@ -406,6 +439,7 @@ mod test {
         let summary = summarize(window(28, 0, 29, 0), [entry(1, 27, 8, Command::Start { kind })]);
 
         assert_bucket(&summary, kind, hours(24), TimeDelta::zero());
+        assert_bucket_dates(&summary, kind, &[NaiveDate::from_ymd_opt(2026, 1, 28).unwrap()]);
     }
 
     #[test]

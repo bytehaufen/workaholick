@@ -63,6 +63,14 @@ impl Formatter for PlainFormatter {
                 .max()
                 .unwrap_or("Activity".len())
                 .max("Activity".len());
+            let day_count_width = summary
+                .rows
+                .iter()
+                .chain(std::iter::once(&summary.total))
+                .map(|row| row.day_count.len())
+                .max()
+                .unwrap_or("Days".len())
+                .max("Days".len());
             let active_width = summary
                 .rows
                 .iter()
@@ -80,18 +88,18 @@ impl Formatter for PlainFormatter {
                 .unwrap_or("Break".len())
                 .max("Break".len());
             output.push_str(&format!(
-                "{:<activity_width$}  {:>active_width$}  {:>break_width$}\n",
-                "Activity", "Active", "Break",
+                "{:<activity_width$}  {:>day_count_width$}  {:>active_width$}  {:>break_width$}\n",
+                "Activity", "Days", "Active", "Break",
             ));
             output.push_str(&format!(
-                "{:-<activity_width$}  {:-<active_width$}  {:-<break_width$}\n",
-                "", "", "",
+                "{:-<activity_width$}  {:-<day_count_width$}  {:-<active_width$}  {:-<break_width$}\n",
+                "", "", "", "",
             ));
 
             for row in summary.rows.iter().chain(std::iter::once(&summary.total)) {
                 output.push_str(&format!(
-                    "{:<activity_width$}  {:>active_width$}  {:>break_width$}\n",
-                    row.activity, row.active, row.break_time,
+                    "{:<activity_width$}  {:>day_count_width$}  {:>active_width$}  {:>break_width$}\n",
+                    row.activity, row.day_count, row.active, row.break_time,
                 ));
             }
         }
@@ -243,11 +251,11 @@ mod tests {
             &rendered,
             r#"Summary 2026-01-12 .. 2026-01-14
 
-Activity     Active  Break
------------  ------  -----
-holiday      3h 30m    30m
-work (home)  2h 15m     0m
-TOTAL        5h 45m    30m
+Activity     Days  Active  Break
+-----------  ----  ------  -----
+holiday         1  3h 30m    30m
+work (home)     1  2h 15m     0m
+TOTAL              5h 45m    30m
 
 Day             Worked
 --------------  ------

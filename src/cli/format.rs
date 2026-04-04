@@ -3,6 +3,8 @@ mod markdown_formatter;
 mod plain_formatter;
 mod port;
 
+use std::collections::HashSet;
+
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
 
@@ -129,6 +131,7 @@ pub(super) struct SummaryDisplay {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SummaryDisplayRow {
     pub activity: String,
+    pub day_count: String,
     pub active: String,
     pub break_time: String,
 }
@@ -150,6 +153,7 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
 
             PreparedSummaryRow {
                 activity: format_activity_kind(&kind),
+                day_count: format_summary_day_count(bucket.dates()),
                 active_minutes,
                 break_minutes,
             }
@@ -173,12 +177,13 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
         rows: rows.into_iter().map(SummaryDisplayRow::from).collect(),
         total: SummaryDisplayRow::from(PreparedSummaryRow {
             activity: "TOTAL".to_string(),
+            day_count: String::new(),
             active_minutes: total_active_minutes,
             break_minutes: total_break_minutes,
         }),
         weekly_days,
-        target: report.weekly_target_minutes().map(format_hour_summary_duration),
-        balance: report.balance_minutes().map(format_signed_hour_summary_duration),
+        target: report.weekly_target_minutes().map(format_summary_duration),
+        balance: report.balance_minutes().map(format_signed_summary_duration),
     }
 }
 
@@ -219,40 +224,11 @@ pub(super) fn format_summary_day(date: NaiveDate) -> String {
     format!("{} {}", date.weekday(), date)
 }
 
+fn format_summary_day_count(dates: &HashSet<NaiveDate>) -> String {
+    dates.len().to_string()
+}
+
 pub(super) fn format_summary_duration(total_minutes: i64) -> String {
-    if total_minutes <= 0 {
-        return "0m".to_string();
-    }
-
-    let minutes_per_day = 24 * 60;
-    let days = total_minutes / minutes_per_day;
-    let hours = (total_minutes % minutes_per_day) / 60;
-    let minutes = total_minutes % 60;
-
-    let mut parts = Vec::new();
-    if days > 0 {
-        parts.push(format!("{days}d"));
-    }
-    if hours > 0 {
-        parts.push(format!("{hours}h"));
-    }
-    if minutes > 0 {
-        parts.push(format!("{minutes}m"));
-    }
-
-    if parts.is_empty() { "0m".to_string() } else { parts.join(" ") }
-}
-
-#[cfg(test)]
-pub(super) fn format_signed_summary_duration(total_minutes: i64) -> String {
-    match total_minutes.cmp(&0) {
-        std::cmp::Ordering::Less => format!("-{}", format_summary_duration(-total_minutes)),
-        std::cmp::Ordering::Equal => "0m".to_string(),
-        std::cmp::Ordering::Greater => format!("+{}", format_summary_duration(total_minutes)),
-    }
-}
-
-fn format_hour_summary_duration(total_minutes: i64) -> String {
     if total_minutes <= 0 {
         return "0m".to_string();
     }
@@ -271,17 +247,18 @@ fn format_hour_summary_duration(total_minutes: i64) -> String {
     if parts.is_empty() { "0m".to_string() } else { parts.join(" ") }
 }
 
-fn format_signed_hour_summary_duration(total_minutes: i64) -> String {
+pub(super) fn format_signed_summary_duration(total_minutes: i64) -> String {
     match total_minutes.cmp(&0) {
-        std::cmp::Ordering::Less => format!("-{}", format_hour_summary_duration(-total_minutes)),
+        std::cmp::Ordering::Less => format!("-{}", format_summary_duration(-total_minutes)),
         std::cmp::Ordering::Equal => "0m".to_string(),
-        std::cmp::Ordering::Greater => format!("+{}", format_hour_summary_duration(total_minutes)),
+        std::cmp::Ordering::Greater => format!("+{}", format_summary_duration(total_minutes)),
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PreparedSummaryRow {
     activity: String,
+    day_count: String,
     active_minutes: i64,
     break_minutes: i64,
 }
@@ -290,6 +267,7 @@ impl From<PreparedSummaryRow> for SummaryDisplayRow {
     fn from(row: PreparedSummaryRow) -> Self {
         Self {
             activity: row.activity,
+            day_count: row.day_count,
             active: format_summary_duration(row.active_minutes),
             break_time: format_summary_duration(row.break_minutes),
         }
@@ -326,27 +304,19 @@ mod tests {
     }
 
     #[test]
-    fn format_summary_duration_uses_compact_day_hour_minute_units() {
+    fn format_summary_duration_keeps_values_in_hours_and_minutes() {
         assert_eq!(format_summary_duration(0), "0m");
         assert_eq!(format_summary_duration(12), "12m");
         assert_eq!(format_summary_duration(4 * 60 + 12), "4h 12m");
-        assert_eq!(format_summary_duration(2 * 24 * 60 + 4 * 60 + 12), "2d 4h 12m");
-        assert_eq!(format_summary_duration(24 * 60), "1d");
+        assert_eq!(format_summary_duration(2 * 24 * 60 + 4 * 60 + 12), "52h 12m");
+        assert_eq!(format_summary_duration(24 * 60), "24h");
     }
 
     #[test]
     fn format_signed_summary_duration_includes_sign() {
-        assert_eq!(format_signed_summary_duration(-(4 * 60 + 12)), "-4h 12m");
+        assert_eq!(format_signed_summary_duration(-(28 * 60 + 12)), "-28h 12m");
         assert_eq!(format_signed_summary_duration(0), "0m");
-        assert_eq!(format_signed_summary_duration(4 * 60 + 12), "+4h 12m");
-    }
-
-    #[test]
-    fn format_hour_summary_duration_keeps_large_weekly_values_in_hours() {
-        assert_eq!(format_hour_summary_duration(40 * 60), "40h");
-        assert_eq!(format_signed_hour_summary_duration(-(34 * 60 + 15)), "-34h 15m");
-        assert_eq!(format_signed_hour_summary_duration(0), "0m");
-        assert_eq!(format_signed_hour_summary_duration(34 * 60 + 15), "+34h 15m");
+        assert_eq!(format_signed_summary_duration(28 * 60 + 12), "+28h 12m");
     }
 
     #[test]
@@ -395,11 +365,13 @@ mod tests {
             vec![
                 SummaryDisplayRow {
                     activity: "holiday".into(),
+                    day_count: "1".into(),
                     active: "3h 30m".into(),
                     break_time: "30m".into(),
                 },
                 SummaryDisplayRow {
                     activity: "work (home)".into(),
+                    day_count: "1".into(),
                     active: "2h 15m".into(),
                     break_time: "0m".into(),
                 },
@@ -409,6 +381,7 @@ mod tests {
             display.total,
             SummaryDisplayRow {
                 activity: "TOTAL".into(),
+                day_count: String::new(),
                 active: "5h 45m".into(),
                 break_time: "30m".into(),
             }

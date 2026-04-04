@@ -59,13 +59,14 @@ impl Formatter for MarkdownFormatter {
                 output.push('\n');
             }
         } else {
-            output.push_str("| Activity | Active | Break |\n");
-            output.push_str("| :-- | --: | --: |\n");
+            output.push_str("| Activity | Days | Active | Break |\n");
+            output.push_str("| :-- | --: | --: | --: |\n");
 
             for row in summary.rows.iter().chain(std::iter::once(&summary.total)) {
                 output.push_str(&format!(
-                    "| {} | {} | {} |\n",
+                    "| {} | {} | {} | {} |\n",
                     escape_markdown_table_cell(&row.activity),
+                    row.day_count,
                     row.active,
                     row.break_time,
                 ));
@@ -219,11 +220,11 @@ mod tests {
             &rendered,
             r#"# Summary 2026-01-12 .. 2026-01-14
 
-| Activity | Active | Break |
-| :-- | --: | --: |
-| holiday | 3h 30m | 30m |
-| work (home) | 2h 15m | 0m |
-| TOTAL | 5h 45m | 30m |
+| Activity | Days | Active | Break |
+| :-- | --: | --: | --: |
+| holiday | 1 | 3h 30m | 30m |
+| work (home) | 1 | 2h 15m | 0m |
+| TOTAL |  | 5h 45m | 30m |
 
 | Day | Worked |
 | :-- | --: |
