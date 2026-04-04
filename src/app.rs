@@ -531,8 +531,7 @@ mod tests {
                 ),
             ),
         ]);
-        let mut config = Config::default();
-        config.weekly_target_hours = 40.0;
+        let config = Config { weekly_target_hours: 40.0, ..Config::default() };
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 

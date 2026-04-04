@@ -65,16 +65,6 @@ fn run_inner<S: EntryReader + EntryWriter>(
             app.update_entry(id, patch)
         }
 
-        CliCommand::Status => {
-            // FIXME: implement
-            // match app.status()? {
-            //     Some(summary) => println!("{:?}", summary),
-            //     None => println!("No status for today"),
-            // };
-
-            todo!();
-        }
-
         CliCommand::Day { date } => {
             let Some(date) = date.or_else(|| app.last_date()) else {
                 anyhow::bail!("There are no entries.");

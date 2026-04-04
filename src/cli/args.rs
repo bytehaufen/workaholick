@@ -77,9 +77,6 @@ pub enum CliCommand {
     },
 
     // --- Query commands ---
-    /// Status summary for today
-    Status,
-
     /// Inspect a day (arbitrary date)
     #[command(visible_alias = "d")]
     Day {
@@ -87,7 +84,6 @@ pub enum CliCommand {
         date: Option<NaiveDate>,
     },
 
-    // TODO: Check necessity
     /// Show summaries
     #[command(visible_alias = "sum")]
     Summary(SummaryArgs),
