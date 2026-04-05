@@ -17,7 +17,9 @@ pub use port::Formatter;
 #[allow(unused_imports)]
 pub use markdown_formatter::MarkdownFormatter;
 
-use crate::domain::{ActivityKind, Command, SummaryReport, SummaryWindow};
+use crate::domain::{
+    ActivityKind, Command, ReportGroupBy, SummaryReport, SummaryWindow, WorkItemReport,
+};
 
 pub fn print_day(
     formatter: OutputFormatter,
@@ -59,6 +61,36 @@ pub fn print_summary(formatter: OutputFormatter, report: &SummaryReport) -> Resu
             #[cfg(feature = "markdown")]
             {
                 let rendered = MarkdownFormatter::format_summary(report);
+                MarkdownFormatter::print(&rendered);
+                Ok(())
+            }
+
+            #[cfg(not(feature = "markdown"))]
+            {
+                anyhow::bail!(
+                    "Config sets formatter to `markdown`, but this binary was built without the `markdown` feature"
+                )
+            }
+        }
+    }
+}
+
+pub fn print_report(
+    formatter: OutputFormatter,
+    report: &WorkItemReport,
+    group_by: Option<ReportGroupBy>,
+    summary: Option<&SummaryReport>,
+) -> Result<()> {
+    match formatter {
+        OutputFormatter::Plain => {
+            let rendered = PlainFormatter::format_report(report, group_by, summary);
+            PlainFormatter::print(&rendered);
+            Ok(())
+        }
+        OutputFormatter::Markdown => {
+            #[cfg(feature = "markdown")]
+            {
+                let rendered = MarkdownFormatter::format_report(report, group_by, summary);
                 MarkdownFormatter::print(&rendered);
                 Ok(())
             }
@@ -128,6 +160,31 @@ pub(super) struct SummaryDisplay {
     pub weekly_balances_total: Option<SummaryWeekDisplay>,
     pub target: Option<String>,
     pub balance: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ReportDisplay {
+    pub title: String,
+    pub rows: Vec<ReportItemDisplay>,
+    pub groups: Vec<ReportGroupDisplay>,
+    pub show_description: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ReportItemDisplay {
+    pub date: String,
+    pub start: String,
+    pub end: String,
+    pub duration: String,
+    pub title: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ReportGroupDisplay {
+    pub title: String,
+    pub count: String,
+    pub duration: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,8 +289,63 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
     }
 }
 
+pub(super) fn prepare_report(
+    report: &WorkItemReport,
+    group_by: Option<ReportGroupBy>,
+) -> ReportDisplay {
+    match group_by {
+        Some(ReportGroupBy::Title) => ReportDisplay {
+            title: format_report_title(report.window(), group_by),
+            rows: Vec::new(),
+            groups: report
+                .group_by_title()
+                .into_iter()
+                .map(|row| ReportGroupDisplay {
+                    title: row.title().to_string(),
+                    count: row.count().to_string(),
+                    duration: format_summary_duration(row.duration_minutes()),
+                })
+                .collect(),
+            show_description: false,
+        },
+        None => {
+            let rows = report
+                .rows()
+                .iter()
+                .map(|row| ReportItemDisplay {
+                    date: row.date().to_string(),
+                    start: format_report_boundary(row.start(), row.date()),
+                    end: format_report_boundary(row.end(), row.date()),
+                    duration: format_summary_duration(row.duration_minutes()),
+                    title: row.title().to_string(),
+                    description: row.description().unwrap_or_default().to_string(),
+                })
+                .collect::<Vec<_>>();
+
+            ReportDisplay {
+                title: format_report_title(report.window(), group_by),
+                show_description: rows.iter().any(|row| !row.description.is_empty()),
+                rows,
+                groups: Vec::new(),
+            }
+        }
+    }
+}
+
 pub(super) fn format_summary_title(window: SummaryWindow) -> String {
     format!("Summary {}", format_summary_window(window))
+}
+
+pub(super) fn format_report_title(
+    window: SummaryWindow,
+    group_by: Option<ReportGroupBy>,
+) -> String {
+    match group_by {
+        Some(ReportGroupBy::Title) => {
+            format!("Report {} (grouped by title)", format_summary_window(window))
+        }
+        None => format!("Report {}", format_summary_window(window)),
+    }
 }
 
 pub(super) fn format_summary_window(window: SummaryWindow) -> String {
@@ -260,6 +372,14 @@ pub(super) fn format_summary_window(window: SummaryWindow) -> String {
 pub(super) fn format_summary_boundary(boundary: DateTime<Local>) -> String {
     if is_midnight(boundary) {
         boundary.date_naive().to_string()
+    } else {
+        boundary.format("%Y-%m-%d %H:%M").to_string()
+    }
+}
+
+pub(super) fn format_report_boundary(boundary: DateTime<Local>, row_date: NaiveDate) -> String {
+    if boundary.date_naive() == row_date {
+        boundary.format("%H:%M").to_string()
     } else {
         boundary.format("%Y-%m-%d %H:%M").to_string()
     }
@@ -335,8 +455,10 @@ fn is_midnight(boundary: DateTime<Local>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        ActivityKind, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkContext, summary,
+        ActivityKind, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkContext,
+        WorkItemReport, summary,
     };
     use chrono::{Local, TimeZone};
 
@@ -390,6 +512,96 @@ mod tests {
                 Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive()
             ),
             "2026-W01"
+        );
+    }
+
+    #[test]
+    fn prepare_report_renders_detailed_rows() {
+        let report = WorkItemReport::new(
+            SummaryWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
+            vec![
+                WorkItemRow::new(
+                    ts(10, 10, 0).date_naive(),
+                    ts(10, 8, 0),
+                    ts(10, 10, 0),
+                    120,
+                    "handoff".into(),
+                    Some("sync".into()),
+                ),
+                WorkItemRow::new(
+                    ts(10, 12, 0).date_naive(),
+                    ts(10, 10, 0),
+                    ts(10, 12, 0),
+                    120,
+                    "wrap".into(),
+                    None,
+                ),
+            ],
+        );
+
+        let display = prepare_report(&report, None);
+
+        assert_eq!(display.title, "Report 2026-01-10");
+        assert!(display.groups.is_empty());
+        assert!(display.show_description);
+        assert_eq!(
+            display.rows,
+            vec![
+                ReportItemDisplay {
+                    date: "2026-01-10".into(),
+                    start: "08:00".into(),
+                    end: "10:00".into(),
+                    duration: "2h".into(),
+                    title: "handoff".into(),
+                    description: "sync".into(),
+                },
+                ReportItemDisplay {
+                    date: "2026-01-10".into(),
+                    start: "10:00".into(),
+                    end: "12:00".into(),
+                    duration: "2h".into(),
+                    title: "wrap".into(),
+                    description: String::new(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn prepare_report_groups_rows_by_title() {
+        let report = WorkItemReport::new(
+            SummaryWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
+            vec![
+                WorkItemRow::new(
+                    ts(10, 10, 0).date_naive(),
+                    ts(10, 8, 0),
+                    ts(10, 10, 0),
+                    120,
+                    "review".into(),
+                    None,
+                ),
+                WorkItemRow::new(
+                    ts(10, 12, 0).date_naive(),
+                    ts(10, 10, 0),
+                    ts(10, 12, 0),
+                    60,
+                    "review".into(),
+                    None,
+                ),
+            ],
+        );
+
+        let display = prepare_report(&report, Some(ReportGroupBy::Title));
+
+        assert_eq!(display.title, "Report 2026-01-10 (grouped by title)");
+        assert!(display.rows.is_empty());
+        assert_eq!(
+            display.groups,
+            vec![ReportGroupDisplay {
+                title: "review".into(),
+                count: "2".into(),
+                duration: "3h".into(),
+            }]
         );
     }
 

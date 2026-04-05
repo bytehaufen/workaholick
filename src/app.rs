@@ -4,7 +4,7 @@ use crate::{
     config::Config,
     domain::{
         Command, Entry, EntryId, EntryPatch, Period, SummaryDay, SummaryReport, SummaryScope,
-        SummaryWeek, SummaryWindow, summary,
+        SummaryWeek, SummaryWindow, WorkItemReport, report, summary,
     },
     store::{EntryReader, EntryWriter, ValidatedEntryStore},
 };
@@ -66,8 +66,6 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
         Ok(Self { config, v_store: ValidatedEntryStore::new(store)?, clock })
     }
 
-    // TODO:
-    // - Implement methods: day, status, report
     pub fn append(&mut self, command: Command) -> anyhow::Result<EntryId> {
         let now = self.clock.now();
         let entry = EntryPatch::new(now, command);
@@ -135,6 +133,13 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
             }
             _ => Ok(SummaryReport::new(window, summary)),
         }
+    }
+
+    pub fn report(&self, scope: SummaryScope) -> anyhow::Result<WorkItemReport> {
+        let window = self.summary_window(scope)?;
+        let entries = self.collect_entries(|entry| *entry.timestamp() < window.end());
+
+        Ok(report(&entries, window)?)
     }
 
     fn collect_entries<F: Fn(&Entry) -> bool>(&self, predicate: F) -> Vec<DayEntryView> {
@@ -834,5 +839,77 @@ mod tests {
 
         assert_eq!(report.summary().active_time(kind), chrono::TimeDelta::hours(10));
         assert_eq!(report.summary().break_time(kind), chrono::TimeDelta::zero());
+    }
+
+    #[test]
+    fn report_returns_completed_items_for_the_scope() {
+        let now = ts(15, 12);
+        let kind = ActivityKind::Work { context: WorkContext::Office };
+        let store = FakeStore::default().seed(vec![
+            (1.into(), EntryPatch::new(ts(10, 8), Command::Start { kind })),
+            (
+                2.into(),
+                EntryPatch::new(
+                    Local.with_ymd_and_hms(2026, 1, 10, 10, 0, 0).unwrap(),
+                    Command::Log { title: "handoff".into(), description: None },
+                ),
+            ),
+            (
+                3.into(),
+                EntryPatch::new(
+                    ts(10, 12),
+                    Command::End { title: "wrap".into(), description: None },
+                ),
+            ),
+        ]);
+        let app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let report = app.report(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
+
+        assert_eq!(report.rows().len(), 2);
+        assert_eq!(report.rows()[0].title(), "handoff");
+        assert_eq!(report.rows()[0].duration_minutes(), 120);
+        assert_eq!(report.rows()[1].title(), "wrap");
+        assert_eq!(report.rows()[1].duration_minutes(), 120);
+    }
+
+    #[test]
+    fn report_uses_entries_before_scope_for_carry_in_state() {
+        let now = ts(15, 12);
+        let kind = ActivityKind::Work { context: WorkContext::Office };
+        let store = FakeStore::default().seed(vec![
+            (
+                1.into(),
+                EntryPatch::new(
+                    Local.with_ymd_and_hms(2026, 1, 9, 20, 0, 0).unwrap(),
+                    Command::Start { kind },
+                ),
+            ),
+            (
+                2.into(),
+                EntryPatch::new(
+                    ts(10, 10),
+                    Command::End { title: "done".into(), description: None },
+                ),
+            ),
+        ]);
+        let app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let report = app.report(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
+
+        assert_eq!(report.rows().len(), 1);
+        assert_eq!(report.rows()[0].start(), ts(10, 0));
+        assert_eq!(report.rows()[0].end(), ts(10, 10));
+        assert_eq!(report.rows()[0].duration_minutes(), 10 * 60);
     }
 }

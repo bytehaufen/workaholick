@@ -2,10 +2,10 @@ use chrono::NaiveDate;
 use termimad::Alignment;
 
 use crate::DayEntryView;
-use crate::domain::SummaryReport;
+use crate::domain::{ReportGroupBy, SummaryReport, WorkItemReport};
 
 use super::Formatter;
-use super::{format_day_command, prepare_summary};
+use super::{format_day_command, prepare_report, prepare_summary};
 
 pub struct MarkdownFormatter;
 
@@ -125,6 +125,70 @@ impl Formatter for MarkdownFormatter {
 
         output
     }
+
+    fn format_report(
+        report: &WorkItemReport,
+        group_by: Option<ReportGroupBy>,
+        summary: Option<&SummaryReport>,
+    ) -> String {
+        let report = prepare_report(report, group_by);
+        let mut output = String::new();
+        output.push_str(&format!("# {}\n\n", report.title));
+
+        if !report.groups.is_empty() {
+            output.push_str("| Title | Count | Duration |\n");
+            output.push_str("| :-- | --: | --: |\n");
+
+            report.groups.iter().for_each(|row| {
+                output.push_str(&format!(
+                    "| {} | {} | {} |\n",
+                    escape_markdown_table_cell(&row.title),
+                    row.count,
+                    row.duration,
+                ));
+            });
+        } else if report.rows.is_empty() {
+            output.push_str("_No completed items._\n");
+        } else {
+            if report.show_description {
+                output.push_str("| Date | Start | End | Duration | Title | Description |\n");
+                output.push_str("| :-- | :-- | :-- | --: | :-- | :-- |\n");
+
+                report.rows.iter().for_each(|row| {
+                    output.push_str(&format!(
+                        "| {} | {} | {} | {} | {} | {} |\n",
+                        row.date,
+                        row.start,
+                        row.end,
+                        row.duration,
+                        escape_markdown_table_cell(&row.title),
+                        escape_markdown_table_cell(&row.description),
+                    ));
+                });
+            } else {
+                output.push_str("| Date | Start | End | Duration | Title |\n");
+                output.push_str("| :-- | :-- | :-- | --: | :-- |\n");
+
+                report.rows.iter().for_each(|row| {
+                    output.push_str(&format!(
+                        "| {} | {} | {} | {} | {} |\n",
+                        row.date,
+                        row.start,
+                        row.end,
+                        row.duration,
+                        escape_markdown_table_cell(&row.title),
+                    ));
+                });
+            }
+        }
+
+        if let Some(summary) = summary {
+            output.push('\n');
+            output.push_str(&Self::format_summary(summary));
+        }
+
+        output
+    }
 }
 
 fn escape_markdown_table_cell(value: &str) -> String {
@@ -135,9 +199,10 @@ fn escape_markdown_table_cell(value: &str) -> String {
 mod tests {
     use chrono::{Local, TimeZone};
 
+    use crate::domain::report::WorkItemRow;
     use crate::domain::{
         ActivityKind, Command, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkContext,
-        summary,
+        WorkItemReport, summary,
     };
 
     use super::*;
@@ -327,6 +392,51 @@ _No tracked time._
         );
     }
 
+    #[test]
+    fn markdown_format_report_renders_detailed_rows() {
+        let rendered = MarkdownFormatter::format_report(&detailed_report(), None, None);
+
+        assert_eq!(
+            &rendered,
+            r#"# Report 2026-01-10
+
+| Date | Start | End | Duration | Title | Description |
+| :-- | :-- | :-- | --: | :-- | :-- |
+| 2026-01-10 | 08:00 | 10:00 | 2h | handoff | sync |
+| 2026-01-10 | 10:00 | 12:00 | 2h | wrap |  |
+"#
+        );
+    }
+
+    #[test]
+    fn markdown_format_report_renders_grouped_rows_and_summary() {
+        let window = SummaryWindow::new(
+            Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
+            Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
+        );
+        let summary = SummaryReport::new(window, summary(&[], window).unwrap());
+        let rendered = MarkdownFormatter::format_report(
+            &detailed_report(),
+            Some(ReportGroupBy::Title),
+            Some(&summary),
+        );
+
+        assert_eq!(
+            &rendered,
+            r#"# Report 2026-01-10 (grouped by title)
+
+| Title | Count | Duration |
+| :-- | --: | --: |
+| handoff | 1 | 2h |
+| wrap | 1 | 2h |
+
+# Summary 2026-01-10
+
+_No tracked time._
+"#
+        );
+    }
+
     fn summary_report(entries: Vec<DayEntryView>) -> SummaryReport {
         let window = SummaryWindow::new(
             Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
@@ -356,5 +466,32 @@ _No tracked time._
 
     fn day_entry(id: u64, timestamp: chrono::DateTime<Local>, command: Command) -> DayEntryView {
         DayEntryView { id: id.into(), timestamp, command }
+    }
+
+    fn detailed_report() -> WorkItemReport {
+        WorkItemReport::new(
+            SummaryWindow::new(
+                Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
+                Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
+            ),
+            vec![
+                WorkItemRow::new(
+                    Local.with_ymd_and_hms(2026, 1, 10, 10, 0, 0).unwrap().date_naive(),
+                    Local.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
+                    Local.with_ymd_and_hms(2026, 1, 10, 10, 0, 0).unwrap(),
+                    120,
+                    "handoff".into(),
+                    Some("sync".into()),
+                ),
+                WorkItemRow::new(
+                    Local.with_ymd_and_hms(2026, 1, 10, 12, 0, 0).unwrap().date_naive(),
+                    Local.with_ymd_and_hms(2026, 1, 10, 10, 0, 0).unwrap(),
+                    Local.with_ymd_and_hms(2026, 1, 10, 12, 0, 0).unwrap(),
+                    120,
+                    "wrap".into(),
+                    None,
+                ),
+            ],
+        )
     }
 }

@@ -83,5 +83,17 @@ fn run_inner<S: EntryReader + EntryWriter>(
             let report = app.summary(summary_args.scope())?;
             format::print_summary(formatter, &report)
         }
+        CliCommand::Report(report_args) => {
+            let scope = report_args.scope();
+            let report = app.report(scope.clone())?;
+            let summary = if report_args.summary { Some(app.summary(scope)?) } else { None };
+
+            format::print_report(
+                formatter,
+                &report,
+                report_args.group_by.map(Into::into),
+                summary.as_ref(),
+            )
+        }
     }
 }

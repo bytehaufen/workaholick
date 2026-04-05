@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
-use crate::domain::{ActivityKind, Period, SummaryScope, WorkContext};
+use crate::domain::{ActivityKind, Period, ReportGroupBy, SummaryScope, WorkContext};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -87,6 +87,9 @@ pub enum CliCommand {
     /// Show summaries
     #[command(visible_alias = "sum")]
     Summary(SummaryArgs),
+
+    /// Show completed work items for a scope
+    Report(ReportArgs),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Subcommand)]
@@ -143,8 +146,8 @@ pub enum ConfigCommand {
 }
 
 #[derive(Args, Debug, Clone)]
-#[command(group(ArgGroup::new("summary_scope").args(["period", "from"]).required(false)))]
-pub struct SummaryArgs {
+#[command(group(ArgGroup::new("scope").args(["period", "from"]).required(false)))]
+pub struct ScopeArgs {
     /// Preset period to summarize
     #[arg(value_enum, conflicts_with_all = ["from", "to"])]
     pub period: Option<PeriodArg>,
@@ -168,7 +171,7 @@ pub struct SummaryArgs {
     pub to: Option<NaiveDate>,
 }
 
-impl SummaryArgs {
+impl ScopeArgs {
     pub fn scope(&self) -> SummaryScope {
         match (self.period, self.offset, self.from, self.to) {
             (Some(period), offset, None, None) => {
@@ -185,6 +188,51 @@ fn parse_period_offset(value: &str) -> Result<i64, String> {
     let offset = value.parse::<i64>().map_err(|_| format!("invalid integer: {value}"))?;
 
     if offset > 0 { Err("period offset must be zero or negative".to_string()) } else { Ok(offset) }
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct SummaryArgs {
+    #[command(flatten)]
+    pub scope_args: ScopeArgs,
+}
+
+impl SummaryArgs {
+    pub fn scope(&self) -> SummaryScope {
+        self.scope_args.scope()
+    }
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ReportArgs {
+    #[command(flatten)]
+    pub scope_args: ScopeArgs,
+
+    /// Group the report rows
+    #[arg(long, value_enum)]
+    pub group_by: Option<ReportGroupByArg>,
+
+    /// Append the aggregate summary for the same scope
+    #[arg(long)]
+    pub summary: bool,
+}
+
+impl ReportArgs {
+    pub fn scope(&self) -> SummaryScope {
+        self.scope_args.scope()
+    }
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum, PartialEq, Eq)]
+pub enum ReportGroupByArg {
+    Title,
+}
+
+impl From<ReportGroupByArg> for ReportGroupBy {
+    fn from(value: ReportGroupByArg) -> Self {
+        match value {
+            ReportGroupByArg::Title => ReportGroupBy::Title,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -252,6 +300,41 @@ mod tests {
     fn summary_scope_rejects_positive_period_offset() {
         let err = Cli::try_parse_from(["workaholick", "summary", "month", "1"]).unwrap_err();
 
-        assert!(err.to_string().contains("summary period offset must be zero or negative"));
+        assert!(err.to_string().contains("period offset must be zero or negative"));
+    }
+
+    #[test]
+    fn report_scope_defaults_to_current_day() {
+        let cli = Cli::try_parse_from(["workaholick", "report"]).unwrap();
+
+        let CliCommand::Report(args) = cli.command else {
+            panic!("expected report command");
+        };
+
+        assert_eq!(args.scope(), SummaryScope::Period { period: Period::Day, offset: 0 });
+        assert_eq!(args.group_by, None);
+        assert!(!args.summary);
+    }
+
+    #[test]
+    fn report_scope_parses_grouping_and_summary_flag() {
+        let cli = Cli::try_parse_from([
+            "workaholick",
+            "report",
+            "week",
+            "-1",
+            "--group-by",
+            "title",
+            "--summary",
+        ])
+        .unwrap();
+
+        let CliCommand::Report(args) = cli.command else {
+            panic!("expected report command");
+        };
+
+        assert_eq!(args.scope(), SummaryScope::Period { period: Period::Week, offset: -1 });
+        assert_eq!(args.group_by, Some(ReportGroupByArg::Title));
+        assert!(args.summary);
     }
 }

@@ -1,9 +1,9 @@
 use chrono::NaiveDate;
 
 use super::Formatter;
-use super::{format_day_command, prepare_summary};
+use super::{format_day_command, prepare_report, prepare_summary};
 use crate::DayEntryView;
-use crate::domain::SummaryReport;
+use crate::domain::{ReportGroupBy, SummaryReport, WorkItemReport};
 
 pub struct PlainFormatter;
 
@@ -197,6 +197,149 @@ impl Formatter for PlainFormatter {
 
         output
     }
+
+    fn format_report(
+        report: &WorkItemReport,
+        group_by: Option<ReportGroupBy>,
+        summary: Option<&SummaryReport>,
+    ) -> String {
+        let report = prepare_report(report, group_by);
+        let mut output = String::new();
+        output.push_str(&report.title);
+        output.push_str("\n\n");
+
+        if !report.groups.is_empty() {
+            let title_width = report
+                .groups
+                .iter()
+                .map(|row| row.title.len())
+                .max()
+                .unwrap_or("Title".len())
+                .max("Title".len());
+            let count_width = report
+                .groups
+                .iter()
+                .map(|row| row.count.len())
+                .max()
+                .unwrap_or("Count".len())
+                .max("Count".len());
+            let duration_width = report
+                .groups
+                .iter()
+                .map(|row| row.duration.len())
+                .max()
+                .unwrap_or("Duration".len())
+                .max("Duration".len());
+
+            output.push_str(&format!(
+                "{:<title_width$}  {:>count_width$}  {:>duration_width$}\n",
+                "Title", "Count", "Duration",
+            ));
+            output.push_str(&format!(
+                "{:-<title_width$}  {:-<count_width$}  {:-<duration_width$}\n",
+                "", "", "",
+            ));
+
+            for row in &report.groups {
+                let line = format!(
+                    "{:<title_width$}  {:>count_width$}  {:>duration_width$}\n",
+                    row.title, row.count, row.duration,
+                );
+                output.push_str(line.trim_end());
+                output.push('\n');
+            }
+        } else if report.rows.is_empty() {
+            output.push_str("No completed items.\n");
+        } else {
+            let date_width = report
+                .rows
+                .iter()
+                .map(|row| row.date.len())
+                .max()
+                .unwrap_or("Date".len())
+                .max("Date".len());
+            let start_width = report
+                .rows
+                .iter()
+                .map(|row| row.start.len())
+                .max()
+                .unwrap_or("Start".len())
+                .max("Start".len());
+            let end_width = report
+                .rows
+                .iter()
+                .map(|row| row.end.len())
+                .max()
+                .unwrap_or("End".len())
+                .max("End".len());
+            let duration_width = report
+                .rows
+                .iter()
+                .map(|row| row.duration.len())
+                .max()
+                .unwrap_or("Duration".len())
+                .max("Duration".len());
+            let title_width = report
+                .rows
+                .iter()
+                .map(|row| row.title.len())
+                .max()
+                .unwrap_or("Title".len())
+                .max("Title".len());
+            let description_width = report
+                .rows
+                .iter()
+                .map(|row| row.description.len())
+                .max()
+                .unwrap_or("Description".len())
+                .max("Description".len());
+
+            if report.show_description {
+                output.push_str(&format!(
+                    "{:<date_width$}  {:<start_width$}  {:<end_width$}  {:>duration_width$}  {:<title_width$}  {:<description_width$}\n",
+                    "Date", "Start", "End", "Duration", "Title", "Description",
+                ));
+                output.push_str(&format!(
+                    "{:-<date_width$}  {:-<start_width$}  {:-<end_width$}  {:-<duration_width$}  {:-<title_width$}  {:-<description_width$}\n",
+                    "", "", "", "", "", "",
+                ));
+
+                for row in &report.rows {
+                    let line = format!(
+                        "{:<date_width$}  {:<start_width$}  {:<end_width$}  {:>duration_width$}  {:<title_width$}  {:<description_width$}\n",
+                        row.date, row.start, row.end, row.duration, row.title, row.description,
+                    );
+                    output.push_str(line.trim_end());
+                    output.push('\n');
+                }
+            } else {
+                output.push_str(&format!(
+                    "{:<date_width$}  {:<start_width$}  {:<end_width$}  {:>duration_width$}  {:<title_width$}\n",
+                    "Date", "Start", "End", "Duration", "Title",
+                ));
+                output.push_str(&format!(
+                    "{:-<date_width$}  {:-<start_width$}  {:-<end_width$}  {:-<duration_width$}  {:-<title_width$}\n",
+                    "", "", "", "", "",
+                ));
+
+                for row in &report.rows {
+                    let line = format!(
+                        "{:<date_width$}  {:<start_width$}  {:<end_width$}  {:>duration_width$}  {:<title_width$}\n",
+                        row.date, row.start, row.end, row.duration, row.title,
+                    );
+                    output.push_str(line.trim_end());
+                    output.push('\n');
+                }
+            }
+        }
+
+        if let Some(summary) = summary {
+            output.push('\n');
+            output.push_str(&Self::format_summary(summary));
+        }
+
+        output
+    }
 }
 
 fn format_day_entry(entry: &DayEntryView, id_width: usize) -> String {
@@ -209,9 +352,10 @@ fn format_day_entry(entry: &DayEntryView, id_width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::report::WorkItemRow;
     use crate::domain::{
         ActivityKind, Command, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkContext,
-        summary,
+        WorkItemReport, summary,
     };
     use chrono::{Local, TimeZone};
 
@@ -388,6 +532,60 @@ TOTAL        48h     40h       0m
         );
     }
 
+    #[test]
+    fn plain_format_report_renders_detailed_rows() {
+        let rendered = PlainFormatter::format_report(&detailed_report(), None, None);
+
+        assert_eq!(
+            &rendered,
+            r#"Report 2026-01-10
+
+Date        Start  End    Duration  Title    Description
+----------  -----  -----  --------  -------  -----------
+2026-01-10  08:00  10:00        2h  handoff  sync
+2026-01-10  10:00  12:00        2h  wrap
+"#
+        );
+    }
+
+    #[test]
+    fn plain_format_report_renders_grouped_rows_and_appends_summary() {
+        let summary = SummaryReport::new(
+            SummaryWindow::new(
+                Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
+                Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
+            ),
+            summary(
+                &[],
+                SummaryWindow::new(
+                    Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
+                    Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
+                ),
+            )
+            .unwrap(),
+        );
+        let rendered = PlainFormatter::format_report(
+            &detailed_report(),
+            Some(ReportGroupBy::Title),
+            Some(&summary),
+        );
+
+        assert_eq!(
+            &rendered,
+            r#"Report 2026-01-10 (grouped by title)
+
+Title    Count  Duration
+-------  -----  --------
+handoff      1        2h
+wrap         1        2h
+
+Summary 2026-01-10
+
+No tracked time.
+"#
+        );
+    }
+
     fn summary_report(entries: Vec<DayEntryView>) -> SummaryReport {
         let window = SummaryWindow::new(
             Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
@@ -417,5 +615,32 @@ TOTAL        48h     40h       0m
 
     fn day_entry(id: u64, timestamp: chrono::DateTime<Local>, command: Command) -> DayEntryView {
         DayEntryView { id: id.into(), timestamp, command }
+    }
+
+    fn detailed_report() -> WorkItemReport {
+        WorkItemReport::new(
+            SummaryWindow::new(
+                Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
+                Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
+            ),
+            vec![
+                WorkItemRow::new(
+                    Local.with_ymd_and_hms(2026, 1, 10, 10, 0, 0).unwrap().date_naive(),
+                    Local.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
+                    Local.with_ymd_and_hms(2026, 1, 10, 10, 0, 0).unwrap(),
+                    120,
+                    "handoff".into(),
+                    Some("sync".into()),
+                ),
+                WorkItemRow::new(
+                    Local.with_ymd_and_hms(2026, 1, 10, 12, 0, 0).unwrap().date_naive(),
+                    Local.with_ymd_and_hms(2026, 1, 10, 10, 0, 0).unwrap(),
+                    Local.with_ymd_and_hms(2026, 1, 10, 12, 0, 0).unwrap(),
+                    120,
+                    "wrap".into(),
+                    None,
+                ),
+            ],
+        )
     }
 }
