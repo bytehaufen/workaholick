@@ -1,4 +1,5 @@
 {
+  installShellFiles,
   rustPlatform,
   version ? "git",
   rev ? "unknown",
@@ -18,6 +19,8 @@ in
     pname = "workaholick";
     inherit version src;
 
+    nativeBuildInputs = [installShellFiles];
+
     cargoLock = {
       lockFile = "${src}/Cargo.lock";
     };
@@ -29,7 +32,13 @@ in
       VERGEN_BUILD_DATE = builtins.concatStringsSep "-" (builtins.match "(.{4})(.{2})(.{2}).*" date);
     };
 
-    postInstall = '''';
+    postInstall = ''
+      installShellCompletion \
+        --cmd workaholick \
+        --bash <($out/bin/workaholick completions bash) \
+        --fish <($out/bin/workaholick completions fish) \
+        --zsh <($out/bin/workaholick completions zsh)
+    '';
 
     meta = {
       description = "todo";

@@ -1,5 +1,6 @@
 use chrono::NaiveDate;
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
 use std::path::PathBuf;
 
 use crate::domain::{ActivityKind, Period, ReportGroupBy, SummaryScope, WorkContext};
@@ -25,6 +26,12 @@ pub enum CliCommand {
     Config {
         #[command(subcommand)]
         command: Option<ConfigCommand>,
+    },
+
+    /// Print shell completion script to stdout
+    Completions {
+        #[arg(value_enum)]
+        shell: CompletionShell,
     },
 
     // --- Write commands  ---
@@ -143,6 +150,32 @@ pub enum ConfigCommand {
 
     /// Create config file if missing
     Init,
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum, PartialEq, Eq)]
+pub enum CompletionShell {
+    #[value(name = "bash")]
+    Bash,
+    #[value(name = "elvish")]
+    Elvish,
+    #[value(name = "fish")]
+    Fish,
+    #[value(name = "powershell")]
+    PowerShell,
+    #[value(name = "zsh")]
+    Zsh,
+}
+
+impl From<CompletionShell> for Shell {
+    fn from(value: CompletionShell) -> Self {
+        match value {
+            CompletionShell::Bash => Self::Bash,
+            CompletionShell::Elvish => Self::Elvish,
+            CompletionShell::Fish => Self::Fish,
+            CompletionShell::PowerShell => Self::PowerShell,
+            CompletionShell::Zsh => Self::Zsh,
+        }
+    }
 }
 
 #[derive(Args, Debug, Clone)]
@@ -350,5 +383,16 @@ mod tests {
         };
 
         assert_eq!(args.group_by, Some(ReportGroupByArg::TitleDescription));
+    }
+
+    #[test]
+    fn completions_shell_parses() {
+        let cli = Cli::try_parse_from(["workaholick", "completions", "zsh"]).unwrap();
+
+        let CliCommand::Completions { shell } = cli.command else {
+            panic!("expected completions command");
+        };
+
+        assert_eq!(shell, CompletionShell::Zsh);
     }
 }

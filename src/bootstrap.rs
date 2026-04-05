@@ -11,6 +11,11 @@ pub fn run_app() -> Result<()> {
 
     let editor = ShellEditor::real();
 
+    if let CliCommand::Completions { shell } = &cli.command {
+        cli::print_completions(*shell);
+        return Ok(());
+    }
+
     if let CliCommand::Config { command } = &cli.command {
         let config_override = cli.config.as_deref();
 

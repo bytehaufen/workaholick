@@ -38,6 +38,7 @@ fn run_inner<S: EntryReader + EntryWriter>(
         CliCommand::Web => web::run(app),
 
         CliCommand::Config { .. } => anyhow::bail!("config handled in main"),
+        CliCommand::Completions { .. } => anyhow::bail!("completions handled in main"),
 
         CliCommand::Start { kind } => append_and_print!(app, Command::Start { kind: kind.into() }),
         CliCommand::End { title, description } => {
