@@ -216,6 +216,13 @@ impl Formatter for PlainFormatter {
                 .max()
                 .unwrap_or("Title".len())
                 .max("Title".len());
+            let description_width = report
+                .groups
+                .iter()
+                .map(|row| row.description.len())
+                .max()
+                .unwrap_or("Description".len())
+                .max("Description".len());
             let count_width = report
                 .groups
                 .iter()
@@ -231,22 +238,42 @@ impl Formatter for PlainFormatter {
                 .unwrap_or("Duration".len())
                 .max("Duration".len());
 
-            output.push_str(&format!(
-                "{:<title_width$}  {:>count_width$}  {:>duration_width$}\n",
-                "Title", "Count", "Duration",
-            ));
-            output.push_str(&format!(
-                "{:-<title_width$}  {:-<count_width$}  {:-<duration_width$}\n",
-                "", "", "",
-            ));
+            if report.show_group_description {
+                output.push_str(&format!(
+                    "{:<title_width$}  {:<description_width$}  {:>count_width$}  {:>duration_width$}\n",
+                    "Title", "Description", "Count", "Duration",
+                ));
+                output.push_str(&format!(
+                    "{:-<title_width$}  {:-<description_width$}  {:-<count_width$}  {:-<duration_width$}\n",
+                    "", "", "", "",
+                ));
 
-            for row in &report.groups {
-                let line = format!(
+                for row in &report.groups {
+                    let line = format!(
+                        "{:<title_width$}  {:<description_width$}  {:>count_width$}  {:>duration_width$}\n",
+                        row.title, row.description, row.count, row.duration,
+                    );
+                    output.push_str(line.trim_end());
+                    output.push('\n');
+                }
+            } else {
+                output.push_str(&format!(
                     "{:<title_width$}  {:>count_width$}  {:>duration_width$}\n",
-                    row.title, row.count, row.duration,
-                );
-                output.push_str(line.trim_end());
-                output.push('\n');
+                    "Title", "Count", "Duration",
+                ));
+                output.push_str(&format!(
+                    "{:-<title_width$}  {:-<count_width$}  {:-<duration_width$}\n",
+                    "", "", "",
+                ));
+
+                for row in &report.groups {
+                    let line = format!(
+                        "{:<title_width$}  {:>count_width$}  {:>duration_width$}\n",
+                        row.title, row.count, row.duration,
+                    );
+                    output.push_str(line.trim_end());
+                    output.push('\n');
+                }
             }
         } else if report.rows.is_empty() {
             output.push_str("No completed items.\n");
@@ -582,6 +609,26 @@ wrap         1        2h
 Summary 2026-01-10
 
 No tracked time.
+"#
+        );
+    }
+
+    #[test]
+    fn plain_format_report_renders_grouped_rows_by_title_description() {
+        let rendered = PlainFormatter::format_report(
+            &detailed_report(),
+            Some(ReportGroupBy::TitleDescription),
+            None,
+        );
+
+        assert_eq!(
+            &rendered,
+            r#"Report 2026-01-10 (grouped by title + description)
+
+Title    Description  Count  Duration
+-------  -----------  -----  --------
+handoff  sync             1        2h
+wrap     -                1        2h
 "#
         );
     }

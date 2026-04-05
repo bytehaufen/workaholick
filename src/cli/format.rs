@@ -168,6 +168,7 @@ pub(super) struct ReportDisplay {
     pub rows: Vec<ReportItemDisplay>,
     pub groups: Vec<ReportGroupDisplay>,
     pub show_description: bool,
+    pub show_group_description: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,6 +184,7 @@ pub(super) struct ReportItemDisplay {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ReportGroupDisplay {
     pub title: String,
+    pub description: String,
     pub count: String,
     pub duration: String,
 }
@@ -302,11 +304,29 @@ pub(super) fn prepare_report(
                 .into_iter()
                 .map(|row| ReportGroupDisplay {
                     title: row.title().to_string(),
+                    description: String::new(),
                     count: row.count().to_string(),
                     duration: format_summary_duration(row.duration_minutes()),
                 })
                 .collect(),
             show_description: false,
+            show_group_description: false,
+        },
+        Some(ReportGroupBy::TitleDescription) => ReportDisplay {
+            title: format_report_title(report.window(), group_by),
+            rows: Vec::new(),
+            groups: report
+                .group_by_title_description()
+                .into_iter()
+                .map(|row| ReportGroupDisplay {
+                    title: row.title().to_string(),
+                    description: row.description().unwrap_or("-").to_string(),
+                    count: row.count().to_string(),
+                    duration: format_summary_duration(row.duration_minutes()),
+                })
+                .collect(),
+            show_description: false,
+            show_group_description: true,
         },
         None => {
             let rows = report
@@ -325,6 +345,7 @@ pub(super) fn prepare_report(
             ReportDisplay {
                 title: format_report_title(report.window(), group_by),
                 show_description: rows.iter().any(|row| !row.description.is_empty()),
+                show_group_description: false,
                 rows,
                 groups: Vec::new(),
             }
@@ -343,6 +364,9 @@ pub(super) fn format_report_title(
     match group_by {
         Some(ReportGroupBy::Title) => {
             format!("Report {} (grouped by title)", format_summary_window(window))
+        }
+        Some(ReportGroupBy::TitleDescription) => {
+            format!("Report {} (grouped by title + description)", format_summary_window(window))
         }
         None => format!("Report {}", format_summary_window(window)),
     }
@@ -544,6 +568,7 @@ mod tests {
         assert_eq!(display.title, "Report 2026-01-10");
         assert!(display.groups.is_empty());
         assert!(display.show_description);
+        assert!(!display.show_group_description);
         assert_eq!(
             display.rows,
             vec![
@@ -595,13 +620,63 @@ mod tests {
 
         assert_eq!(display.title, "Report 2026-01-10 (grouped by title)");
         assert!(display.rows.is_empty());
+        assert!(!display.show_group_description);
         assert_eq!(
             display.groups,
             vec![ReportGroupDisplay {
                 title: "review".into(),
+                description: String::new(),
                 count: "2".into(),
                 duration: "3h".into(),
             }]
+        );
+    }
+
+    #[test]
+    fn prepare_report_groups_rows_by_title_description() {
+        let report = WorkItemReport::new(
+            SummaryWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
+            vec![
+                WorkItemRow::new(
+                    ts(10, 10, 0).date_naive(),
+                    ts(10, 8, 0),
+                    ts(10, 10, 0),
+                    120,
+                    "review".into(),
+                    Some("PR #184".into()),
+                ),
+                WorkItemRow::new(
+                    ts(10, 12, 0).date_naive(),
+                    ts(10, 10, 0),
+                    ts(10, 12, 0),
+                    30,
+                    "review".into(),
+                    None,
+                ),
+            ],
+        );
+
+        let display = prepare_report(&report, Some(ReportGroupBy::TitleDescription));
+
+        assert_eq!(display.title, "Report 2026-01-10 (grouped by title + description)");
+        assert!(display.rows.is_empty());
+        assert!(display.show_group_description);
+        assert_eq!(
+            display.groups,
+            vec![
+                ReportGroupDisplay {
+                    title: "review".into(),
+                    description: "PR #184".into(),
+                    count: "1".into(),
+                    duration: "2h".into(),
+                },
+                ReportGroupDisplay {
+                    title: "review".into(),
+                    description: "-".into(),
+                    count: "1".into(),
+                    duration: "30m".into(),
+                },
+            ]
         );
     }
 

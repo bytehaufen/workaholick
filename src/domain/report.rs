@@ -12,6 +12,7 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportGroupBy {
     Title,
+    TitleDescription,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +87,41 @@ impl ReportTitleGroup {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportTitleDescriptionGroup {
+    title: String,
+    description: Option<String>,
+    count: usize,
+    duration_minutes: i64,
+}
+
+impl ReportTitleDescriptionGroup {
+    fn new(
+        title: String,
+        description: Option<String>,
+        count: usize,
+        duration_minutes: i64,
+    ) -> Self {
+        Self { title, description, count, duration_minutes }
+    }
+
+    pub(crate) fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub(crate) fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
+    pub(crate) fn count(&self) -> usize {
+        self.count
+    }
+
+    pub(crate) fn duration_minutes(&self) -> i64 {
+        self.duration_minutes
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkItemReport {
     window: SummaryWindow,
@@ -128,6 +164,40 @@ impl WorkItemReport {
                 .duration_minutes
                 .cmp(&left.duration_minutes)
                 .then_with(|| left.title.cmp(&right.title))
+        });
+        rows
+    }
+
+    pub(crate) fn group_by_title_description(&self) -> Vec<ReportTitleDescriptionGroup> {
+        let mut by_title_description = self.rows.iter().fold(
+            std::collections::HashMap::<(String, Option<String>), (usize, i64)>::new(),
+            |mut grouped, row| {
+                let entry =
+                    grouped.entry((row.title.clone(), row.description.clone())).or_insert((0, 0));
+                entry.0 += 1;
+                entry.1 += row.duration_minutes;
+                grouped
+            },
+        );
+
+        let mut rows = by_title_description
+            .drain()
+            .map(|((title, description), (count, duration_minutes))| {
+                ReportTitleDescriptionGroup::new(title, description, count, duration_minutes)
+            })
+            .collect::<Vec<_>>();
+
+        rows.sort_by(|left, right| {
+            right
+                .duration_minutes
+                .cmp(&left.duration_minutes)
+                .then_with(|| left.title.cmp(&right.title))
+                .then_with(|| {
+                    left.description
+                        .as_deref()
+                        .unwrap_or("")
+                        .cmp(right.description.as_deref().unwrap_or(""))
+                })
         });
         rows
     }
@@ -413,6 +483,61 @@ mod tests {
             vec![
                 ReportTitleGroup::new("review".into(), 2, 240),
                 ReportTitleGroup::new("Review".into(), 1, 60),
+            ]
+        );
+    }
+
+    #[test]
+    fn group_by_title_description_splits_distinct_descriptions() {
+        let report = WorkItemReport::new(
+            window(10, 0, 11, 0),
+            vec![
+                WorkItemRow::new(
+                    ts(10, 10, 0).date_naive(),
+                    ts(10, 8, 0),
+                    ts(10, 10, 0),
+                    120,
+                    "review".into(),
+                    Some("PR #184".into()),
+                ),
+                WorkItemRow::new(
+                    ts(10, 12, 0).date_naive(),
+                    ts(10, 10, 0),
+                    ts(10, 12, 0),
+                    60,
+                    "review".into(),
+                    Some("PR #184".into()),
+                ),
+                WorkItemRow::new(
+                    ts(10, 13, 0).date_naive(),
+                    ts(10, 12, 0),
+                    ts(10, 13, 0),
+                    60,
+                    "review".into(),
+                    Some("architecture notes".into()),
+                ),
+                WorkItemRow::new(
+                    ts(10, 14, 0).date_naive(),
+                    ts(10, 13, 0),
+                    ts(10, 14, 0),
+                    30,
+                    "review".into(),
+                    None,
+                ),
+            ],
+        );
+
+        assert_eq!(
+            report.group_by_title_description(),
+            vec![
+                ReportTitleDescriptionGroup::new("review".into(), Some("PR #184".into()), 2, 180),
+                ReportTitleDescriptionGroup::new(
+                    "review".into(),
+                    Some("architecture notes".into()),
+                    1,
+                    60,
+                ),
+                ReportTitleDescriptionGroup::new("review".into(), None, 1, 30),
             ]
         );
     }

@@ -225,12 +225,14 @@ impl ReportArgs {
 #[derive(Copy, Clone, Debug, ValueEnum, PartialEq, Eq)]
 pub enum ReportGroupByArg {
     Title,
+    TitleDescription,
 }
 
 impl From<ReportGroupByArg> for ReportGroupBy {
     fn from(value: ReportGroupByArg) -> Self {
         match value {
             ReportGroupByArg::Title => ReportGroupBy::Title,
+            ReportGroupByArg::TitleDescription => ReportGroupBy::TitleDescription,
         }
     }
 }
@@ -336,5 +338,17 @@ mod tests {
         assert_eq!(args.scope(), SummaryScope::Period { period: Period::Week, offset: -1 });
         assert_eq!(args.group_by, Some(ReportGroupByArg::Title));
         assert!(args.summary);
+    }
+
+    #[test]
+    fn report_scope_parses_title_description_grouping() {
+        let cli = Cli::try_parse_from(["workaholick", "report", "--group-by", "title-description"])
+            .unwrap();
+
+        let CliCommand::Report(args) = cli.command else {
+            panic!("expected report command");
+        };
+
+        assert_eq!(args.group_by, Some(ReportGroupByArg::TitleDescription));
     }
 }

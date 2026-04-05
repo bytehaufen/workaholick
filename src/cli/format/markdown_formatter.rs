@@ -136,17 +136,32 @@ impl Formatter for MarkdownFormatter {
         output.push_str(&format!("# {}\n\n", report.title));
 
         if !report.groups.is_empty() {
-            output.push_str("| Title | Count | Duration |\n");
-            output.push_str("| :-- | --: | --: |\n");
+            if report.show_group_description {
+                output.push_str("| Title | Description | Count | Duration |\n");
+                output.push_str("| :-- | :-- | --: | --: |\n");
 
-            report.groups.iter().for_each(|row| {
-                output.push_str(&format!(
-                    "| {} | {} | {} |\n",
-                    escape_markdown_table_cell(&row.title),
-                    row.count,
-                    row.duration,
-                ));
-            });
+                report.groups.iter().for_each(|row| {
+                    output.push_str(&format!(
+                        "| {} | {} | {} | {} |\n",
+                        escape_markdown_table_cell(&row.title),
+                        escape_markdown_table_cell(&row.description),
+                        row.count,
+                        row.duration,
+                    ));
+                });
+            } else {
+                output.push_str("| Title | Count | Duration |\n");
+                output.push_str("| :-- | --: | --: |\n");
+
+                report.groups.iter().for_each(|row| {
+                    output.push_str(&format!(
+                        "| {} | {} | {} |\n",
+                        escape_markdown_table_cell(&row.title),
+                        row.count,
+                        row.duration,
+                    ));
+                });
+            }
         } else if report.rows.is_empty() {
             output.push_str("_No completed items._\n");
         } else {
@@ -433,6 +448,26 @@ _No tracked time._
 # Summary 2026-01-10
 
 _No tracked time._
+"#
+        );
+    }
+
+    #[test]
+    fn markdown_format_report_renders_grouped_rows_by_title_description() {
+        let rendered = MarkdownFormatter::format_report(
+            &detailed_report(),
+            Some(ReportGroupBy::TitleDescription),
+            None,
+        );
+
+        assert_eq!(
+            &rendered,
+            r#"# Report 2026-01-10 (grouped by title + description)
+
+| Title | Description | Count | Duration |
+| :-- | :-- | --: | --: |
+| handoff | sync | 1 | 2h |
+| wrap | - | 1 | 2h |
 "#
         );
     }
