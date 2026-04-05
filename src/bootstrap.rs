@@ -13,6 +13,7 @@ pub fn run_app() -> Result<()> {
 
     if let CliCommand::Config { command } = &cli.command {
         let config_override = cli.config.as_deref();
+
         match command.as_ref().unwrap_or(&ConfigCommand::Show) {
             ConfigCommand::Show => {
                 if let Some(path) = config_override {

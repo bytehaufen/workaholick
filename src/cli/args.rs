@@ -155,7 +155,7 @@ pub struct SummaryArgs {
         requires = "period",
         conflicts_with_all = ["from", "to"],
         allow_hyphen_values = true,
-        value_parser = parse_summary_period_offset
+        value_parser = parse_period_offset
     )]
     pub offset: Option<i64>,
 
@@ -181,20 +181,16 @@ impl SummaryArgs {
     }
 }
 
-fn parse_summary_period_offset(value: &str) -> Result<i64, String> {
+fn parse_period_offset(value: &str) -> Result<i64, String> {
     let offset = value.parse::<i64>().map_err(|_| format!("invalid integer: {value}"))?;
 
-    if offset > 0 {
-        Err("summary period offset must be zero or negative".to_string())
-    } else {
-        Ok(offset)
-    }
+    if offset > 0 { Err("period offset must be zero or negative".to_string()) } else { Ok(offset) }
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum PeriodArg {
     /// Today (default)
-    #[value(alias = "t")]
+    #[value(alias = "d")]
     Day,
 
     /// This week
