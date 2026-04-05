@@ -125,6 +125,7 @@ pub(super) struct SummaryDisplay {
     pub total: SummaryDisplayRow,
     pub weekly_days: Vec<SummaryDayDisplay>,
     pub weekly_balances: Vec<SummaryWeekDisplay>,
+    pub weekly_balances_total: Option<SummaryWeekDisplay>,
     pub target: Option<String>,
     pub balance: Option<String>,
 }
@@ -195,7 +196,24 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
                 .map(format_signed_summary_duration)
                 .unwrap_or_else(|| "n/a".to_string()),
         })
-        .collect();
+        .collect::<Vec<_>>();
+    let weekly_balances_total = if report.weekly_balances().is_empty() {
+        None
+    } else {
+        let total_worked_minutes =
+            report.weekly_balances().iter().map(|week| week.worked_minutes()).sum();
+        let total_target_minutes: i64 =
+            report.weekly_balances().iter().filter_map(|week| week.target_minutes()).sum();
+        let total_balance_minutes: i64 =
+            report.weekly_balances().iter().filter_map(|week| week.balance_minutes()).sum();
+
+        Some(SummaryWeekDisplay {
+            week: "TOTAL".to_string(),
+            worked: format_summary_duration(total_worked_minutes),
+            target: format_summary_duration(total_target_minutes),
+            balance: format_signed_summary_duration(total_balance_minutes),
+        })
+    };
 
     SummaryDisplay {
         title: format_summary_title(report.window()),
@@ -208,6 +226,7 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
         }),
         weekly_days,
         weekly_balances,
+        weekly_balances_total,
         target: report.weekly_target_minutes().map(format_summary_duration),
         balance: report.balance_minutes().map(format_signed_summary_duration),
     }
@@ -436,6 +455,7 @@ mod tests {
             ]
         );
         assert!(display.weekly_balances.is_empty());
+        assert_eq!(display.weekly_balances_total, None);
         assert_eq!(display.target, Some("40h".into()));
         assert_eq!(display.balance, Some("-34h 15m".into()));
     }
@@ -474,6 +494,15 @@ mod tests {
                     balance: "0m".into(),
                 },
             ]
+        );
+        assert_eq!(
+            display.weekly_balances_total,
+            Some(SummaryWeekDisplay {
+                week: "TOTAL".into(),
+                worked: "48h".into(),
+                target: "40h".into(),
+                balance: "0m".into(),
+            })
         );
         assert!(display.weekly_days.is_empty());
         assert_eq!(display.target, None);

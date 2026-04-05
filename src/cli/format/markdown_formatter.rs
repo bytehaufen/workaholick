@@ -103,6 +103,16 @@ impl Formatter for MarkdownFormatter {
                 ));
             });
 
+            if let Some(total) = &summary.weekly_balances_total {
+                output.push_str(&format!(
+                    "| {} | {} | {} | {} |\n",
+                    escape_markdown_table_cell(&total.week),
+                    total.worked,
+                    total.target,
+                    total.balance,
+                ));
+            }
+
             output.push('\n');
         }
 
@@ -311,6 +321,7 @@ _No tracked time._
 | :-- | --: | --: | --: |
 | 2026-W01 | 8h | n/a | n/a |
 | 2026-W02 | 40h | 40h | 0m |
+| TOTAL | 48h | 40h | 0m |
 
 "#
         );

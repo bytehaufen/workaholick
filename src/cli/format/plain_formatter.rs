@@ -136,6 +136,7 @@ impl Formatter for PlainFormatter {
             let week_width = summary
                 .weekly_balances
                 .iter()
+                .chain(summary.weekly_balances_total.iter())
                 .map(|row| row.week.len())
                 .max()
                 .unwrap_or("Week".len())
@@ -143,6 +144,7 @@ impl Formatter for PlainFormatter {
             let worked_width = summary
                 .weekly_balances
                 .iter()
+                .chain(summary.weekly_balances_total.iter())
                 .map(|row| row.worked.len())
                 .max()
                 .unwrap_or("Worked".len())
@@ -150,6 +152,7 @@ impl Formatter for PlainFormatter {
             let target_width = summary
                 .weekly_balances
                 .iter()
+                .chain(summary.weekly_balances_total.iter())
                 .map(|row| row.target.len())
                 .max()
                 .unwrap_or("Target".len())
@@ -157,6 +160,7 @@ impl Formatter for PlainFormatter {
             let balance_width = summary
                 .weekly_balances
                 .iter()
+                .chain(summary.weekly_balances_total.iter())
                 .map(|row| row.balance.len())
                 .max()
                 .unwrap_or("Balance".len())
@@ -174,6 +178,13 @@ impl Formatter for PlainFormatter {
                 output.push_str(&format!(
                     "{:<week_width$}  {:>worked_width$}  {:>target_width$}  {:>balance_width$}\n",
                     row.week, row.worked, row.target, row.balance,
+                ));
+            }
+
+            if let Some(total) = &summary.weekly_balances_total {
+                output.push_str(&format!(
+                    "{:<week_width$}  {:>worked_width$}  {:>target_width$}  {:>balance_width$}\n",
+                    total.week, total.worked, total.target, total.balance,
                 ));
             }
         }
@@ -372,6 +383,7 @@ Week      Worked  Target  Balance
 --------  ------  ------  -------
 2026-W01      8h     n/a      n/a
 2026-W02     40h     40h       0m
+TOTAL        48h     40h       0m
 "#
         );
     }
