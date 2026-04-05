@@ -109,13 +109,22 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
     }
 
     pub fn summary(&self, scope: SummaryScope) -> anyhow::Result<SummaryReport> {
+        self.build_summary(scope, false)
+    }
+
+    pub fn report_summary(&self, scope: SummaryScope) -> anyhow::Result<SummaryReport> {
+        self.build_summary(scope, true)
+    }
+
+    fn build_summary(&self, scope: SummaryScope, work_only: bool) -> anyhow::Result<SummaryReport> {
         let window = self.summary_window(scope.clone())?;
         let entries = self.collect_entries(|entry| *entry.timestamp() < window.end());
         let summary = summary(&entries, window)?;
+        let summary = if work_only { summary.only_work() } else { summary };
 
         match scope {
             SummaryScope::Period { period: Period::Week, .. } => {
-                let weekly_days = weekly_summary_days(&entries, window)?;
+                let weekly_days = weekly_summary_days(&entries, window, work_only)?;
                 Ok(SummaryReport::with_weekly_balance(
                     window,
                     summary,
@@ -128,6 +137,7 @@ impl<STORE: EntryReader + EntryWriter, C: Clock> App<STORE, C> {
                     &entries,
                     window,
                     self.config.weekly_target_minutes(),
+                    work_only,
                 )?;
                 Ok(SummaryReport::with_weekly_breakdown(window, summary, weekly_balances))
             }
@@ -244,6 +254,7 @@ fn weekly_balance_breakdown(
     entries: &[DayEntryView],
     window: SummaryWindow,
     weekly_target_minutes: i64,
+    work_only: bool,
 ) -> anyhow::Result<Vec<SummaryWeek>> {
     let first_week_start = start_of_week(window.start().date_naive());
 
@@ -265,9 +276,15 @@ fn weekly_balance_breakdown(
 
         let week_summary = summary(entries, week_window)?;
 
+        let worked_minutes = if work_only {
+            week_summary.work_active_minutes()
+        } else {
+            week_summary.total_active_minutes()
+        };
+
         Ok(SummaryWeek::new(
             week_start,
-            week_summary.total_active_minutes(),
+            worked_minutes,
             (week_window.start() == full_week_start && week_window.end() == full_week_end)
                 .then_some(weekly_target_minutes),
         ))
@@ -278,6 +295,7 @@ fn weekly_balance_breakdown(
 fn weekly_summary_days(
     entries: &[DayEntryView],
     window: SummaryWindow,
+    work_only: bool,
 ) -> anyhow::Result<Vec<SummaryDay>> {
     let first_date = window.start().date_naive();
     let last_date = window.end().date_naive();
@@ -291,7 +309,12 @@ fn weekly_summary_days(
             if day_end > day_start {
                 let day_window = SummaryWindow::new(day_start, day_end);
                 let day_summary = summary(entries, day_window)?;
-                Ok(Some(SummaryDay::new(date, day_summary.total_active_minutes())))
+                let worked_minutes = if work_only {
+                    day_summary.work_active_minutes()
+                } else {
+                    day_summary.total_active_minutes()
+                };
+                Ok(Some(SummaryDay::new(date, worked_minutes)))
             } else {
                 Ok(None)
             }
@@ -911,5 +934,81 @@ mod tests {
         assert_eq!(report.rows()[0].start(), ts(10, 0));
         assert_eq!(report.rows()[0].end(), ts(10, 10));
         assert_eq!(report.rows()[0].duration_minutes(), 10 * 60);
+    }
+
+    #[test]
+    fn report_only_includes_work_items_in_mixed_ranges() {
+        let now = ts(15, 12);
+        let work = ActivityKind::Work { context: WorkContext::Office };
+        let store = FakeStore::default().seed(vec![
+            (1.into(), EntryPatch::new(ts(10, 8), Command::Start { kind: ActivityKind::Holiday })),
+            (
+                2.into(),
+                EntryPatch::new(
+                    ts(10, 10),
+                    Command::End { title: "holiday done".into(), description: None },
+                ),
+            ),
+            (3.into(), EntryPatch::new(ts(10, 10), Command::Start { kind: work })),
+            (
+                4.into(),
+                EntryPatch::new(
+                    ts(10, 12),
+                    Command::End { title: "work done".into(), description: None },
+                ),
+            ),
+        ]);
+        let app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let report = app.report(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
+
+        assert_eq!(report.rows().len(), 1);
+        assert_eq!(report.rows()[0].title(), "work done");
+        assert_eq!(report.rows()[0].duration_minutes(), 120);
+    }
+
+    #[test]
+    fn report_summary_is_work_only() {
+        let now = ts(18, 18);
+        let work = ActivityKind::Work { context: WorkContext::Office };
+        let holiday = ActivityKind::Holiday;
+        let store = FakeStore::default().seed(vec![
+            (1.into(), EntryPatch::new(ts(12, 8), Command::Start { kind: holiday })),
+            (
+                2.into(),
+                EntryPatch::new(
+                    ts(12, 16),
+                    Command::End { title: "holiday done".into(), description: None },
+                ),
+            ),
+            (3.into(), EntryPatch::new(ts(13, 8), Command::Start { kind: work })),
+            (
+                4.into(),
+                EntryPatch::new(
+                    ts(13, 16),
+                    Command::End { title: "work done".into(), description: None },
+                ),
+            ),
+        ]);
+        let config = Config { weekly_target_hours: 40.0, ..Config::default() };
+        let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
+            .unwrap();
+
+        let report =
+            app.report_summary(SummaryScope::Period { period: Period::Week, offset: 0 }).unwrap();
+
+        assert_eq!(report.summary().active_time(work), chrono::TimeDelta::hours(8));
+        assert_eq!(report.summary().active_time(holiday), chrono::TimeDelta::zero());
+        assert_eq!(report.worked_minutes(), 8 * 60);
+        assert_eq!(report.balance_minutes(), Some(-(32 * 60)));
+        assert_eq!(
+            report.weekly_days().iter().map(|day| day.active_minutes()).collect::<Vec<_>>(),
+            vec![0, 8 * 60, 0, 0, 0, 0, 0]
+        );
     }
 }

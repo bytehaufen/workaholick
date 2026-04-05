@@ -3,7 +3,7 @@ use chrono::{DateTime, Local, NaiveDate};
 use crate::{
     DayEntryView,
     domain::{
-        Command, DayEntryValidationError,
+        ActivityKind, Command, DayEntryValidationError,
         day_entries::{DayState, transition_day_state},
         summary::SummaryWindow,
     },
@@ -278,11 +278,15 @@ pub fn report(
         |mut state, entry| -> Result<State, DayEntryValidationError> {
             let next_state = transition_day_state(state.state, entry.id, &entry.command)?;
 
-            match (&state.state, &entry.command) {
-                (DayState::Idle, Command::Start { .. }) => {
+            match (&state.state, &entry.command, next_state) {
+                (
+                    DayState::Idle,
+                    Command::Start { .. },
+                    DayState::Active(ActivityKind::Work { .. }),
+                ) => {
                     state.active_segment_start = Some(entry.timestamp);
                 }
-                (DayState::Active(_), Command::BreakStart) => {
+                (DayState::Active(ActivityKind::Work { .. }), Command::BreakStart, _) => {
                     state.open_item.add_segment(
                         state.active_segment_start,
                         entry.timestamp,
@@ -290,10 +294,14 @@ pub fn report(
                     );
                     state.active_segment_start = None;
                 }
-                (DayState::Breaking(_), Command::BreakEnd { .. }) => {
+                (DayState::Breaking(ActivityKind::Work { .. }), Command::BreakEnd { .. }, _) => {
                     state.active_segment_start = Some(entry.timestamp);
                 }
-                (DayState::Active(_), Command::Log { title, description }) => {
+                (
+                    DayState::Active(ActivityKind::Work { .. }),
+                    Command::Log { title, description },
+                    _,
+                ) => {
                     state.open_item.add_segment(
                         state.active_segment_start,
                         entry.timestamp,
@@ -306,7 +314,11 @@ pub fn report(
                     }
                     state.active_segment_start = Some(entry.timestamp);
                 }
-                (DayState::Active(_), Command::End { title, description }) => {
+                (
+                    DayState::Active(ActivityKind::Work { .. }),
+                    Command::End { title, description },
+                    _,
+                ) => {
                     state.open_item.add_segment(
                         state.active_segment_start,
                         entry.timestamp,
@@ -387,7 +399,7 @@ mod tests {
 
     #[test]
     fn report_excludes_breaks_from_row_duration() {
-        let kind = ActivityKind::Holiday;
+        let kind = ActivityKind::Work { context: WorkContext::Travel };
         let report = report(
             &[
                 entry(1, 10, 8, 0, Command::Start { kind }),
@@ -410,6 +422,22 @@ mod tests {
                 None,
             )]
         );
+    }
+
+    #[test]
+    fn report_ignores_non_work_completed_items() {
+        let kind = ActivityKind::Holiday;
+        let report = report(
+            &[
+                entry(1, 10, 8, 0, Command::Start { kind }),
+                entry(2, 10, 10, 0, Command::Log { title: "checkpoint".into(), description: None }),
+                entry(3, 10, 12, 0, Command::End { title: "done".into(), description: None }),
+            ],
+            window(10, 0, 11, 0),
+        )
+        .unwrap();
+
+        assert!(report.rows().is_empty());
     }
 
     #[test]

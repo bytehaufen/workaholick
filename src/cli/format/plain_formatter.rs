@@ -276,7 +276,7 @@ impl Formatter for PlainFormatter {
                 }
             }
         } else if report.rows.is_empty() {
-            output.push_str("No completed items.\n");
+            output.push_str("No completed work items.\n");
         } else {
             let date_width = report
                 .rows
@@ -629,6 +629,29 @@ Title    Description  Count  Duration
 -------  -----------  -----  --------
 handoff  sync             1        2h
 wrap     -                1        2h
+"#
+        );
+    }
+
+    #[test]
+    fn plain_format_report_prints_work_specific_empty_state() {
+        let rendered = PlainFormatter::format_report(
+            &WorkItemReport::new(
+                SummaryWindow::new(
+                    Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
+                    Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
+                ),
+                vec![],
+            ),
+            None,
+            None,
+        );
+
+        assert_eq!(
+            &rendered,
+            r#"Report 2026-01-10
+
+No completed work items.
 "#
         );
     }

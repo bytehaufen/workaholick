@@ -163,7 +163,7 @@ impl Formatter for MarkdownFormatter {
                 });
             }
         } else if report.rows.is_empty() {
-            output.push_str("_No completed items._\n");
+            output.push_str("_No completed work items._\n");
         } else {
             if report.show_description {
                 output.push_str("| Date | Start | End | Duration | Title | Description |\n");
@@ -468,6 +468,29 @@ _No tracked time._
 | :-- | :-- | --: | --: |
 | handoff | sync | 1 | 2h |
 | wrap | - | 1 | 2h |
+"#
+        );
+    }
+
+    #[test]
+    fn markdown_format_report_prints_work_specific_empty_state() {
+        let rendered = MarkdownFormatter::format_report(
+            &WorkItemReport::new(
+                SummaryWindow::new(
+                    Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
+                    Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
+                ),
+                vec![],
+            ),
+            None,
+            None,
+        );
+
+        assert_eq!(
+            &rendered,
+            r#"# Report 2026-01-10
+
+_No completed work items._
 "#
         );
     }

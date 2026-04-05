@@ -24,8 +24,26 @@ impl Summary {
         self.0.iter().map(|(kind, bucket)| (*kind, bucket))
     }
 
+    pub(crate) fn only_work(&self) -> Self {
+        Self(
+            self.0
+                .iter()
+                .filter(|(kind, _)| matches!(kind, ActivityKind::Work { .. }))
+                .map(|(kind, bucket)| (*kind, bucket.clone()))
+                .collect(),
+        )
+    }
+
     pub(crate) fn total_active_minutes(&self) -> i64 {
         self.0.values().map(|bucket| bucket.active_time().num_minutes().max(0)).sum()
+    }
+
+    pub(crate) fn work_active_minutes(&self) -> i64 {
+        self.0
+            .iter()
+            .filter(|(kind, _)| matches!(kind, ActivityKind::Work { .. }))
+            .map(|(_, bucket)| bucket.active_time().num_minutes().max(0))
+            .sum()
     }
 
     #[cfg(test)]
