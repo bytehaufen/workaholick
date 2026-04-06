@@ -20,16 +20,11 @@ impl EntryValidationIndex {
     ) -> anyhow::Result<()> {
         let date = patch.timestamp().date_naive();
         let dummy = Entry::from_patch(new_entry_id, EntryVersion::default(), patch.clone());
+        let initial_state = self.state_before(date);
 
         let mut relevant_entries: Vec<&Entry> = Vec::new();
 
         let resolve = |id| -> anyhow::Result<&Entry> { Ok(Self::resolve_entry(entries, id)?) };
-
-        // Previous day
-        if let Some((_, prev_day)) = self.days.range(..date).next_back() {
-            relevant_entries
-                .extend(prev_day.ids.iter().map(resolve).collect::<anyhow::Result<Vec<&Entry>>>()?);
-        }
 
         // Current day (inclusive new one)
         if let Some(day) = self.days.get(&date) {
@@ -47,7 +42,7 @@ impl EntryValidationIndex {
                 .extend(next_day.ids.iter().map(resolve).collect::<anyhow::Result<Vec<&Entry>>>()?);
         }
 
-        Self::try_new(&relevant_entries)?;
+        Self::try_new_with_initial_state(&relevant_entries, initial_state)?;
 
         Ok(())
     }
@@ -59,15 +54,11 @@ impl EntryValidationIndex {
     ) -> anyhow::Result<()> {
         let entry = Self::resolve_entry(entries, id)?;
         let date = entry.timestamp().date_naive();
+        let initial_state = self.state_before(date);
 
         let mut relevant_entries: Vec<&Entry> = Vec::new();
 
         let resolve = |id| -> anyhow::Result<&Entry> { Ok(Self::resolve_entry(entries, id)?) };
-        // Previous day
-        if let Some((_, prev_day)) = self.days.range(..date).next_back() {
-            relevant_entries
-                .extend(prev_day.ids.iter().map(resolve).collect::<anyhow::Result<Vec<&Entry>>>()?);
-        }
 
         // Current day, excluding the removed one
         let day = self.days.get(&date).expect("current day should exist");
@@ -88,7 +79,7 @@ impl EntryValidationIndex {
         }
 
         if !relevant_entries.is_empty() {
-            Self::try_new(&relevant_entries)?;
+            Self::try_new_with_initial_state(&relevant_entries, initial_state)?;
         }
 
         Ok(())
@@ -114,18 +105,12 @@ impl EntryValidationIndex {
             by_day_without_target.validate_insert_entry(&entries_without_target, patch, *id)?;
         } else {
             let updated = Entry::from_patch(*id, EntryVersion::default(), patch.clone());
+            let initial_state = self.state_before(patch.date());
             let resolve = |entry_id| -> anyhow::Result<&Entry> {
                 Ok(Self::resolve_entry(entries, entry_id)?)
             };
 
             let mut relevant_entries: Vec<&Entry> = Vec::new();
-
-            // Prev day
-            if let Some((_, prev_day)) = self.days.range(..&patch.date()).next_back() {
-                relevant_entries.extend(
-                    prev_day.ids.iter().map(resolve).collect::<anyhow::Result<Vec<&Entry>>>()?,
-                );
-            }
 
             // Current day
             let day = self.days.get(&patch.date()).expect("current day should exist");
@@ -147,7 +132,7 @@ impl EntryValidationIndex {
                 );
             }
 
-            let _ = Self::try_new(&relevant_entries)?;
+            let _ = Self::try_new_with_initial_state(&relevant_entries, initial_state)?;
         }
 
         Ok(())
@@ -157,6 +142,19 @@ impl EntryValidationIndex {
         let days = index_entries_by_date(entries)?;
 
         Ok(Self { days })
+    }
+
+    fn try_new_with_initial_state(
+        entries: &[&Entry],
+        initial_state: DayState,
+    ) -> anyhow::Result<Self> {
+        let days = index_entries_by_date_with_initial_state(entries, initial_state)?;
+
+        Ok(Self { days })
+    }
+
+    fn state_before(&self, date: NaiveDate) -> DayState {
+        self.days.range(..date).next_back().map(|(_, day)| day.end_state).unwrap_or_default()
     }
 
     fn resolve_entry<'a>(entries: &'a [&Entry], id: &EntryId) -> anyhow::Result<&'a Entry> {
@@ -172,6 +170,13 @@ impl EntryValidationIndex {
 pub(super) fn index_entries_by_date(
     entries: &[&Entry],
 ) -> Result<BTreeMap<NaiveDate, DayEntryInfo>, DayEntryValidationError> {
+    index_entries_by_date_with_initial_state(entries, DayState::Idle)
+}
+
+fn index_entries_by_date_with_initial_state(
+    entries: &[&Entry],
+    initial_state: DayState,
+) -> Result<BTreeMap<NaiveDate, DayEntryInfo>, DayEntryValidationError> {
     let mut entries_by_date: BTreeMap<NaiveDate, Vec<&Entry>> =
         entries.iter().fold(BTreeMap::new(), |mut acc, entry| {
             acc.entry(entry.date()).or_default().push(entry);
@@ -179,7 +184,6 @@ pub(super) fn index_entries_by_date(
         });
 
     entries_by_date.values_mut().for_each(|entries| entries.sort_by_key(|entry| entry.sort_key()));
-    let initial_state = DayState::Idle;
 
     let (day_entries, _) = entries_by_date.iter().try_fold(
         (BTreeMap::new(), initial_state),

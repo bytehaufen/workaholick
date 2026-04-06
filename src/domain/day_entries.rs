@@ -552,6 +552,54 @@ mod tests {
         }
 
         #[test]
+        fn validate_insert_entry_allows_future_day_when_existing_day_depends_on_earlier_gap_state()
+        {
+            let day1 = [
+                entry(
+                    4,
+                    Local.with_ymd_and_hms(2026, 1, 18, 6, 4, 54).unwrap(),
+                    Command::Start { kind: ActivityKind::Sick },
+                ),
+                entry(
+                    5,
+                    Local.with_ymd_and_hms(2026, 1, 18, 7, 13, 39).unwrap(),
+                    Command::BreakStart,
+                ),
+            ];
+            let day2 = [
+                entry(
+                    6,
+                    Local.with_ymd_and_hms(2026, 3, 29, 7, 13, 40).unwrap(),
+                    Command::BreakEnd { description: None },
+                ),
+                entry(
+                    7,
+                    Local.with_ymd_and_hms(2026, 3, 29, 7, 13, 41).unwrap(),
+                    Command::Log { title: "first".into(), description: Some("first".into()) },
+                ),
+                entry(
+                    8,
+                    Local.with_ymd_and_hms(2026, 3, 29, 7, 13, 42).unwrap(),
+                    Command::End { title: "second".into(), description: Some("second".into()) },
+                ),
+            ];
+
+            let mut all = Vec::new();
+            all.extend_from_slice(&day1);
+            all.extend_from_slice(&day2);
+
+            let entries = id_refs(&all);
+            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+
+            let patch = EntryPatch::new(
+                Local.with_ymd_and_hms(2026, 4, 6, 9, 0, 0).unwrap(),
+                Command::Start { kind: ActivityKind::Work { context: WorkContext::Home } },
+            );
+
+            assert!(by_day.validate_insert_entry(&entries, &patch, 9.into()).is_ok());
+        }
+
+        #[test]
         fn validate_remove_entry_rejects_when_removal_makes_previous_day_invalid_for_next_day() {
             let day1 = [
                 entry(
