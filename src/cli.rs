@@ -19,6 +19,7 @@ pub use dispatch::run;
 pub use format::MarkdownFormatter;
 pub use format::{Formatter, PlainFormatter};
 pub use shell_editor::ShellEditor;
+pub use validation_error::render_error;
 
 pub fn print_completions(shell: CompletionShell) {
     let mut cmd = Cli::command();

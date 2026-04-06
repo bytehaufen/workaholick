@@ -1,16 +1,19 @@
-use anyhow::{Error, anyhow};
+use anyhow::Error;
 use colored::Colorize;
+use std::backtrace::BacktraceStatus;
 
 use crate::domain::{
     CommandLabel, DayEntryValidationError, DayEntryValidationIssue, TransitionReason,
 };
 
-pub fn style_error(err: Error) -> Error {
-    let Some(validation_error) = find_validation_error(&err) else {
-        return err;
+pub fn render_error(err: &Error) -> String {
+    let Some(issue) = find_validation_error(err).map(DayEntryValidationError::issue) else {
+        return format!("{err:?}");
     };
 
-    anyhow!(render_colored_validation_error(validation_error.issue()))
+    let mut rendered = render_colored_validation_error(issue);
+    append_backtrace(err, &mut rendered);
+    rendered
 }
 
 fn find_validation_error(err: &Error) -> Option<&DayEntryValidationError> {
@@ -59,6 +62,25 @@ fn colorize_attempted(attempted: CommandLabel) -> String {
     attempted.to_string().yellow().to_string()
 }
 
+fn append_backtrace(err: &Error, rendered: &mut String) {
+    let backtrace = err.backtrace();
+    if !matches!(backtrace.status(), BacktraceStatus::Captured) {
+        return;
+    }
+
+    let mut formatted = backtrace.to_string();
+    rendered.push_str("\n\n");
+
+    if formatted.starts_with("stack backtrace:") {
+        formatted.replace_range(0..1, "S");
+    } else {
+        rendered.push_str("Stack backtrace:\n");
+    }
+
+    formatted.truncate(formatted.trim_end().len());
+    rendered.push_str(&formatted);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,15 +127,15 @@ mod tests {
     }
 
     #[test]
-    fn style_error_passes_through_non_validation_errors() {
+    fn render_error_passes_through_non_validation_errors() {
         let err = anyhow!("plain error");
-        let styled = style_error(err);
+        let rendered = render_error(&err);
 
-        assert_eq!(styled.to_string(), "plain error");
+        assert_eq!(rendered, format!("{err:?}"));
     }
 
     #[test]
-    fn style_error_reformats_validation_errors() {
+    fn render_error_reformats_validation_errors() {
         let text = with_color_override(true, || {
             let ts = Local.with_ymd_and_hms(2026, 1, 12, 10, 0, 0).unwrap();
             let entry = Entry::new(
@@ -124,13 +146,39 @@ mod tests {
             );
             let entries = vec![&entry];
 
-            let err = EntryValidationIndex::try_new(&entries).unwrap_err();
-            let styled = style_error(err);
-            styled.to_string()
+            let err = anyhow::Error::from(EntryValidationIndex::try_new(&entries).unwrap_err());
+            render_error(&err)
         });
 
         assert!(text.contains("Day entries validation failed"));
         assert!(text.contains("Entry 1 - cannot"));
         assert!(text.contains("\u{1b}["));
+        assert!(!text.contains("Caused by:"));
+    }
+
+    #[test]
+    fn render_error_finds_validation_errors_inside_context() {
+        let rendered = with_color_override(false, || {
+            let ts = Local.with_ymd_and_hms(2026, 1, 12, 10, 0, 0).unwrap();
+            let entry = Entry::new(
+                1.into(),
+                1.into(),
+                ts,
+                Command::Log { title: "status".into(), description: None },
+            );
+            let entries = vec![&entry];
+
+            let err = anyhow::Error::from(EntryValidationIndex::try_new(&entries).unwrap_err())
+                .context("outer");
+
+            assert!(find_validation_error(&err).is_some());
+            render_error(&err)
+        });
+
+        assert!(rendered.contains("Day entries validation failed: Entry 1 - cannot"));
+        assert!(rendered.contains("log"));
+        assert!(rendered.contains("idle"));
+        assert!(!rendered.contains("outer"));
+        assert!(!rendered.contains("Caused by:"));
     }
 }

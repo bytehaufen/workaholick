@@ -1,7 +1,6 @@
 use super::args::{Cli, CliCommand};
 use super::edit_format::{parse_edited, render_for_edit};
 use super::format;
-use super::validation_error;
 use crate::App;
 use crate::config::OutputFormatter;
 use crate::domain::Command;
@@ -25,7 +24,7 @@ pub fn run<S: EntryReader + EntryWriter>(
     editor: &dyn Editor,
     formatter: OutputFormatter,
 ) -> Result<()> {
-    run_inner(app, cli, editor, formatter).map_err(validation_error::style_error)
+    run_inner(app, cli, editor, formatter)
 }
 
 fn run_inner<S: EntryReader + EntryWriter>(
