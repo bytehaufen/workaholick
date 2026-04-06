@@ -5,8 +5,6 @@ pub mod config;
 mod domain;
 mod editor;
 mod store;
-#[cfg(test)]
-mod test_support;
 mod web;
 
 pub use crate::app::App;
