@@ -2,7 +2,7 @@
 name = "workaholick"
 version = "0.1.0"
 edition = "2024"
-description = "todo"
+description = "Track work, break, and daily activity from the terminal"
 
 [features]
 default = ["markdown"]

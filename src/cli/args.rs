@@ -6,7 +6,19 @@ use std::path::PathBuf;
 use crate::domain::{ActivityKind, Period, ReportGroupBy, SummaryScope, WorkContext};
 
 #[derive(Parser, Debug)]
-#[command(version, about)]
+#[command(
+    version,
+    about,
+    after_help = "\
+Examples:
+  workaholick start work office
+  workaholick log \"Code review\" \"PR #184\"
+  workaholick end \"Wrap up\" \"Release prep\"
+  workaholick day
+  workaholick summary week -1
+  workaholick report --from 2026-04-01 --to 2026-04-06 --group-by title
+"
+)]
 pub struct Cli {
     #[arg(short, long, value_name = "FILE")]
     pub config: Option<PathBuf>,
@@ -84,18 +96,19 @@ pub enum CliCommand {
     },
 
     // --- Query commands ---
-    /// Inspect a day (arbitrary date)
+    /// Show all entries for a day
     #[command(visible_alias = "d")]
     Day {
         /// Date to inspect (YYYY-MM-DD), latest day if left empty
         date: Option<NaiveDate>,
     },
 
-    /// Show summaries
+    /// Summarize tracked time and breaks for a period or date range
     #[command(visible_alias = "sum")]
     Summary(SummaryArgs),
 
-    /// Show completed work items for a scope
+    /// Show completed work items for a period or date range
+    #[command(visible_alias = "rep")]
     Report(ReportArgs),
 }
 
