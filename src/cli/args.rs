@@ -224,7 +224,7 @@ impl ScopeArgs {
                 SummaryScope::Period { period: Period::from(period), offset: offset.unwrap_or(0) }
             }
             (None, None, Some(from), Some(to)) => SummaryScope::Range { from, to },
-            (None, None, None, None) => SummaryScope::Period { period: Period::Day, offset: 0 },
+            (None, None, None, None) => SummaryScope::Period { period: Period::Week, offset: 0 },
             _ => unreachable!("clap validation should prevent invalid summary arguments"),
         }
     }
@@ -285,11 +285,7 @@ impl From<ReportGroupByArg> for ReportGroupBy {
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
 pub enum PeriodArg {
-    /// Today (default)
-    #[value(alias = "d")]
-    Day,
-
-    /// This week
+    /// This week (default)
     #[value(alias = "w")]
     Week,
 
@@ -305,7 +301,6 @@ pub enum PeriodArg {
 impl From<PeriodArg> for Period {
     fn from(p: PeriodArg) -> Self {
         match p {
-            PeriodArg::Day => Period::Day,
             PeriodArg::Week => Period::Week,
             PeriodArg::Month => Period::Month,
             PeriodArg::Year => Period::Year,
@@ -323,14 +318,14 @@ mod tests {
     use clap::Parser;
 
     #[test]
-    fn summary_scope_defaults_to_current_day() {
+    fn summary_scope_defaults_to_current_week() {
         let cli = Cli::try_parse_from(["workaholick", "summary"]).unwrap();
 
         let CliCommand::Summary(args) = cli.command else {
             panic!("expected summary command");
         };
 
-        assert_eq!(args.scope(), SummaryScope::Period { period: Period::Day, offset: 0 });
+        assert_eq!(args.scope(), SummaryScope::Period { period: Period::Week, offset: 0 });
     }
 
     #[test]
@@ -352,14 +347,14 @@ mod tests {
     }
 
     #[test]
-    fn report_scope_defaults_to_current_day() {
+    fn report_scope_defaults_to_current_week() {
         let cli = Cli::try_parse_from(["workaholick", "report"]).unwrap();
 
         let CliCommand::Report(args) = cli.command else {
             panic!("expected report command");
         };
 
-        assert_eq!(args.scope(), SummaryScope::Period { period: Period::Day, offset: 0 });
+        assert_eq!(args.scope(), SummaryScope::Period { period: Period::Week, offset: 0 });
         assert_eq!(args.group_by, None);
         assert!(!args.summary);
     }
