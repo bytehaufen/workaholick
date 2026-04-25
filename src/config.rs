@@ -13,11 +13,72 @@ const APP_NAME: &str = env!("CARGO_PKG_NAME");
 const CONFIG_NAME: &str = "config";
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(default)]
 pub struct Config {
     pub store_path: PathBuf,
-    pub weekly_target_hours: f64,
-    #[serde(default)]
+    pub schedule: ScheduleConfig,
     pub cli: CliConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ScheduleConfig {
+    mon_minutes: i64,
+    tue_minutes: i64,
+    wed_minutes: i64,
+    thu_minutes: i64,
+    fri_minutes: i64,
+    sat_minutes: i64,
+    sun_minutes: i64,
+}
+
+impl ScheduleConfig {
+    fn as_array(&self) -> [i64; 7] {
+        [
+            self.mon_minutes,
+            self.tue_minutes,
+            self.wed_minutes,
+            self.thu_minutes,
+            self.fri_minutes,
+            self.sat_minutes,
+            self.sun_minutes,
+        ]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new(
+        mon_minutes: i64,
+        tue_minutes: i64,
+        wed_minutes: i64,
+        thu_minutes: i64,
+        fri_minutes: i64,
+        sat_minutes: i64,
+        sun_minutes: i64,
+    ) -> Self {
+        Self {
+            mon_minutes,
+            tue_minutes,
+            wed_minutes,
+            thu_minutes,
+            fri_minutes,
+            sat_minutes,
+            sun_minutes,
+        }
+    }
+}
+
+impl Default for ScheduleConfig {
+    fn default() -> Self {
+        Self {
+            mon_minutes: 480,
+            tue_minutes: 480,
+            wed_minutes: 480,
+            thu_minutes: 480,
+            fri_minutes: 480,
+            sat_minutes: 0,
+            sun_minutes: 0,
+        }
+    }
 }
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
@@ -28,10 +89,10 @@ pub struct CliConfig {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum OutputFormatter {
-    #[default]
     Plain,
+    #[default]
     Markdown,
 }
 
@@ -39,7 +100,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             store_path: default_store_path(),
-            weekly_target_hours: default_weekly_target_hours(),
+            schedule: Default::default(),
             cli: CliConfig::default(),
         }
     }
@@ -47,7 +108,19 @@ impl Default for Config {
 
 impl Config {
     pub fn weekly_target_minutes(&self) -> i64 {
-        (self.weekly_target_hours * 60.0).round() as i64
+        let schedule = &self.schedule;
+
+        [
+            schedule.mon_minutes,
+            schedule.tue_minutes,
+            schedule.wed_minutes,
+            schedule.thu_minutes,
+            schedule.fri_minutes,
+            schedule.sat_minutes,
+            schedule.sun_minutes,
+        ]
+        .iter()
+        .sum()
     }
 }
 
@@ -60,29 +133,21 @@ impl<'de> Deserialize<'de> for Config {
         struct RawConfig {
             store_path: PathBuf,
             #[serde(default)]
-            weekly_target_hours: Option<f64>,
-            #[serde(default)]
-            daily_target_hours: Option<f64>,
-            #[serde(default)]
-            daily_target_minutes: Option<u32>,
+            schedule: ScheduleConfig,
             #[serde(default)]
             cli: CliConfig,
         }
 
         let raw = RawConfig::deserialize(deserializer)?;
-        let weekly_target_hours = raw
-            .weekly_target_hours
-            .or_else(|| raw.daily_target_hours.map(|hours| hours * 5.0))
-            .or_else(|| raw.daily_target_minutes.map(|minutes| (f64::from(minutes) / 60.0) * 5.0))
-            .unwrap_or_else(default_weekly_target_hours);
+        let schedule_hours = raw.schedule.as_array();
 
-        if !weekly_target_hours.is_finite() || weekly_target_hours < 0.0 {
+        if schedule_hours.iter().any(|&day_hours| day_hours.is_negative()) {
             return Err(serde::de::Error::custom(
-                "weekly_target_hours must be a finite non-negative number",
+                "schedule day hours must be a non-negative number",
             ));
         }
 
-        Ok(Self { store_path: raw.store_path, weekly_target_hours, cli: raw.cli })
+        Ok(Self { store_path: raw.store_path, schedule: raw.schedule, cli: raw.cli })
     }
 }
 
@@ -213,13 +278,9 @@ fn default_store_path() -> PathBuf {
     home.join(APP_NAME).join("data.jsonl")
 }
 
-fn default_weekly_target_hours() -> f64 {
-    40.0
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::config::{APP_NAME, OutputFormatter};
+    use crate::config::{APP_NAME, Config, OutputFormatter};
     use crate::editor::ports::{Editor, FileType};
     use anyhow::Result;
     use std::{cell::RefCell, fs, path::PathBuf};
@@ -256,12 +317,13 @@ mod tests {
         let shown = super::show_from(&path).unwrap();
 
         assert_eq!(loaded.store_path, super::Config::default().store_path);
-        assert_eq!(loaded.weekly_target_hours, 40.0);
-        assert_eq!(loaded.cli.formatter, OutputFormatter::Plain);
-        assert!(shown.contains("weekly_target_hours"));
+        assert_eq!(loaded.schedule, super::Config::default().schedule);
+        assert_eq!(loaded.cli.formatter, OutputFormatter::Markdown);
         assert!(shown.contains("[cli]"));
         assert!(shown.contains("formatter"));
         assert!(shown.contains("store_path"));
+        assert!(shown.contains("[schedule"));
+        assert!(shown.contains("mon_minutes"));
     }
 
     #[test]
@@ -274,50 +336,17 @@ mod tests {
         super::edit_at(&path, &editor).unwrap();
 
         let seen = editor.seen();
-        assert!(seen.contains("weekly_target_hours"));
         assert!(seen.contains("[cli]"));
-        assert!(seen.contains("formatter = \"plain\""));
+        assert!(seen.contains("formatter = \"markdown\""));
         assert!(seen.contains("store_path = \"/tmp/work.jsonl\""));
+        assert!(seen.contains("[schedule"));
+        assert!(seen.contains("mon_minutes"));
     }
 
     #[test]
-    fn load_from_accepts_legacy_daily_target_minutes() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("legacy-config.toml");
-        fs::write(
-            &path,
-            "store_path = \"/tmp/work.jsonl\"\ndaily_target_minutes = 450\n[cli]\nformatter = \"plain\"\n",
-        )
-        .unwrap();
-
-        let loaded = super::load_from(&path).unwrap();
-
-        assert_eq!(loaded.weekly_target_hours, 37.5);
-        assert_eq!(loaded.weekly_target_minutes(), 2250);
-    }
-
-    #[test]
-    fn load_from_accepts_fractional_daily_target_hours() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("hours-config.toml");
-        fs::write(&path, "store_path = \"/tmp/work.jsonl\"\ndaily_target_hours = 7.5\n").unwrap();
-
-        let loaded = super::load_from(&path).unwrap();
-
-        assert_eq!(loaded.weekly_target_hours, 37.5);
-        assert_eq!(loaded.weekly_target_minutes(), 2250);
-    }
-
-    #[test]
-    fn load_from_accepts_fractional_weekly_target_hours() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("weekly-hours-config.toml");
-        fs::write(&path, "store_path = \"/tmp/work.jsonl\"\nweekly_target_hours = 32.5\n").unwrap();
-
-        let loaded = super::load_from(&path).unwrap();
-
-        assert_eq!(loaded.weekly_target_hours, 32.5);
-        assert_eq!(loaded.weekly_target_minutes(), 1950);
+    fn default_schedule_has_correct_sum() {
+        let sum: i64 = Config::default().schedule.as_array().iter().sum();
+        assert_eq!(sum, 5 * 480);
     }
 
     #[test]

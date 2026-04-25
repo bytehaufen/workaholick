@@ -2,153 +2,161 @@ use std::{collections::BTreeMap, ops::Bound};
 
 use chrono::NaiveDate;
 
-use crate::domain::{Entry, EntryId, EntryPatch, day_entries::DayState, entry::EntryVersion};
+use crate::domain::{RecordId, WorkRecord, WorkRecordInput, day_entries::DayState};
 
-use super::validation::{DayEntryInfo, DayEntryValidationError};
+use super::validation::{DayRecordInfo, DayRecordValidationError};
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct EntryValidationIndex {
-    pub(super) days: BTreeMap<NaiveDate, DayEntryInfo>,
+pub(crate) struct WorkRecordValidationIndex {
+    pub(super) days: BTreeMap<NaiveDate, DayRecordInfo>,
 }
 
-impl EntryValidationIndex {
-    pub(crate) fn validate_insert_entry(
+impl WorkRecordValidationIndex {
+    pub(crate) fn validate_insert_record(
         &self,
-        entries: &[&Entry],
-        patch: &EntryPatch,
-        new_entry_id: EntryId,
+        records: &[&WorkRecord],
+        input: &WorkRecordInput,
+        new_record_id: RecordId,
     ) -> anyhow::Result<()> {
-        let date = patch.timestamp().date_naive();
-        let dummy = Entry::from_patch(new_entry_id, EntryVersion::default(), patch.clone());
+        let date = input.date();
+        let dummy = WorkRecord::from_input(new_record_id, input.clone());
         let initial_state = self.state_before(date);
 
-        let mut relevant_entries: Vec<&Entry> = Vec::new();
+        let mut relevant_records: Vec<&WorkRecord> = Vec::new();
 
-        let resolve = |id| -> anyhow::Result<&Entry> { Ok(Self::resolve_entry(entries, id)?) };
+        let resolve =
+            |id| -> anyhow::Result<&WorkRecord> { Ok(Self::resolve_record(records, id)?) };
 
         // Current day (inclusive new one)
         if let Some(day) = self.days.get(&date) {
-            relevant_entries
-                .extend(day.ids.iter().map(resolve).collect::<anyhow::Result<Vec<&Entry>>>()?);
+            relevant_records
+                .extend(day.ids.iter().map(resolve).collect::<anyhow::Result<Vec<&WorkRecord>>>()?);
         }
 
-        relevant_entries.push(&dummy);
+        relevant_records.push(&dummy);
 
         // Next day
         if let Some((_, next_day)) =
             self.days.range((Bound::Excluded(date), Bound::Unbounded)).next()
         {
-            relevant_entries
-                .extend(next_day.ids.iter().map(resolve).collect::<anyhow::Result<Vec<&Entry>>>()?);
+            relevant_records.extend(
+                next_day.ids.iter().map(resolve).collect::<anyhow::Result<Vec<&WorkRecord>>>()?,
+            );
         }
 
-        Self::try_new_with_initial_state(&relevant_entries, initial_state)?;
+        Self::try_new_with_initial_state(&relevant_records, initial_state)?;
 
         Ok(())
     }
 
-    pub(crate) fn validate_remove_entry(
+    pub(crate) fn validate_remove_record(
         &self,
-        entries: &[&Entry],
-        id: &EntryId,
+        records: &[&WorkRecord],
+        id: &RecordId,
     ) -> anyhow::Result<()> {
-        let entry = Self::resolve_entry(entries, id)?;
-        let date = entry.timestamp().date_naive();
+        let record = Self::resolve_record(records, id)?;
+        let date = record.date();
         let initial_state = self.state_before(date);
 
-        let mut relevant_entries: Vec<&Entry> = Vec::new();
+        let mut relevant_records: Vec<&WorkRecord> = Vec::new();
 
-        let resolve = |id| -> anyhow::Result<&Entry> { Ok(Self::resolve_entry(entries, id)?) };
+        let resolve =
+            |id| -> anyhow::Result<&WorkRecord> { Ok(Self::resolve_record(records, id)?) };
 
         // Current day, excluding the removed one
         let day = self.days.get(&date).expect("current day should exist");
-        relevant_entries.extend(
+        relevant_records.extend(
             day.ids
                 .iter()
-                .filter(|&entry_id| entry_id != id)
+                .filter(|&record_id| record_id != id)
                 .map(resolve)
-                .collect::<anyhow::Result<Vec<&Entry>>>()?,
+                .collect::<anyhow::Result<Vec<&WorkRecord>>>()?,
         );
 
         // Next day
         if let Some((_, next_day)) =
             self.days.range((Bound::Excluded(date), Bound::Unbounded)).next()
         {
-            relevant_entries
-                .extend(next_day.ids.iter().map(resolve).collect::<anyhow::Result<Vec<&Entry>>>()?);
+            relevant_records.extend(
+                next_day.ids.iter().map(resolve).collect::<anyhow::Result<Vec<&WorkRecord>>>()?,
+            );
         }
 
-        if !relevant_entries.is_empty() {
-            Self::try_new_with_initial_state(&relevant_entries, initial_state)?;
+        if !relevant_records.is_empty() {
+            Self::try_new_with_initial_state(&relevant_records, initial_state)?;
         }
 
         Ok(())
     }
 
-    pub(crate) fn validate_update_entry(
+    pub(crate) fn validate_update_record(
         &self,
-        entries: &[&Entry],
-        id: &EntryId,
-        patch: &EntryPatch,
+        records: &[&WorkRecord],
+        id: &RecordId,
+        input: &WorkRecordInput,
     ) -> anyhow::Result<()> {
-        let entry = Self::resolve_entry(entries, id)?;
-        let old_date = entry.date();
-        let new_date = patch.date();
+        let record = Self::resolve_record(records, id)?;
+        let old_date = record.date();
+        let new_date = input.date();
 
         if old_date != new_date {
-            self.validate_remove_entry(entries, id)?;
+            self.validate_remove_record(records, id)?;
 
-            let mut entries_without_target: Vec<&Entry> = entries.to_vec();
-            entries_without_target.retain(|entry| entry.id() != id);
+            let mut records_without_target: Vec<&WorkRecord> = records.to_vec();
+            records_without_target.retain(|record| record.id() != id);
 
-            let by_day_without_target = Self::try_new(&entries_without_target)?;
-            by_day_without_target.validate_insert_entry(&entries_without_target, patch, *id)?;
+            let by_day_without_target = Self::try_new(&records_without_target)?;
+            by_day_without_target.validate_insert_record(&records_without_target, input, *id)?;
         } else {
-            let updated = Entry::from_patch(*id, EntryVersion::default(), patch.clone());
-            let initial_state = self.state_before(patch.date());
-            let resolve = |entry_id| -> anyhow::Result<&Entry> {
-                Ok(Self::resolve_entry(entries, entry_id)?)
+            let updated = WorkRecord::from_input(*id, input.clone());
+            let initial_state = self.state_before(input.date());
+            let resolve = |record_id| -> anyhow::Result<&WorkRecord> {
+                Ok(Self::resolve_record(records, record_id)?)
             };
 
-            let mut relevant_entries: Vec<&Entry> = Vec::new();
+            let mut relevant_records: Vec<&WorkRecord> = Vec::new();
 
             // Current day
-            let day = self.days.get(&patch.date()).expect("current day should exist");
-            relevant_entries.extend(
+            let day = self.days.get(&input.date()).expect("current day should exist");
+            relevant_records.extend(
                 day.ids
                     .iter()
-                    .filter(|entry_id| *entry_id != id)
+                    .filter(|record_id| *record_id != id)
                     .map(resolve)
-                    .collect::<anyhow::Result<Vec<&Entry>>>()?,
+                    .collect::<anyhow::Result<Vec<&WorkRecord>>>()?,
             );
-            relevant_entries.push(&updated);
+            relevant_records.push(&updated);
 
             // Next day
             if let Some((_, next_day)) =
-                self.days.range((Bound::Excluded(patch.date()), Bound::Unbounded)).next()
+                self.days.range((Bound::Excluded(input.date()), Bound::Unbounded)).next()
             {
-                relevant_entries.extend(
-                    next_day.ids.iter().map(resolve).collect::<anyhow::Result<Vec<&Entry>>>()?,
+                relevant_records.extend(
+                    next_day
+                        .ids
+                        .iter()
+                        .map(resolve)
+                        .collect::<anyhow::Result<Vec<&WorkRecord>>>()?,
                 );
             }
 
-            let _ = Self::try_new_with_initial_state(&relevant_entries, initial_state)?;
+            let _ = Self::try_new_with_initial_state(&relevant_records, initial_state)?;
         }
 
         Ok(())
     }
 
-    pub(crate) fn try_new(entries: &[&Entry]) -> anyhow::Result<Self> {
-        let days = index_entries_by_date(entries)?;
+    pub(crate) fn try_new(records: &[&WorkRecord]) -> anyhow::Result<Self> {
+        let days = index_records_by_date(records)?;
 
         Ok(Self { days })
     }
 
     fn try_new_with_initial_state(
-        entries: &[&Entry],
+        records: &[&WorkRecord],
         initial_state: DayState,
     ) -> anyhow::Result<Self> {
-        let days = index_entries_by_date_with_initial_state(entries, initial_state)?;
+        let days = index_records_by_date_with_initial_state(records, initial_state)?;
 
         Ok(Self { days })
     }
@@ -157,45 +165,50 @@ impl EntryValidationIndex {
         self.days.range(..date).next_back().map(|(_, day)| day.end_state).unwrap_or_default()
     }
 
-    fn resolve_entry<'a>(entries: &'a [&Entry], id: &EntryId) -> anyhow::Result<&'a Entry> {
-        let entry = entries
+    fn resolve_record<'a>(
+        records: &'a [&WorkRecord],
+        id: &RecordId,
+    ) -> anyhow::Result<&'a WorkRecord> {
+        let record = records
             .iter()
-            .find(|entry| entry.id() == id)
-            .ok_or_else(|| anyhow::anyhow!("entry {id} should exist during validation"))?;
+            .find(|record| record.id() == id)
+            .ok_or_else(|| anyhow::anyhow!("record {id} should exist during validation"))?;
 
-        Ok(*entry)
+        Ok(*record)
     }
 }
 
-pub(super) fn index_entries_by_date(
-    entries: &[&Entry],
-) -> Result<BTreeMap<NaiveDate, DayEntryInfo>, DayEntryValidationError> {
-    index_entries_by_date_with_initial_state(entries, DayState::Idle)
+pub(super) fn index_records_by_date(
+    records: &[&WorkRecord],
+) -> Result<BTreeMap<NaiveDate, DayRecordInfo>, DayRecordValidationError> {
+    index_records_by_date_with_initial_state(records, DayState::Idle)
 }
 
-fn index_entries_by_date_with_initial_state(
-    entries: &[&Entry],
+fn index_records_by_date_with_initial_state(
+    records: &[&WorkRecord],
     initial_state: DayState,
-) -> Result<BTreeMap<NaiveDate, DayEntryInfo>, DayEntryValidationError> {
-    let mut entries_by_date: BTreeMap<NaiveDate, Vec<&Entry>> =
-        entries.iter().fold(BTreeMap::new(), |mut acc, entry| {
-            acc.entry(entry.date()).or_default().push(entry);
+) -> Result<BTreeMap<NaiveDate, DayRecordInfo>, DayRecordValidationError> {
+    let mut records_by_date: BTreeMap<NaiveDate, Vec<&WorkRecord>> =
+        records.iter().fold(BTreeMap::new(), |mut acc, record| {
+            acc.entry(record.date()).or_default().push(record);
             acc
         });
 
-    entries_by_date.values_mut().for_each(|entries| entries.sort_by_key(|entry| entry.sort_key()));
+    records_by_date
+        .values_mut()
+        .for_each(|records| records.sort_by_key(|record| record.sort_key()));
 
-    let (day_entries, _) = entries_by_date.iter().try_fold(
+    let (day_records, _) = records_by_date.iter().try_fold(
         (BTreeMap::new(), initial_state),
-        |(mut day_entries, last_state), (date, entries)| {
-            let day_entry = DayEntryInfo::try_new(entries, &last_state)?;
+        |(mut day_records, last_state), (date, records)| {
+            let day_record = DayRecordInfo::try_new(records, &last_state)?;
 
-            let next_state = day_entry.end_state;
-            day_entries.insert(*date, day_entry);
+            let next_state = day_record.end_state;
+            day_records.insert(*date, day_record);
 
-            Ok((day_entries, next_state))
+            Ok((day_records, next_state))
         },
     )?;
 
-    Ok(day_entries)
+    Ok(day_records)
 }

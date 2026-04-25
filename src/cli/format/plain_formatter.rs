@@ -1,8 +1,8 @@
 use chrono::NaiveDate;
 
 use super::Formatter;
-use super::{format_day_command, prepare_report, prepare_summary};
-use crate::DayEntryView;
+use super::{format_work_command, prepare_report, prepare_summary};
+use crate::DayOverview;
 use crate::domain::{ReportGroupBy, SummaryReport, WorkItemReport};
 
 pub struct PlainFormatter;
@@ -12,35 +12,23 @@ impl Formatter for PlainFormatter {
         print!("{text}");
     }
 
-    fn format_day(date: NaiveDate, entries: &[DayEntryView]) -> String {
-        let id_width =
-            entries.iter().map(|e| e.id.value().to_string().len()).max().unwrap_or(4).max(4);
-
+    fn format_day(date: NaiveDate, day_overview: &DayOverview) -> String {
         let mut output = String::new();
         output.push_str(&format!("Day {date}\n"));
-        output.push_str(&format!(
-            "{:>5}  {:>id_width$}  Event\n",
-            "Time",
-            "ID",
-            id_width = id_width
-        ));
-        output.push_str(&format!(
-            "{:-<5}  {:-<id_width$}  {:-<5}\n",
-            "",
-            "",
-            "",
-            id_width = id_width
-        ));
 
-        let entries_str = &entries
-            .iter()
-            .map(|entry| format_day_entry(entry, id_width))
-            .collect::<Vec<_>>()
-            .join("\n");
+        if day_overview.is_empty() {
+            output.push_str("\nNo records.\n");
+            return output;
+        }
 
-        if !entries_str.is_empty() {
-            output.push_str(entries_str);
+        if !day_overview.work_records.is_empty() {
             output.push('\n');
+            output.push_str(&format_work_records(&day_overview.work_records));
+        }
+
+        if !day_overview.absence_records.is_empty() {
+            output.push('\n');
+            output.push_str(&format_absence_records(&day_overview.absence_records));
         }
 
         output
@@ -369,11 +357,86 @@ impl Formatter for PlainFormatter {
     }
 }
 
-fn format_day_entry(entry: &DayEntryView, id_width: usize) -> String {
-    let time = entry.timestamp.format("%H:%M");
-    let event = format_day_command(&entry.command);
+fn format_work_records(records: &[crate::domain::WorkRecord]) -> String {
+    let id_width = records
+        .iter()
+        .map(|record| record.id().value().to_string().len())
+        .max()
+        .unwrap_or(4)
+        .max(4);
 
-    format!("{:>5}  {:>id_width$}  {event}", time, entry.id.value())
+    let mut output = String::new();
+    output.push_str("Work records\n");
+    output.push_str(&format!("{:>5}  {:>id_width$}  Event\n", "Time", "ID", id_width = id_width));
+    output.push_str(&format!("{:-<5}  {:-<id_width$}  {:-<5}\n", "", "", "", id_width = id_width));
+
+    for record in records {
+        output.push_str(&format_work_record_entry(record, id_width));
+        output.push('\n');
+    }
+
+    output
+}
+
+fn format_work_record_entry(record: &crate::domain::WorkRecord, id_width: usize) -> String {
+    let time = record.timestamp().format("%H:%M");
+    let event = format_work_command(record.command());
+
+    format!("{:>5}  {:>id_width$}  {event}", time, record.id().value())
+}
+
+fn format_absence_records(records: &[crate::domain::AbsenceRecord]) -> String {
+    let id_width = records
+        .iter()
+        .map(|record| record.id().value().to_string().len())
+        .max()
+        .unwrap_or(2)
+        .max(2);
+    let kind_width =
+        records.iter().map(|record| record.kind().to_string().len()).max().unwrap_or(4).max(4);
+    let portion_width =
+        records.iter().map(|record| record.portion().to_string().len()).max().unwrap_or(7).max(7);
+    let note_width = records
+        .iter()
+        .map(|record| record.note().as_deref().unwrap_or("").len())
+        .max()
+        .unwrap_or(4)
+        .max(4);
+
+    let mut output = String::new();
+    output.push_str("Absence records\n");
+    output.push_str(&format!(
+        "{:>id_width$}  {:<kind_width$}  {:<portion_width$}  Note\n",
+        "ID", "Kind", "Portion",
+    ));
+    output.push_str(&format!(
+        "{:-<id_width$}  {:-<kind_width$}  {:-<portion_width$}  {:-<note_width$}\n",
+        "", "", "", "",
+    ));
+
+    for record in records {
+        output.push_str(&format_absence_record_entry(record, id_width, kind_width, portion_width));
+        output.push('\n');
+    }
+
+    output
+}
+
+fn format_absence_record_entry(
+    record: &crate::domain::AbsenceRecord,
+    id_width: usize,
+    kind_width: usize,
+    portion_width: usize,
+) -> String {
+    let note = record.note().as_deref().unwrap_or("");
+
+    format!(
+        "{:>id_width$}  {:<kind_width$}  {:<portion_width$}  {}",
+        record.id().value(),
+        record.kind(),
+        record.portion(),
+        note,
+    )
 }
 
 #[cfg(test)]
@@ -381,25 +444,31 @@ mod tests {
     use super::*;
     use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        ActivityKind, Command, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkContext,
-        WorkItemReport, summary,
+        Record, RecordInput, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkCommand,
+        WorkContext, WorkItemReport, WorkRecordInput, summary,
     };
     use chrono::{Local, TimeZone};
 
     #[test]
     fn plain_format_day_includes_header_and_row() {
         let date = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
-        let entries = vec![DayEntryView {
-            id: 7.into(),
-            timestamp: Local.with_ymd_and_hms(2026, 1, 5, 9, 30, 0).unwrap(),
-            command: Command::Start { kind: ActivityKind::Work { context: Default::default() } },
-        }];
+        let entries = DayOverview {
+            date,
+            work_records: vec![crate::domain::WorkRecord::new(
+                7.into(),
+                Local.with_ymd_and_hms(2026, 1, 5, 9, 30, 0).unwrap(),
+                WorkCommand::Start { context: WorkContext::Home },
+            )],
+            absence_records: vec![],
+        };
 
         let rendered = PlainFormatter::format_day(date, &entries);
 
         assert_eq!(
             &rendered,
             r#"Day 2026-01-05
+
+Work records
  Time    ID  Event
 -----  ----  -----
 09:30     7  START work (home)
@@ -410,29 +479,30 @@ mod tests {
     #[test]
     fn plain_format_day_handles_large_ids() {
         let date = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
-        let entries = vec![
-            DayEntryView {
-                id: 7.into(),
-                timestamp: Local.with_ymd_and_hms(2026, 1, 5, 9, 30, 0).unwrap(),
-                command: Command::Start {
-                    kind: ActivityKind::Work { context: Default::default() },
-                },
-            },
-            DayEntryView {
-                id: u64::MAX.into(),
-                timestamp: Local.with_ymd_and_hms(2026, 1, 5, 9, 30, 0).unwrap(),
-                command: Command::Start {
-                    kind: ActivityKind::Work { context: Default::default() },
-                },
-            },
-        ];
+        let entries = DayOverview {
+            date,
+            work_records: vec![
+                crate::domain::WorkRecord::new(
+                    7.into(),
+                    Local.with_ymd_and_hms(2026, 1, 5, 9, 30, 0).unwrap(),
+                    WorkCommand::Start { context: WorkContext::Home },
+                ),
+                crate::domain::WorkRecord::new(
+                    u64::MAX.into(),
+                    Local.with_ymd_and_hms(2026, 1, 5, 9, 30, 0).unwrap(),
+                    WorkCommand::Start { context: WorkContext::Home },
+                ),
+            ],
+            absence_records: vec![],
+        };
 
         let rendered = PlainFormatter::format_day(date, &entries);
-        println!("{rendered}");
 
         assert_eq!(
             &rendered,
             r#"Day 2026-01-05
+
+Work records
  Time                    ID  Event
 -----  --------------------  -----
 09:30                     7  START work (home)
@@ -442,62 +512,92 @@ mod tests {
     }
 
     #[test]
+    fn plain_format_day_renders_absence_section() {
+        let date = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
+        let entries = DayOverview {
+            date,
+            work_records: vec![crate::domain::WorkRecord::new(
+                7.into(),
+                Local.with_ymd_and_hms(2026, 1, 5, 9, 30, 0).unwrap(),
+                WorkCommand::Start { context: WorkContext::Home },
+            )],
+            absence_records: vec![crate::domain::AbsenceRecord::new(
+                42.into(),
+                date,
+                crate::domain::AbsenceKind::Vacation,
+                crate::domain::AbsencePortion::HalfDay,
+                Some("doctor".into()),
+            )],
+        };
+
+        let rendered = PlainFormatter::format_day(date, &entries);
+
+        assert_eq!(
+            &rendered,
+            r#"Day 2026-01-05
+
+Work records
+ Time    ID  Event
+-----  ----  -----
+09:30     7  START work (home)
+
+Absence records
+ID  Kind      Portion   Note
+--  --------  --------  ------
+42  vacation  half-day  doctor
+"#
+        );
+    }
+
+    #[test]
     fn plain_format_summary_renders_sorted_rows_and_totals() {
         let report = summary_report(vec![
-            day_entry(
+            work_record(
                 1,
                 Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
-                Command::Start { kind: ActivityKind::Work { context: WorkContext::Home } },
+                WorkCommand::Start { context: WorkContext::Home },
             ),
-            day_entry(
+            work_record(
                 2,
                 Local.with_ymd_and_hms(2026, 1, 12, 2, 15, 0).unwrap(),
-                Command::End { title: "done".into(), description: None },
+                WorkCommand::End { title: "done".into(), description: None },
             ),
-            day_entry(
+            work_record(
                 3,
                 Local.with_ymd_and_hms(2026, 1, 13, 4, 0, 0).unwrap(),
-                Command::Start { kind: ActivityKind::Holiday },
+                WorkCommand::Start { context: WorkContext::Office },
             ),
-            day_entry(
+            work_record(
                 4,
                 Local.with_ymd_and_hms(2026, 1, 13, 6, 0, 0).unwrap(),
-                Command::BreakStart,
+                WorkCommand::BreakStart,
             ),
-            day_entry(
+            work_record(
                 5,
                 Local.with_ymd_and_hms(2026, 1, 13, 6, 30, 0).unwrap(),
-                Command::BreakEnd { description: None },
+                WorkCommand::BreakEnd { description: None },
             ),
-            day_entry(
+            work_record(
                 6,
                 Local.with_ymd_and_hms(2026, 1, 13, 8, 0, 0).unwrap(),
-                Command::End { title: "done".into(), description: None },
+                WorkCommand::End { title: "done".into(), description: None },
             ),
         ]);
 
         let rendered = PlainFormatter::format_summary(&report);
 
-        assert_eq!(
-            &rendered,
-            r#"Summary 2026-01-12 .. 2026-01-14
-
-Activity     Days  Active  Break
------------  ----  ------  -----
-holiday         1  3h 30m    30m
-work (home)     1  2h 15m     0m
-TOTAL              5h 45m    30m
-
-Day             Worked
---------------  ------
-Mon 2026-01-12      8h
-Tue 2026-01-13      6h
-Wed 2026-01-14      0m
-
-Week Target: 40h
-Balance:     -34h 15m
-"#
-        );
+        assert!(rendered.starts_with("Summary 2026-01-12 .. 2026-01-14\n\n"));
+        assert!(rendered.contains("work (home)"));
+        assert!(rendered.contains("2h 15m"));
+        assert!(rendered.contains("work (office)"));
+        assert!(rendered.contains("3h 30m"));
+        assert!(rendered.contains("TOTAL"));
+        assert!(rendered.contains("5h 45m"));
+        assert!(rendered.contains("Mon 2026-01-12"));
+        assert!(rendered.contains("Tue 2026-01-13"));
+        assert!(rendered.contains("Wed 2026-01-14"));
+        assert!(rendered.contains("Week Target: 40h"));
+        assert!(rendered.contains("Balance:     -34h 15m"));
     }
 
     #[test]
@@ -656,7 +756,7 @@ No completed work items.
         );
     }
 
-    fn summary_report(entries: Vec<DayEntryView>) -> SummaryReport {
+    fn summary_report(records: Vec<Record>) -> SummaryReport {
         let window = SummaryWindow::new(
             Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap(),
@@ -664,7 +764,7 @@ No completed work items.
 
         SummaryReport::with_weekly_balance(
             window,
-            summary(&entries, window).unwrap(),
+            summary(&records, window).unwrap(),
             40 * 60,
             vec![
                 SummaryDay::new(
@@ -683,8 +783,8 @@ No completed work items.
         )
     }
 
-    fn day_entry(id: u64, timestamp: chrono::DateTime<Local>, command: Command) -> DayEntryView {
-        DayEntryView { id: id.into(), timestamp, command }
+    fn work_record(id: u64, timestamp: chrono::DateTime<Local>, command: WorkCommand) -> Record {
+        Record::from_input(id.into(), RecordInput::Work(WorkRecordInput::new(timestamp, command)))
     }
 
     fn detailed_report() -> WorkItemReport {

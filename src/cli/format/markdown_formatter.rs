@@ -1,11 +1,11 @@
 use chrono::NaiveDate;
 use termimad::Alignment;
 
-use crate::DayEntryView;
+use crate::DayOverview;
 use crate::domain::{ReportGroupBy, SummaryReport, WorkItemReport};
 
 use super::Formatter;
-use super::{format_day_command, prepare_report, prepare_summary};
+use super::{format_work_command, prepare_report, prepare_summary};
 
 pub struct MarkdownFormatter;
 
@@ -18,27 +18,56 @@ impl Formatter for MarkdownFormatter {
         skin.print_text(markdown);
     }
 
-    fn format_day(date: NaiveDate, entries: &[DayEntryView]) -> String {
+    fn format_day(date: NaiveDate, day_overview: &DayOverview) -> String {
         let mut output = String::new();
         output.push_str(&format!("# Day {date}\n\n"));
-        output.push_str("| Time | ID | Event |\n");
-        output.push_str("| ---: | ---: | :-- |\n");
 
-        let entries_str = entries
+        let work_records_str = day_overview
+            .work_records
             .iter()
-            .map(|entry| {
-                let event = escape_markdown_table_cell(&format_day_command(&entry.command));
-                let timestamp = entry.timestamp.format("%H:%M");
-                let id = entry.id;
+            .map(|record| {
+                let event = escape_markdown_table_cell(&format_work_command(record.command()));
+                let timestamp = record.timestamp().format("%H:%M");
+                let id = record.id();
 
                 format!("| {timestamp} | {id} | {event} |")
             })
             .collect::<Vec<_>>()
             .join("\n");
 
-        if !entries_str.is_empty() {
-            output.push_str(&entries_str);
-            output.push('\n');
+        let absence_records_str = day_overview
+            .absence_records
+            .iter()
+            .map(|record| {
+                let kind = record.kind();
+                let portion = record.portion();
+                let note = escape_markdown_table_cell(record.note().as_deref().unwrap_or(""));
+                let id = record.id();
+
+                format!("| {id} | {kind} | {portion} | {note} |")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if work_records_str.is_empty() && absence_records_str.is_empty() {
+            output.push_str(&format!("_No records for {date}._"));
+            return output;
+        }
+
+        if !work_records_str.is_empty() {
+            output.push_str(&format!("## Work records\n\n"));
+            output.push_str("| Time | ID | Event |\n");
+            output.push_str("| ---: | ---: | :-- |\n");
+            output.push_str(&work_records_str);
+            output.push_str("\n\n");
+        }
+
+        if !absence_records_str.is_empty() {
+            output.push_str(&format!("## Absence records\n\n"));
+            output.push_str("| ID | Kind | Portion | Note |\n");
+            output.push_str("| ---: | --: | --: | :-- |\n");
+            output.push_str(&absence_records_str);
+            output.push_str("\n\n");
         }
 
         output
@@ -216,8 +245,8 @@ mod tests {
 
     use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        ActivityKind, Command, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkContext,
-        WorkItemReport, summary,
+        Record, RecordInput, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkCommand,
+        WorkContext, WorkItemReport, WorkRecordInput, summary,
     };
 
     use super::*;
@@ -225,11 +254,15 @@ mod tests {
     #[test]
     fn markdown_format_day_includes_header_and_row() {
         let date = NaiveDate::from_ymd_opt(2026, 3, 21).unwrap();
-        let entries = vec![DayEntryView {
-            id: 7.into(),
-            timestamp: Local.with_ymd_and_hms(2026, 3, 21, 5, 15, 12).unwrap(),
-            command: Command::Start { kind: ActivityKind::Work { context: WorkContext::Home } },
-        }];
+        let entries = DayOverview {
+            date,
+            work_records: vec![crate::domain::WorkRecord::new(
+                7.into(),
+                Local.with_ymd_and_hms(2026, 3, 21, 5, 15, 12).unwrap(),
+                WorkCommand::Start { context: WorkContext::Home },
+            )],
+            absence_records: vec![],
+        };
 
         let rendered = MarkdownFormatter::format_day(date, &entries);
 
@@ -237,9 +270,12 @@ mod tests {
             &rendered,
             r#"# Day 2026-03-21
 
+## Work records
+
 | Time | ID | Event |
 | ---: | ---: | :-- |
 | 05:15 | 7 | START work (home) |
+
 "#
         );
     }
@@ -247,41 +283,53 @@ mod tests {
     #[test]
     fn markdown_format_day_escapes_pipes_and_new_line() {
         let date = NaiveDate::from_ymd_opt(2026, 3, 21).unwrap();
-        let entries = vec![
-            DayEntryView {
-                id: 7.into(),
-                timestamp: Local.with_ymd_and_hms(2026, 3, 21, 5, 15, 12).unwrap(),
-                command: Command::Start { kind: ActivityKind::Work { context: WorkContext::Home } },
-            },
-            DayEntryView {
-                id: 42.into(),
-                timestamp: Local.with_ymd_and_hms(2026, 3, 22, 5, 15, 12).unwrap(),
-                command: Command::End {
-                    title: "End Working | but with pipes".into(),
-                    description: Some(
-                        "That is\nso much description,\nthat it spans multiple\nlines".into(),
-                    ),
-                },
-            },
-            DayEntryView {
-                id: 42.into(),
-                timestamp: Local.with_ymd_and_hms(2026, 3, 22, 5, 15, 12).unwrap(),
-                command: Command::Start { kind: ActivityKind::Work { context: WorkContext::Home } },
-            },
-        ];
+        let entries = DayOverview {
+            date,
+            work_records: vec![
+                crate::domain::WorkRecord::new(
+                    7.into(),
+                    Local.with_ymd_and_hms(2026, 3, 21, 5, 15, 12).unwrap(),
+                    WorkCommand::Start { context: WorkContext::Home },
+                ),
+                crate::domain::WorkRecord::new(
+                    42.into(),
+                    Local.with_ymd_and_hms(2026, 3, 21, 5, 15, 12).unwrap(),
+                    WorkCommand::End {
+                        title: "End Working | but with pipes".into(),
+                        description: Some(
+                            "That is\nso much description,\nthat it spans multiple\nlines".into(),
+                        ),
+                    },
+                ),
+            ],
+            absence_records: vec![crate::domain::AbsenceRecord::new(
+                99.into(),
+                date,
+                crate::domain::AbsenceKind::SickChild,
+                crate::domain::AbsencePortion::HalfDay,
+                Some("doctor | note\nnext line".into()),
+            )],
+        };
 
         let rendered = MarkdownFormatter::format_day(date, &entries);
-        println!("{}", &rendered);
 
         assert_eq!(
             &rendered,
             r#"# Day 2026-03-21
 
+## Work records
+
 | Time | ID | Event |
 | ---: | ---: | :-- |
 | 05:15 | 7 | START work (home) |
 | 05:15 | 42 | END   "End Working \| but with pipes" (That is<br>so much description,<br>that it spans multiple<br>lines) |
-| 05:15 | 42 | START work (home) |
+
+## Absence records
+
+| ID | Kind | Portion | Note |
+| ---: | --: | --: | :-- |
+| 99 | sick-child | half-day | doctor \| note<br>next line |
+
 "#
         );
     }
@@ -289,35 +337,35 @@ mod tests {
     #[test]
     fn markdown_format_summary_renders_sorted_rows_and_totals() {
         let report = summary_report(vec![
-            day_entry(
+            work_record(
                 1,
                 Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
-                Command::Start { kind: ActivityKind::Work { context: WorkContext::Home } },
+                WorkCommand::Start { context: WorkContext::Home },
             ),
-            day_entry(
+            work_record(
                 2,
                 Local.with_ymd_and_hms(2026, 1, 12, 2, 15, 0).unwrap(),
-                Command::End { title: "done".into(), description: None },
+                WorkCommand::End { title: "done".into(), description: None },
             ),
-            day_entry(
+            work_record(
                 3,
                 Local.with_ymd_and_hms(2026, 1, 13, 4, 0, 0).unwrap(),
-                Command::Start { kind: ActivityKind::Holiday },
+                WorkCommand::Start { context: WorkContext::Office },
             ),
-            day_entry(
+            work_record(
                 4,
                 Local.with_ymd_and_hms(2026, 1, 13, 6, 0, 0).unwrap(),
-                Command::BreakStart,
+                WorkCommand::BreakStart,
             ),
-            day_entry(
+            work_record(
                 5,
                 Local.with_ymd_and_hms(2026, 1, 13, 6, 30, 0).unwrap(),
-                Command::BreakEnd { description: None },
+                WorkCommand::BreakEnd { description: None },
             ),
-            day_entry(
+            work_record(
                 6,
                 Local.with_ymd_and_hms(2026, 1, 13, 8, 0, 0).unwrap(),
-                Command::End { title: "done".into(), description: None },
+                WorkCommand::End { title: "done".into(), description: None },
             ),
         ]);
 
@@ -329,8 +377,8 @@ mod tests {
 
 | Activity | Days | Active | Break |
 | :-- | --: | --: | --: |
-| holiday | 1 | 3h 30m | 30m |
 | work (home) | 1 | 2h 15m | 0m |
+| work (office) | 1 | 3h 30m | 30m |
 | TOTAL |  | 5h 45m | 30m |
 
 | Day | Worked |
@@ -495,7 +543,7 @@ _No completed work items._
         );
     }
 
-    fn summary_report(entries: Vec<DayEntryView>) -> SummaryReport {
+    fn summary_report(records: Vec<Record>) -> SummaryReport {
         let window = SummaryWindow::new(
             Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap(),
@@ -503,7 +551,7 @@ _No completed work items._
 
         SummaryReport::with_weekly_balance(
             window,
-            summary(&entries, window).unwrap(),
+            summary(&records, window).unwrap(),
             40 * 60,
             vec![
                 SummaryDay::new(
@@ -522,8 +570,8 @@ _No completed work items._
         )
     }
 
-    fn day_entry(id: u64, timestamp: chrono::DateTime<Local>, command: Command) -> DayEntryView {
-        DayEntryView { id: id.into(), timestamp, command }
+    fn work_record(id: u64, timestamp: chrono::DateTime<Local>, command: WorkCommand) -> Record {
+        Record::from_input(id.into(), RecordInput::Work(WorkRecordInput::new(timestamp, command)))
     }
 
     fn detailed_report() -> WorkItemReport {

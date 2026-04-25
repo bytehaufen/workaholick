@@ -2,23 +2,14 @@ use super::args::{Cli, CliCommand};
 use super::edit_format::{parse_edited, render_for_edit};
 use super::format;
 use crate::App;
+use crate::cli::args::WorkSubcommand;
 use crate::config::OutputFormatter;
-use crate::domain::Command;
 use crate::editor::{Editor, ports::FileType};
-use crate::{EntryReader, EntryWriter, web};
+use crate::{RecordReader, RecordWriter, web};
 
 use anyhow::Result;
 
-macro_rules! append_and_print {
-    ($app:expr, $cmd:expr) => {{
-        let id = $app.append($cmd)?;
-        println!("✅ Entry with ID {id} added.");
-
-        Ok(())
-    }};
-}
-
-pub fn run<S: EntryReader + EntryWriter>(
+pub fn run<S: RecordReader + RecordWriter>(
     app: &mut App<S>,
     cli: Cli,
     editor: &dyn Editor,
@@ -27,58 +18,65 @@ pub fn run<S: EntryReader + EntryWriter>(
     run_inner(app, cli, editor, formatter)
 }
 
-fn run_inner<S: EntryReader + EntryWriter>(
+fn run_inner<S: RecordReader + RecordWriter>(
     app: &mut App<S>,
     cli: Cli,
     editor: &dyn Editor,
     formatter: OutputFormatter,
 ) -> Result<()> {
     match cli.command {
-        CliCommand::Web => web::run(app),
-
         CliCommand::Config { .. } => anyhow::bail!("config handled in main"),
         CliCommand::Completions { .. } => anyhow::bail!("completions handled in main"),
 
-        CliCommand::Start { kind } => append_and_print!(app, Command::Start { kind: kind.into() }),
-        CliCommand::End { title, description } => {
-            append_and_print!(app, Command::End { title, description })
-        }
-        CliCommand::Log { title, description } => {
-            append_and_print!(app, Command::Log { title, description })
-        }
-        CliCommand::BreakStart => append_and_print!(app, Command::BreakStart),
-        CliCommand::BreakEnd { description } => {
-            append_and_print!(app, Command::BreakEnd { description })
-        }
+        CliCommand::Web => web::run(app),
+        CliCommand::Work { command } => {
+            let id = match command {
+                WorkSubcommand::Start { context } => app.start_work(context)?,
+                WorkSubcommand::End { title, description } => app.end_work(title, description)?,
+                WorkSubcommand::Log { title, description } => app.log_work(title, description)?,
+                WorkSubcommand::BreakStart => app.start_break()?,
+                WorkSubcommand::BreakEnd { description } => app.end_break(description)?,
+            };
 
+            println!("✅ Record with ID {id} added.");
+            Ok(())
+        }
+        CliCommand::Absence { kind, details } => {
+            let id = app.add_absence(details.into_input(kind))?;
+            println!("✅ Record with ID {id} added.");
+            Ok(())
+        }
         CliCommand::Delete { id } => {
-            let entry = app.delete(id.into())?;
-            println!("🗑️ Entry deleted:\n{entry:#?}");
+            let entry = app.delete_record(id.into())?;
+            println!("🗑️ Record deleted:\n{entry:#?}");
             Ok(())
         }
         CliCommand::Edit { id } => {
             let id = id.into();
-            let entry = app.get_entry_patch(id)?;
-            let initial = render_for_edit(&entry)?;
+            let record = app
+                .get_record_input(id)
+                .ok_or_else(|| anyhow::anyhow!("No record with ID {id}"))?;
+            let initial = render_for_edit(&record)?;
             let edited = editor.edit(&initial, FileType::Ron)?;
             let patch = parse_edited(&edited)?;
-            app.update_entry(id, patch)
-        }
+            app.update_record(id, patch)?;
+            println!("✅ Record updated:\n{record:#?}");
 
+            Ok(())
+        }
         CliCommand::Day { date } => {
-            let Some(date) = date.or_else(|| app.last_date()) else {
+            let Some(date) = date.or_else(|| app.last_record_date()) else {
                 anyhow::bail!("There are no entries.");
             };
 
-            let entries = app.day(date)?;
-            if entries.is_empty() {
-                println!("No entries for {date}.");
+            let day_overview = app.day(date);
+            if day_overview.is_empty() {
+                println!("No records for {date}.");
                 return Ok(());
             }
 
-            format::print_day(formatter, date, &entries)
+            format::print_day(formatter, date, &day_overview)
         }
-
         CliCommand::Summary(summary_args) => {
             let report = app.summary(summary_args.scope())?;
             format::print_summary(formatter, &report)

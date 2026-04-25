@@ -1,15 +1,25 @@
 use chrono::{DateTime, Local, NaiveDate};
 
-use crate::{
-    DayEntryView,
-    domain::{
-        ActivityKind, Command, DayEntryValidationError,
-        day_entries::{DayState, transition_day_state},
-        summary::SummaryWindow,
-    },
+use crate::domain::{
+    DayRecordValidationError, Record, WorkCommand,
+    day_entries::{DayState, transition_day_state},
+    summary::SummaryWindow,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::VariantNames,
+)]
+#[strum(serialize_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum ReportGroupBy {
     Title,
     TitleDescription,
@@ -263,9 +273,9 @@ fn clipped_range(
 }
 
 pub fn report(
-    entries: &[DayEntryView],
+    records: &[Record],
     window: SummaryWindow,
-) -> Result<WorkItemReport, DayEntryValidationError> {
+) -> Result<WorkItemReport, DayRecordValidationError> {
     let init_state = State {
         state: DayState::Idle,
         active_segment_start: None,
@@ -273,60 +283,55 @@ pub fn report(
         rows: Vec::new(),
     };
 
-    let state = entries.iter().filter(|entry| entry.timestamp < window.end()).try_fold(
-        init_state,
-        |mut state, entry| -> Result<State, DayEntryValidationError> {
-            let next_state = transition_day_state(state.state, entry.id, &entry.command)?;
+    // FIXME: Need to respect Absence
+    let state = records
+        .iter()
+        .filter_map(Record::as_work)
+        .filter(|entry| *entry.timestamp() < window.end())
+        .try_fold(init_state, |mut state, entry| -> Result<State, DayRecordValidationError> {
+            let next_state = transition_day_state(state.state, *entry.id(), entry.command())?;
 
-            match (&state.state, &entry.command, next_state) {
-                (
-                    DayState::Idle,
-                    Command::Start { .. },
-                    DayState::Active(ActivityKind::Work { .. }),
-                ) => {
-                    state.active_segment_start = Some(entry.timestamp);
+            match (&state.state, entry.command(), next_state) {
+                (DayState::Idle, WorkCommand::Start { .. }, DayState::Active(_)) => {
+                    state.active_segment_start = Some(*entry.timestamp());
                 }
-                (DayState::Active(ActivityKind::Work { .. }), Command::BreakStart, _) => {
+                (DayState::Active(_), WorkCommand::BreakStart, _) => {
                     state.open_item.add_segment(
                         state.active_segment_start,
-                        entry.timestamp,
+                        *entry.timestamp(),
                         window,
                     );
                     state.active_segment_start = None;
                 }
-                (DayState::Breaking(ActivityKind::Work { .. }), Command::BreakEnd { .. }, _) => {
-                    state.active_segment_start = Some(entry.timestamp);
+                (DayState::Breaking(_), WorkCommand::BreakEnd { .. }, _) => {
+                    state.active_segment_start = Some(*entry.timestamp());
                 }
-                (
-                    DayState::Active(ActivityKind::Work { .. }),
-                    Command::Log { title, description },
-                    _,
-                ) => {
+                (DayState::Active(_), WorkCommand::Log { title, description }, _) => {
                     state.open_item.add_segment(
                         state.active_segment_start,
-                        entry.timestamp,
+                        *entry.timestamp(),
                         window,
                     );
-                    if let Some(row) =
-                        state.open_item.finish(entry.timestamp, title.clone(), description.clone())
-                    {
+                    if let Some(row) = state.open_item.finish(
+                        *entry.timestamp(),
+                        title.clone(),
+                        description.clone(),
+                    ) {
                         state.rows.push(row);
                     }
-                    state.active_segment_start = Some(entry.timestamp);
+                    state.active_segment_start = Some(*entry.timestamp());
                 }
-                (
-                    DayState::Active(ActivityKind::Work { .. }),
-                    Command::End { title, description },
-                    _,
-                ) => {
+                (DayState::Active(_), WorkCommand::End { title, description }, _) => {
                     state.open_item.add_segment(
                         state.active_segment_start,
-                        entry.timestamp,
+                        *entry.timestamp(),
                         window,
                     );
-                    if let Some(row) =
-                        state.open_item.finish(entry.timestamp, title.clone(), description.clone())
-                    {
+                    if let Some(row) = state.open_item.finish(
+                        *entry.timestamp(),
+                        title.clone(),
+                        description.clone(),
+                    ) {
                         state.rows.push(row);
                     }
                     state.active_segment_start = None;
@@ -336,8 +341,7 @@ pub fn report(
 
             state.state = next_state;
             Ok(state)
-        },
-    )?;
+        })?;
 
     Ok(WorkItemReport::new(window, state.rows))
 }
@@ -347,7 +351,10 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
-    use crate::domain::{ActivityKind, Command, WorkContext};
+    use crate::domain::{
+        AbsenceKind, AbsencePortion, AbsenceRecordInput, RecordInput, WorkCommand, WorkContext,
+        WorkRecordInput,
+    };
 
     fn ts(day: u32, hour: u32, minute: u32) -> DateTime<Local> {
         Local.with_ymd_and_hms(2026, 1, day, hour, minute, 0).unwrap()
@@ -357,18 +364,44 @@ mod tests {
         SummaryWindow::new(ts(start_day, start_hour, 0), ts(end_day, end_hour, 0))
     }
 
-    fn entry(id: u64, day: u32, hour: u32, minute: u32, command: Command) -> DayEntryView {
-        DayEntryView { id: id.into(), timestamp: ts(day, hour, minute), command }
+    fn work_record(id: u64, day: u32, hour: u32, minute: u32, command: WorkCommand) -> Record {
+        Record::from_input(
+            id.into(),
+            RecordInput::Work(WorkRecordInput::new(ts(day, hour, minute), command)),
+        )
+    }
+
+    fn absence_record(id: u64, day: u32, kind: AbsenceKind) -> Record {
+        Record::from_input(
+            id.into(),
+            RecordInput::Absence(AbsenceRecordInput::new(
+                ts(day, 0, 0).date_naive(),
+                kind,
+                AbsencePortion::FullDay,
+                None,
+            )),
+        )
     }
 
     #[test]
     fn report_splits_log_and_end_into_separate_rows() {
-        let kind = ActivityKind::Work { context: WorkContext::Office };
         let report = report(
             &[
-                entry(1, 10, 8, 0, Command::Start { kind }),
-                entry(2, 10, 10, 0, Command::Log { title: "handoff".into(), description: None }),
-                entry(3, 10, 12, 0, Command::End { title: "wrap".into(), description: None }),
+                work_record(1, 10, 8, 0, WorkCommand::Start { context: WorkContext::Office }),
+                work_record(
+                    2,
+                    10,
+                    10,
+                    0,
+                    WorkCommand::Log { title: "handoff".into(), description: None },
+                ),
+                work_record(
+                    3,
+                    10,
+                    12,
+                    0,
+                    WorkCommand::End { title: "wrap".into(), description: None },
+                ),
             ],
             window(10, 0, 11, 0),
         )
@@ -399,13 +432,18 @@ mod tests {
 
     #[test]
     fn report_excludes_breaks_from_row_duration() {
-        let kind = ActivityKind::Work { context: WorkContext::Travel };
         let report = report(
             &[
-                entry(1, 10, 8, 0, Command::Start { kind }),
-                entry(2, 10, 10, 0, Command::BreakStart),
-                entry(3, 10, 11, 0, Command::BreakEnd { description: None }),
-                entry(4, 10, 13, 0, Command::End { title: "done".into(), description: None }),
+                work_record(1, 10, 8, 0, WorkCommand::Start { context: WorkContext::Travel }),
+                work_record(2, 10, 10, 0, WorkCommand::BreakStart),
+                work_record(3, 10, 11, 0, WorkCommand::BreakEnd { description: None }),
+                work_record(
+                    4,
+                    10,
+                    13,
+                    0,
+                    WorkCommand::End { title: "done".into(), description: None },
+                ),
             ],
             window(10, 0, 11, 0),
         )
@@ -425,28 +463,39 @@ mod tests {
     }
 
     #[test]
-    fn report_ignores_non_work_completed_items() {
-        let kind = ActivityKind::Holiday;
+    fn report_ignores_absence_records() {
         let report = report(
             &[
-                entry(1, 10, 8, 0, Command::Start { kind }),
-                entry(2, 10, 10, 0, Command::Log { title: "checkpoint".into(), description: None }),
-                entry(3, 10, 12, 0, Command::End { title: "done".into(), description: None }),
+                absence_record(1, 10, AbsenceKind::Holiday),
+                work_record(2, 10, 8, 0, WorkCommand::Start { context: WorkContext::Office }),
+                work_record(
+                    3,
+                    10,
+                    12,
+                    0,
+                    WorkCommand::End { title: "done".into(), description: None },
+                ),
             ],
             window(10, 0, 11, 0),
         )
         .unwrap();
 
-        assert!(report.rows().is_empty());
+        assert_eq!(report.rows().len(), 1);
+        assert_eq!(report.rows()[0].title(), "done");
     }
 
     #[test]
     fn report_clips_rows_to_the_requested_window() {
-        let kind = ActivityKind::Work { context: WorkContext::Home };
         let report = report(
             &[
-                entry(1, 9, 20, 0, Command::Start { kind }),
-                entry(2, 10, 10, 0, Command::End { title: "done".into(), description: None }),
+                work_record(1, 9, 20, 0, WorkCommand::Start { context: WorkContext::Home }),
+                work_record(
+                    2,
+                    10,
+                    10,
+                    0,
+                    WorkCommand::End { title: "done".into(), description: None },
+                ),
             ],
             window(10, 0, 11, 0),
         )
@@ -467,9 +516,11 @@ mod tests {
 
     #[test]
     fn report_ignores_trailing_open_work_without_log_or_end() {
-        let kind = ActivityKind::Work { context: WorkContext::Travel };
-        let report =
-            report(&[entry(1, 10, 8, 0, Command::Start { kind })], window(10, 0, 11, 0)).unwrap();
+        let report = report(
+            &[work_record(1, 10, 8, 0, WorkCommand::Start { context: WorkContext::Travel })],
+            window(10, 0, 11, 0),
+        )
+        .unwrap();
 
         assert!(report.rows().is_empty());
     }

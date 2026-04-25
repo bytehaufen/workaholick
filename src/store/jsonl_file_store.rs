@@ -5,12 +5,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 use indexmap::IndexMap;
 
-use crate::domain::{Entry, EntryId, EntryPatch};
+use crate::domain::{Record, RecordId, RecordInput};
 
-use super::{EntryReader, EntryWriter};
+use super::{RecordReader, RecordWriter};
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
-const VERSION: u8 = 1;
 
 /// JSONL file-based `EntryStore` implementation
 #[derive(Debug)]
@@ -18,7 +17,7 @@ pub struct JsonlFileStore {
     file_path: PathBuf,
     _lock_file: File,
     lock_path: PathBuf,
-    entries: IndexMap<EntryId, Entry>,
+    records: IndexMap<RecordId, Record>,
 }
 
 impl Drop for JsonlFileStore {
@@ -52,10 +51,10 @@ impl JsonlFileStore {
             }
         };
 
-        Ok(Self { file_path: file_path.into(), _lock_file: lock_file, lock_path, entries })
+        Ok(Self { file_path: file_path.into(), _lock_file: lock_file, lock_path, records: entries })
     }
 
-    fn read_from<R: BufRead>(reader: R, path: &Path) -> Result<Vec<Entry>> {
+    fn read_from<R: BufRead>(reader: R, path: &Path) -> Result<Vec<Record>> {
         reader
             .lines()
             .enumerate()
@@ -67,7 +66,7 @@ impl JsonlFileStore {
                 let line = line?;
                 let line_num = index + 1;
 
-                serde_json::from_str::<Entry>(&line).map_err(|e| {
+                serde_json::from_str::<Record>(&line).map_err(|e| {
                     anyhow!(
                         "parse JSON on line {} (file {:?}): {}\n  | {}",
                         line_num,
@@ -81,7 +80,7 @@ impl JsonlFileStore {
     }
 
     /// Reads in the file at `path` in a by timeestamp sorted `Vec<Entry>`
-    fn read_file(path: &Path) -> Result<Vec<Entry>> {
+    fn read_file(path: &Path) -> Result<Vec<Record>> {
         if !path.exists() {
             return Ok(Vec::new());
         };
@@ -117,7 +116,7 @@ impl JsonlFileStore {
 
         let mut writer = BufWriter::with_capacity(BUFFER_SIZE, file);
 
-        self.entries.iter().try_for_each(|(_, entry)| -> anyhow::Result<()> {
+        self.records.iter().try_for_each(|(_, entry)| -> anyhow::Result<()> {
             serde_json::to_writer(&mut writer, entry)?;
             writeln!(writer)?;
             Ok(())
@@ -145,14 +144,14 @@ impl JsonlFileStore {
         Ok((file, path))
     }
 
-    fn insert_sorted(&mut self, id: EntryId, entry: Entry) {
-        self.entries
+    fn insert_sorted(&mut self, id: RecordId, entry: Record) {
+        self.records
             .insert_sorted_by(id, entry, |_i1, e1, _i2, e2| e1.sort_key().cmp(&e2.sort_key()));
     }
 
     fn normalize_entries(
-        entries: Vec<Entry>,
-    ) -> std::result::Result<IndexMap<EntryId, Entry>, anyhow::Error> {
+        entries: Vec<Record>,
+    ) -> std::result::Result<IndexMap<RecordId, Record>, anyhow::Error> {
         let len = entries.len();
         let mut entries =
             entries.into_iter().try_fold(IndexMap::with_capacity(len), |mut entries, entry| {
@@ -170,33 +169,33 @@ impl JsonlFileStore {
     }
 }
 
-impl EntryReader for JsonlFileStore {
-    fn iter(&self) -> Box<dyn Iterator<Item = &Entry> + '_> {
-        Box::new(self.entries.values())
+impl RecordReader for JsonlFileStore {
+    fn iter(&self) -> Box<dyn Iterator<Item = &Record> + '_> {
+        Box::new(self.records.values())
     }
 
-    fn get(&self, id: &EntryId) -> Option<&Entry> {
-        self.entries.get(id)
+    fn get(&self, id: &RecordId) -> Option<&Record> {
+        self.records.get(id)
     }
 
     fn len(&self) -> usize {
-        self.entries.len()
+        self.records.len()
     }
 
     fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.records.is_empty()
     }
 }
 
-impl EntryWriter for JsonlFileStore {
-    fn next_id(&self) -> EntryId {
-        self.entries.keys().max().map(|id| id.incremented()).unwrap_or_default()
+impl RecordWriter for JsonlFileStore {
+    fn next_id(&self) -> RecordId {
+        self.records.keys().max().map(|id| id.incremented()).unwrap_or_default()
     }
 
-    fn insert(&mut self, new_entry: EntryPatch) -> anyhow::Result<EntryId> {
+    fn insert(&mut self, new_input: RecordInput) -> anyhow::Result<RecordId> {
         let id = self.next_id();
 
-        let new_entry = Entry::from_patch(id, VERSION.into(), new_entry);
+        let new_entry = Record::from_input(id, new_input);
 
         self.insert_sorted(id, new_entry);
 
@@ -205,21 +204,20 @@ impl EntryWriter for JsonlFileStore {
         Ok(id)
     }
 
-    fn remove(&mut self, id: &EntryId) -> anyhow::Result<Entry> {
+    fn delete(&mut self, id: &RecordId) -> anyhow::Result<Record> {
         // We do a slow shift remove, to do not mess the order in the stored file
-        let entry =
-            self.entries.shift_remove(id).with_context(|| format!("id {id} does not exist"))?;
+        let input =
+            self.records.shift_remove(id).with_context(|| format!("id {id} does not exist"))?;
 
         self.persist()?;
 
-        Ok(entry)
+        Ok(input)
     }
 
-    fn update(&mut self, id: &EntryId, patch: EntryPatch) -> Result<()> {
-        let entry = self.entries.get_mut(id).with_context(|| format!("id {id} does not exist"))?;
-
-        let updated_entry = Entry::from_patch(*id, *entry.version(), patch);
-        self.entries.shift_remove(id);
+    fn update(&mut self, id: &RecordId, input: RecordInput) -> Result<()> {
+        anyhow::ensure!(self.records.contains_key(id), "id {id} does not exist");
+        let updated_entry = Record::from_input(*id, input);
+        self.records.shift_remove(id);
         self.insert_sorted(*id, updated_entry);
 
         self.persist()?;
@@ -231,51 +229,57 @@ impl EntryWriter for JsonlFileStore {
 #[cfg(test)]
 mod tests {
     use chrono::{Local, TimeZone, Timelike};
+    use std::path::Path;
 
-    use crate::domain::{ActivityKind, Command, WorkContext};
+    use crate::domain::{RecordInput, WorkCommand, WorkContext, WorkRecord, WorkRecordInput};
 
     use super::*;
 
+    fn work_input(timestamp: chrono::DateTime<Local>, command: WorkCommand) -> RecordInput {
+        RecordInput::Work(WorkRecordInput::new(timestamp, command))
+    }
+
+    fn work_record(record: &Record) -> &WorkRecord {
+        record.as_work().expect("expected work record")
+    }
+
+    fn write_records(path: &Path, records: &[Record]) {
+        let mut file = File::create(path).unwrap();
+        for record in records {
+            serde_json::to_writer(&mut file, record).unwrap();
+            writeln!(file).unwrap();
+        }
+        file.flush().unwrap();
+    }
+
     #[test]
-    fn insert_persists_and_reopen_reads_entries() {
+    fn insert_persists_and_reopen_reads_records() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
 
-        let timestamp1 = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
-        let timestamp2 = Local.with_ymd_and_hms(2026, 2, 3, 4, 5, 6).unwrap();
-
-        let assert_store = |store: &JsonlFileStore| {
-            assert_eq!(store.entries.len(), 2);
-            assert_eq!(store.entries[0].id().value(), 0);
-            assert_eq!(store.entries[1].id().value(), 1);
-        };
-
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
-
             store
-                .insert(EntryPatch::new(
-                    timestamp1,
-                    Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
+                .insert(work_input(
+                    Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap(),
+                    WorkCommand::Start { context: WorkContext::Office },
                 ))
                 .unwrap();
             store
-                .insert(EntryPatch::new(
-                    timestamp2,
-                    Command::End {
+                .insert(work_input(
+                    Local.with_ymd_and_hms(2026, 2, 3, 4, 5, 6).unwrap(),
+                    WorkCommand::End {
                         title: "The main thing".into(),
-                        description: Some("did some stuff".to_string()),
+                        description: Some("did some stuff".into()),
                     },
                 ))
                 .unwrap();
-
-            assert_store(&store);
         }
-        {
-            let store = JsonlFileStore::new(&file_path).unwrap();
 
-            assert_store(&store);
-        }
+        let store = JsonlFileStore::new(&file_path).unwrap();
+        assert_eq!(store.records.len(), 2);
+        assert_eq!(store.records[0].id().value(), 0);
+        assert_eq!(store.records[1].id().value(), 1);
     }
 
     #[test]
@@ -283,200 +287,123 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
 
-        let timestamp1 = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
-        let timestamp2 = Local.with_ymd_and_hms(2026, 2, 3, 4, 5, 6).unwrap();
-        let timestamp3 = Local.with_ymd_and_hms(2027, 3, 4, 5, 6, 7).unwrap();
+        {
+            let mut store = JsonlFileStore::new(&file_path).unwrap();
+            store
+                .insert(work_input(
+                    Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap(),
+                    WorkCommand::Log { title: "the a thing".into(), description: Some("a".into()) },
+                ))
+                .unwrap();
+            store
+                .insert(work_input(
+                    Local.with_ymd_and_hms(2026, 2, 3, 4, 5, 6).unwrap(),
+                    WorkCommand::Log { title: "the b thing".into(), description: Some("b".into()) },
+                ))
+                .unwrap();
+            store
+                .insert(work_input(
+                    Local.with_ymd_and_hms(2027, 3, 4, 5, 6, 7).unwrap(),
+                    WorkCommand::Log { title: "the c thing".into(), description: Some("c".into()) },
+                ))
+                .unwrap();
 
-        let assert_store = |store: &JsonlFileStore| {
-            let entries = &store.entries;
-            assert_eq!(entries.len(), 2);
-            assert_eq!(entries[0].id().value(), 0);
-            assert_eq!(entries[1].id().value(), 2);
+            let deleted = store.delete(&RecordId::from(1)).unwrap();
+            assert_eq!(
+                *work_record(&deleted).command(),
+                WorkCommand::Log { title: "the b thing".into(), description: Some("b".into()) }
+            );
+        }
 
-            assert_eq!(
-                *entries[0].command(),
-                Command::Log { title: "the a thing".into(), description: Some("a".into()) }
-            );
-            assert_eq!(
-                *entries[1].command(),
-                Command::Log { title: "the c thing".into(), description: Some("c".into()) }
-            );
-        };
+        let store = JsonlFileStore::new(&file_path).unwrap();
+        assert_eq!(store.records.len(), 2);
+        assert_eq!(store.records[0].id().value(), 0);
+        assert_eq!(store.records[1].id().value(), 2);
+    }
+
+    #[test]
+    fn update_record_reorders_by_sort_key_and_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("entries.jsonl");
 
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
             store
-                .insert(EntryPatch::new(
-                    timestamp1,
-                    Command::Log {
-                        title: "the a thing".into(),
-                        description: Some("a".to_string()),
-                    },
+                .insert(work_input(
+                    Local.with_ymd_and_hms(2025, 12, 24, 17, 0, 0).unwrap(),
+                    WorkCommand::Start { context: WorkContext::Home },
                 ))
                 .unwrap();
             store
-                .insert(EntryPatch::new(
-                    timestamp2,
-                    Command::Log {
-                        title: "the b thing".into(),
-                        description: Some("b".to_string()),
-                    },
-                ))
-                .unwrap();
-            store
-                .insert(EntryPatch::new(
-                    timestamp3,
-                    Command::Log {
-                        title: "the c thing".into(),
-                        description: Some("c".to_string()),
-                    },
-                ))
-                .unwrap();
-
-            let deleted = store.remove(&EntryId::from(1)).unwrap();
-            assert_eq!(
-                *deleted.command(),
-                Command::Log { title: "the b thing".into(), description: Some("b".into()) }
-            );
-
-            assert_store(&store);
-        }
-        {
-            let store = JsonlFileStore::new(&file_path).unwrap();
-            assert_store(&store);
-        }
-    }
-
-    #[test]
-    fn lock_file_prevents_second_instance() {
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
-
-        let _store1 = JsonlFileStore::new(&file_path).unwrap();
-        let err = JsonlFileStore::new(&file_path).unwrap_err();
-
-        assert!(err.to_string().contains("lock file exists"));
-    }
-
-    #[test]
-    fn update_entry() {
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
-
-        let assert_store = |store: &JsonlFileStore, id1, id2, id3| {
-            assert_eq!(store.entries.len(), 3);
-            assert_eq!(store.entries[0].id().value(), id1);
-            assert_eq!(store.entries[1].id().value(), id2);
-            assert_eq!(store.entries[2].id().value(), id3);
-        };
-
-        {
-            let mut store = JsonlFileStore::new(&file_path).unwrap();
-            let timestamp1 = Local.with_ymd_and_hms(2025, 12, 24, 17, 0, 0).unwrap();
-            let timestamp2 = Local.with_ymd_and_hms(2025, 12, 24, 14, 0, 0).unwrap();
-            let timestamp3 = Local.with_ymd_and_hms(2025, 12, 24, 20, 0, 0).unwrap();
-
-            store
-                .insert(EntryPatch::new(
-                    timestamp1,
-                    Command::Start { kind: ActivityKind::Vacation },
-                ))
-                .unwrap();
-
-            store
-                .insert(EntryPatch::new(
-                    timestamp2,
-                    Command::Log {
+                .insert(work_input(
+                    Local.with_ymd_and_hms(2025, 12, 24, 14, 0, 0).unwrap(),
+                    WorkCommand::Log {
                         title: "So hungry".into(),
                         description: Some("eating potato salad".into()),
                     },
                 ))
                 .unwrap();
-
             store
-                .insert(EntryPatch::new(
-                    timestamp3,
-                    Command::End {
+                .insert(work_input(
+                    Local.with_ymd_and_hms(2025, 12, 24, 20, 0, 0).unwrap(),
+                    WorkCommand::End {
                         title: "So excited".into(),
                         description: Some("unwrapping presents".into()),
                     },
                 ))
                 .unwrap();
-
-            assert_store(&store, 1, 0, 2);
         }
+
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
-            let updated = EntryPatch::new(
-                Local.with_ymd_and_hms(2025, 12, 24, 18, 0, 0).unwrap(),
-                Command::End {
-                    title: "So excited".into(),
-                    description: Some("un-wrapping presents".into()),
-                },
-            );
-            store.update(&EntryId::from(1), updated).unwrap();
-
-            assert_store(&store, 0, 1, 2);
+            store
+                .update(
+                    &RecordId::from(1),
+                    work_input(
+                        Local.with_ymd_and_hms(2025, 12, 24, 18, 0, 0).unwrap(),
+                        WorkCommand::End {
+                            title: "So excited".into(),
+                            description: Some("un-wrapping presents".into()),
+                        },
+                    ),
+                )
+                .unwrap();
         }
-        {
-            let store = JsonlFileStore::new(&file_path).unwrap();
 
-            assert_store(&store, 0, 1, 2);
-            assert_eq!(store.entries[1].timestamp().hour(), 18);
-
-            assert_eq!(
-                *store.entries[1].command(),
-                Command::End {
-                    title: "So excited".into(),
-                    description: Some("un-wrapping presents".into())
-                }
-            );
-        }
+        let store = JsonlFileStore::new(&file_path).unwrap();
+        assert_eq!(store.records.len(), 3);
+        assert_eq!(store.records[0].id().value(), 0);
+        assert_eq!(store.records[1].id().value(), 1);
+        assert_eq!(store.records[2].id().value(), 2);
+        assert_eq!(work_record(&store.records[1]).timestamp().hour(), 18);
     }
 
     #[test]
-    fn update_missing_id_returns_error() {
+    fn update_and_delete_missing_id_return_error() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
-
         let mut store = JsonlFileStore::new(&file_path).unwrap();
 
         store
-            .insert(EntryPatch::new(
+            .insert(work_input(
                 Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
-                Command::Log { title: "the a thing".into(), description: Some("a".into()) },
+                WorkCommand::Log { title: "the a thing".into(), description: Some("a".into()) },
             ))
             .unwrap();
 
-        let patch = EntryPatch::new(
-            Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
-            Command::Log { title: "the b thing".into(), description: Some("b".into()) },
-        );
+        let update_err = store
+            .update(
+                &999.into(),
+                work_input(
+                    Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
+                    WorkCommand::Log { title: "the b thing".into(), description: Some("b".into()) },
+                ),
+            )
+            .unwrap_err();
+        assert_eq!(update_err.to_string(), "id 999 does not exist");
 
-        let err = store.update(&999.into(), patch).unwrap_err();
-        assert_eq!(err.to_string(), "id 999 does not exist");
-    }
-
-    #[test]
-    fn delete_missing_id_returns_error() {
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
-
-        let mut store = JsonlFileStore::new(&file_path).unwrap();
-
-        store
-            .insert(EntryPatch::new(
-                Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
-                Command::Log { title: "the a thing".into(), description: Some("a".into()) },
-            ))
-            .unwrap();
-
-        let error = store.remove(&EntryId::from(123)).unwrap_err();
-
-        assert_eq!(error.to_string(), "id 123 does not exist");
-
-        assert_eq!(store.entries.len(), 1);
-        assert_eq!(store.entries[0].id().value(), 0);
+        let delete_err = store.delete(&RecordId::from(123)).unwrap_err();
+        assert_eq!(delete_err.to_string(), "id 123 does not exist");
     }
 
     #[test]
@@ -487,81 +414,76 @@ mod tests {
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
             store
-                .insert(EntryPatch::new(
+                .insert(work_input(
                     Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
-                    Command::Log { title: "the a thing".into(), description: Some("a".into()) },
+                    WorkCommand::Log { title: "a".into(), description: None },
                 ))
                 .unwrap();
             store
-                .insert(EntryPatch::new(
+                .insert(work_input(
                     Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
-                    Command::Log { title: "the b thing".into(), description: Some("b".into()) },
+                    WorkCommand::Log { title: "b".into(), description: None },
                 ))
                 .unwrap();
         }
 
-        {
-            let mut store = JsonlFileStore::new(&file_path).unwrap();
-            store
-                .insert(EntryPatch::new(
-                    Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
-                    Command::Log { title: "the c thing".into(), description: Some("c".into()) },
-                ))
-                .unwrap();
+        let mut store = JsonlFileStore::new(&file_path).unwrap();
+        store
+            .insert(work_input(
+                Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
+                WorkCommand::Log { title: "c".into(), description: None },
+            ))
+            .unwrap();
 
-            assert_eq!(store.entries.len(), 3);
-            assert_eq!(store.entries[0].id().value(), 0);
-            assert_eq!(store.entries[1].id().value(), 1);
-            assert_eq!(store.entries[2].id().value(), 2);
-        }
+        assert_eq!(store.records.len(), 3);
+        assert_eq!(store.records[2].id().value(), 2);
     }
 
     #[test]
-    fn iter_returns_entries_sorted_by_timestamp_when_inserted() {
+    fn iter_returns_records_sorted_by_sort_key() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
-        let mut store = JsonlFileStore::new(&file_path).unwrap();
 
-        store
-            .insert(EntryPatch::new(
-                Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
-                Command::Log { title: "late".into(), description: None },
-            ))
-            .unwrap();
-        store
-            .insert(EntryPatch::new(
-                Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
-                Command::Log { title: "early".into(), description: None },
-            ))
-            .unwrap();
-        store
-            .insert(EntryPatch::new(
-                Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
-                Command::Log { title: "mid".into(), description: None },
-            ))
-            .unwrap();
+        let records = vec![
+            Record::from_input(
+                1.into(),
+                work_input(
+                    Local.with_ymd_and_hms(2026, 1, 5, 4, 30, 26).unwrap(),
+                    WorkCommand::Start { context: WorkContext::Home },
+                ),
+            ),
+            Record::from_input(
+                2.into(),
+                work_input(
+                    Local.with_ymd_and_hms(2026, 1, 5, 3, 45, 3).unwrap(),
+                    WorkCommand::End { title: "foo".into(), description: None },
+                ),
+            ),
+        ];
+        write_records(&file_path, &records);
 
-        let hours: Vec<u32> = store.iter().map(|entry| entry.timestamp().hour()).collect();
-        assert_eq!(hours, vec![10, 11, 12]);
+        let store = JsonlFileStore::new(&file_path).unwrap();
+        let ids: Vec<_> = store.iter().map(|record| record.id().value()).collect();
+        assert_eq!(ids, vec![2, 1]);
     }
 
     #[test]
-    fn get_returns_entry_for_existing_id_and_none_for_missing_id() {
+    fn get_returns_record_for_existing_id_and_none_for_missing_id() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
         let mut store = JsonlFileStore::new(&file_path).unwrap();
 
         let id = store
-            .insert(EntryPatch::new(
+            .insert(work_input(
                 Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
-                Command::Log { title: "a".into(), description: Some("b".into()) },
+                WorkCommand::Log { title: "a".into(), description: Some("b".into()) },
             ))
             .unwrap();
 
         let entry = store.get(&id).expect("entry should be present");
         assert_eq!(
-            *entry.command(),
-            Command::Log { title: "a".into(), description: Some("b".into()) }
+            *work_record(entry).command(),
+            WorkCommand::Log { title: "a".into(), description: Some("b".into()) }
         );
         assert!(store.get(&999.into()).is_none());
     }
@@ -604,9 +526,9 @@ mod tests {
         std::fs::create_dir(&file_path).unwrap();
 
         let err = store
-            .insert(EntryPatch::new(
+            .insert(work_input(
                 Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
-                Command::Log { title: "boom".into(), description: None },
+                WorkCommand::Log { title: "boom".into(), description: None },
             ))
             .unwrap_err()
             .to_string();
@@ -615,15 +537,16 @@ mod tests {
     }
 
     #[test]
-    fn lock_file_is_removed_on_drop() {
+    fn lock_file_prevents_second_instance_and_is_removed_on_drop() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
 
         {
-            let _store = JsonlFileStore::new(&file_path).unwrap();
+            let _store1 = JsonlFileStore::new(&file_path).unwrap();
+            let err = JsonlFileStore::new(&file_path).unwrap_err();
+            assert!(err.to_string().contains("lock file exists"));
         }
 
-        // Should succeed because Drop removed the lock
         let _store2 = JsonlFileStore::new(&file_path).unwrap();
     }
 
@@ -651,13 +574,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("entries.jsonl");
 
-        let timestamp = Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap();
-        let entry = Entry::from_patch(
-            EntryId::from(0),
-            super::VERSION.into(),
-            EntryPatch::new(
-                timestamp,
-                Command::Log { title: "the a thing".into(), description: Some("a".into()) },
+        let entry = Record::from_input(
+            RecordId::from(0),
+            work_input(
+                Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap(),
+                WorkCommand::Log { title: "the a thing".into(), description: Some("a".into()) },
             ),
         );
 
@@ -668,8 +589,8 @@ mod tests {
         writeln!(file).unwrap();
 
         let store = JsonlFileStore::new(&file_path).unwrap();
-        assert_eq!(store.entries.len(), 1);
-        assert_eq!(store.entries[0].id().value(), 0);
+        assert_eq!(store.records.len(), 1);
+        assert_eq!(store.records[0].id().value(), 0);
     }
 
     #[test]
@@ -690,10 +611,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store_file_path = dir.path().join("entries.jsonl");
 
-        let mut file = File::create(&store_file_path).unwrap();
-        file.write_all(br#"{"id":0,"version":1,"timestamp":"2026-01-05 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
-                                {"id":0,"version":1,"timestamp":"2026-01-05 16:45:03 +0100","command":{"end":{"title":"foo","description":null}}}"#).unwrap();
-        file.flush().unwrap();
+        write_records(
+            &store_file_path,
+            &[
+                Record::from_input(
+                    0.into(),
+                    work_input(
+                        Local.with_ymd_and_hms(2026, 1, 5, 4, 30, 26).unwrap(),
+                        WorkCommand::Start { context: WorkContext::Home },
+                    ),
+                ),
+                Record::from_input(
+                    0.into(),
+                    work_input(
+                        Local.with_ymd_and_hms(2026, 1, 5, 16, 45, 3).unwrap(),
+                        WorkCommand::End { title: "foo".into(), description: None },
+                    ),
+                ),
+            ],
+        );
 
         let error = JsonlFileStore::new(&store_file_path).unwrap_err();
         assert_eq!(error.to_string(), "duplicate id 0 in entries");
@@ -706,17 +642,15 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
 
-        // Create the parent directory but make it read-only
         let lock_dir = dir.path().join("readonly");
         std::fs::create_dir(&lock_dir).unwrap();
         let mut perms = std::fs::metadata(&lock_dir).unwrap().permissions();
-        perms.set_mode(0o444); // read-only
+        perms.set_mode(0o444);
         std::fs::set_permissions(&lock_dir, perms).unwrap();
 
         let store_in_readonly = lock_dir.join("entries.jsonl");
         let err = JsonlFileStore::new(&store_in_readonly).unwrap_err();
 
-        // Restore permissions
         let mut perms = std::fs::metadata(&lock_dir).unwrap().permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&lock_dir, perms).unwrap();
@@ -727,57 +661,45 @@ mod tests {
     }
 
     #[test]
-    fn iter_returns_entries_sorted_by_timestamp() {
+    fn new_with_unsorted_records_normalizes_iteration_order() {
         let dir = tempfile::tempdir().unwrap();
         let store_file_path = dir.path().join("entries.jsonl");
 
-        let mut file = File::create(&store_file_path).unwrap();
-        file.write_all(br#"{"id":1,"version":1,"timestamp":"2026-01-05 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
-                                {"id":2,"version":1,"timestamp":"2026-01-05 03:45:03 +0100","command":{"end":{"title":"foo","description":null}}}"#).unwrap();
-        file.flush().unwrap();
+        write_records(
+            &store_file_path,
+            &[
+                Record::from_input(
+                    1.into(),
+                    work_input(
+                        Local.with_ymd_and_hms(2026, 1, 4, 4, 30, 26).unwrap(),
+                        WorkCommand::Start { context: WorkContext::Home },
+                    ),
+                ),
+                Record::from_input(
+                    0.into(),
+                    work_input(
+                        Local.with_ymd_and_hms(2026, 1, 4, 4, 30, 26).unwrap(),
+                        WorkCommand::Start { context: WorkContext::Home },
+                    ),
+                ),
+                Record::from_input(
+                    2.into(),
+                    work_input(
+                        Local.with_ymd_and_hms(2026, 1, 3, 4, 30, 26).unwrap(),
+                        WorkCommand::Start { context: WorkContext::Home },
+                    ),
+                ),
+                Record::from_input(
+                    3.into(),
+                    work_input(
+                        Local.with_ymd_and_hms(2026, 1, 2, 16, 45, 3).unwrap(),
+                        WorkCommand::Start { context: WorkContext::Home },
+                    ),
+                ),
+            ],
+        );
 
         let store = JsonlFileStore::new(&store_file_path).unwrap();
-
-        let mut iter = store.iter();
-
-        assert_eq!(*iter.next().unwrap().id(), EntryId::from(2));
-        assert_eq!(*iter.next().unwrap().id(), EntryId::from(1));
-        assert!(iter.next().is_none());
-    }
-
-    #[test]
-    fn iter_returns_entries_sorted_by_id_when_timestamps_are_eq() {
-        let dir = tempfile::tempdir().unwrap();
-        let store_file_path = dir.path().join("entries.jsonl");
-
-        let mut file = File::create(&store_file_path).unwrap();
-        file.write_all(br#"{"id":2,"version":1,"timestamp":"2026-01-05 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
-                                {"id":1,"version":1,"timestamp":"2026-01-05 04:30:26 +0100","command":{"end":{"title":"foo","description":null}}}"#).unwrap();
-        file.flush().unwrap();
-
-        let store = JsonlFileStore::new(&store_file_path).unwrap();
-
-        let mut iter = store.iter();
-
-        assert_eq!(*iter.next().unwrap().id(), EntryId::from(1));
-        assert_eq!(*iter.next().unwrap().id(), EntryId::from(2));
-        assert!(iter.next().is_none());
-    }
-
-    #[test]
-    fn new_with_unsorted_timestamps_normalizes_iteration_order() {
-        let dir = tempfile::tempdir().unwrap();
-        let store_file_path = dir.path().join("entries.jsonl");
-
-        let mut file = File::create(&store_file_path).unwrap();
-        file.write_all(br#"{"id":1,"version":1,"timestamp":"2026-01-04 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
-                                {"id":0,"version":1,"timestamp":"2026-01-04 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
-                                {"id":2,"version":1,"timestamp":"2026-01-03 04:30:26 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}
-                                {"id":3,"version":1,"timestamp":"2026-01-02 16:45:03 +0100","command":{"start":{"kind":{"work":{"context":"home"}}}}}"#).unwrap();
-        file.flush().unwrap();
-
-        let store = JsonlFileStore::new(&store_file_path).unwrap();
-
         let ids: Vec<_> = store.iter().map(|entry| entry.id().value()).collect();
         assert_eq!(ids, vec![3, 2, 0, 1]);
     }
@@ -792,7 +714,7 @@ mod tests {
         assert!(store.is_empty());
 
         let id = store
-            .insert(EntryPatch::new(
+            .insert(work_input(
                 Local.with_ymd_and_hms(2026, 3, 15, 5, 15, 0).unwrap(),
                 Default::default(),
             ))
@@ -800,7 +722,7 @@ mod tests {
         assert_eq!(store.len(), 1);
         assert!(!store.is_empty());
 
-        store.remove(&id).unwrap();
+        store.delete(&id).unwrap();
         assert_eq!(store.len(), 0);
         assert!(store.is_empty());
     }

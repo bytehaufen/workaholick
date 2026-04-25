@@ -1,14 +1,14 @@
 use chrono::NaiveDate;
 
 use crate::{
-    DayEntryView,
+    DayOverview,
     domain::{ReportGroupBy, SummaryReport, WorkItemReport},
 };
 
 pub trait Formatter {
     fn print(text: &str);
 
-    fn format_day(date: NaiveDate, entries: &[DayEntryView]) -> String;
+    fn format_day(date: NaiveDate, day_overview: &DayOverview) -> String;
 
     fn format_summary(report: &SummaryReport) -> String;
 

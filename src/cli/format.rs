@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
 
-use crate::{DayEntryView, config::OutputFormatter};
+use crate::{DayOverview, config::OutputFormatter, domain::SummaryKind};
 
 pub use plain_formatter::PlainFormatter;
 pub use port::Formatter;
@@ -17,25 +17,23 @@ pub use port::Formatter;
 #[allow(unused_imports)]
 pub use markdown_formatter::MarkdownFormatter;
 
-use crate::domain::{
-    ActivityKind, Command, ReportGroupBy, SummaryReport, SummaryWindow, WorkItemReport,
-};
+use crate::domain::{ReportGroupBy, SummaryReport, SummaryWindow, WorkCommand, WorkItemReport};
 
 pub fn print_day(
     formatter: OutputFormatter,
     date: NaiveDate,
-    entries: &[DayEntryView],
+    day_overview: &DayOverview,
 ) -> Result<()> {
     match formatter {
         OutputFormatter::Plain => {
-            let rendered = PlainFormatter::format_day(date, entries);
+            let rendered = PlainFormatter::format_day(date, day_overview);
             PlainFormatter::print(&rendered);
             Ok(())
         }
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
             {
-                let rendered = MarkdownFormatter::format_day(date, entries);
+                let rendered = MarkdownFormatter::format_day(date, day_overview);
                 MarkdownFormatter::print(&rendered);
                 Ok(())
             }
@@ -105,25 +103,27 @@ pub fn print_report(
     }
 }
 
-pub(super) fn format_day_command(command: &Command) -> String {
+pub(super) fn format_work_command(command: &WorkCommand) -> String {
     match command {
-        Command::Start { kind } => format!("START {}", format_activity_kind(kind)),
-        Command::End { title, description } => {
+        WorkCommand::Start { context } => {
+            format!("START {}", format_summary_kind(SummaryKind::from(*context)))
+        }
+        WorkCommand::End { title, description } => {
             format!(
                 "END   \"{}\"{}",
                 escape_inline_text(title),
                 format_optional_note(description.as_deref())
             )
         }
-        Command::Log { title, description } => {
+        WorkCommand::Log { title, description } => {
             format!(
                 "LOG   \"{}\"{}",
                 escape_inline_text(title),
                 format_optional_note(description.as_deref())
             )
         }
-        Command::BreakStart => "BREAK+".to_string(),
-        Command::BreakEnd { description } => {
+        WorkCommand::BreakStart => "BREAK+".to_string(),
+        WorkCommand::BreakEnd { description } => {
             format!("BREAK-{}", format_optional_note(description.as_deref()))
         }
     }
@@ -140,13 +140,9 @@ fn escape_inline_text(text: &str) -> String {
     text.replace('\\', r"\\").replace('"', r#"\""#)
 }
 
-pub(super) fn format_activity_kind(kind: &ActivityKind) -> String {
+pub(super) fn format_summary_kind(kind: SummaryKind) -> String {
     match kind {
-        ActivityKind::Work { context } => format!("work ({context})"),
-        ActivityKind::Vacation => "vacation".to_string(),
-        ActivityKind::Holiday => "holiday".to_string(),
-        ActivityKind::Sick => "sick".to_string(),
-        ActivityKind::SickChild => "sick-child".to_string(),
+        SummaryKind::Work(work_context) => format!("work ({work_context})"),
     }
 }
 
@@ -221,7 +217,7 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
             let break_minutes = duration_minutes(bucket.break_time());
 
             PreparedSummaryRow {
-                activity: format_activity_kind(&kind),
+                activity: format_summary_kind(kind),
                 day_count: format_summary_day_count(bucket.dates()),
                 active_minutes,
                 break_minutes,
@@ -481,20 +477,20 @@ mod tests {
     use super::*;
     use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        ActivityKind, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkContext,
-        WorkItemReport, summary,
+        Record, RecordInput, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkCommand,
+        WorkContext, WorkItemReport, WorkRecordInput, summary,
     };
     use chrono::{Local, TimeZone};
 
     #[test]
     fn format_day_command_includes_optional_description() {
-        let command = Command::End {
+        let command = WorkCommand::End {
             title: "Implement day output".into(),
             description: Some("handles markdown fallback".into()),
         };
 
         assert_eq!(
-            format_day_command(&command),
+            format_work_command(&command),
             "END   \"Implement day output\" (handles markdown fallback)"
         );
     }
@@ -682,20 +678,26 @@ mod tests {
 
     #[test]
     fn prepare_summary_sorts_rows_and_builds_total() {
-        let work = ActivityKind::Work { context: WorkContext::Home };
-        let holiday = ActivityKind::Holiday;
         let window = SummaryWindow::new(ts(12, 0, 0), ts(15, 0, 0));
-        let entries = vec![
-            day_entry(1, ts(12, 0, 0), Command::Start { kind: work }),
-            day_entry(2, ts(12, 2, 15), Command::End { title: "done".into(), description: None }),
-            day_entry(3, ts(13, 4, 0), Command::Start { kind: holiday }),
-            day_entry(4, ts(13, 6, 0), Command::BreakStart),
-            day_entry(5, ts(13, 6, 30), Command::BreakEnd { description: None }),
-            day_entry(6, ts(13, 8, 0), Command::End { title: "done".into(), description: None }),
+        let records = vec![
+            work_record(1, ts(12, 0, 0), WorkCommand::Start { context: WorkContext::Home }),
+            work_record(
+                2,
+                ts(12, 2, 15),
+                WorkCommand::End { title: "done".into(), description: None },
+            ),
+            work_record(3, ts(13, 4, 0), WorkCommand::Start { context: WorkContext::Office }),
+            work_record(4, ts(13, 6, 0), WorkCommand::BreakStart),
+            work_record(5, ts(13, 6, 30), WorkCommand::BreakEnd { description: None }),
+            work_record(
+                6,
+                ts(13, 8, 0),
+                WorkCommand::End { title: "done".into(), description: None },
+            ),
         ];
         let report = SummaryReport::with_weekly_balance(
             window,
-            summary(&entries, window).unwrap(),
+            summary(&records, window).unwrap(),
             40 * 60,
             vec![
                 SummaryDay::new(ts(12, 0, 0).date_naive(), 8 * 60),
@@ -711,16 +713,16 @@ mod tests {
             display.rows,
             vec![
                 SummaryDisplayRow {
-                    activity: "holiday".into(),
-                    day_count: "1".into(),
-                    active: "3h 30m".into(),
-                    break_time: "30m".into(),
-                },
-                SummaryDisplayRow {
                     activity: "work (home)".into(),
                     day_count: "1".into(),
                     active: "2h 15m".into(),
                     break_time: "0m".into(),
+                },
+                SummaryDisplayRow {
+                    activity: "work (office)".into(),
+                    day_count: "1".into(),
+                    active: "3h 30m".into(),
+                    break_time: "30m".into(),
                 },
             ]
         );
@@ -800,11 +802,7 @@ mod tests {
         Local.with_ymd_and_hms(2026, 1, day, hour, minute, 0).unwrap()
     }
 
-    fn day_entry(
-        id: u64,
-        timestamp: chrono::DateTime<Local>,
-        command: Command,
-    ) -> crate::DayEntryView {
-        crate::DayEntryView { id: id.into(), timestamp, command }
+    fn work_record(id: u64, timestamp: chrono::DateTime<Local>, command: WorkCommand) -> Record {
+        Record::from_input(id.into(), RecordInput::Work(WorkRecordInput::new(timestamp, command)))
     }
 }

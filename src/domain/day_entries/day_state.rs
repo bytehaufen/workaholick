@@ -1,9 +1,9 @@
-use crate::domain::ActivityKind;
+use crate::domain::WorkContext;
 
 #[derive(Debug, PartialEq, Clone, Copy, Default)]
 pub enum DayState {
     #[default]
     Idle,
-    Active(ActivityKind),
-    Breaking(ActivityKind),
+    Active(WorkContext),
+    Breaking(WorkContext),
 }

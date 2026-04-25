@@ -2,12 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Local, NaiveDate, TimeDelta};
 
-use crate::{
-    DayEntryView,
-    domain::{
-        ActivityKind, DayEntryValidationError, Period,
-        day_entries::{DayState, transition_day_state},
-    },
+use crate::domain::{
+    DayRecordValidationError, Period, Record, WorkContext,
+    day_entries::{DayState, transition_day_state},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -16,11 +13,25 @@ pub enum SummaryScope {
     Range { from: NaiveDate, to: NaiveDate },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SummaryKind {
+    Work(WorkContext),
+    // FIXME: Add Absence
+}
+
+impl From<WorkContext> for SummaryKind {
+    fn from(value: WorkContext) -> Self {
+        Self::Work(value)
+    }
+}
+
+type SummaryMap = HashMap<SummaryKind, TimeBucket>;
+
 #[derive(Debug, Clone, Default)]
 pub struct Summary(SummaryMap);
 
 impl Summary {
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (ActivityKind, &TimeBucket)> + '_ {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (SummaryKind, &TimeBucket)> + '_ {
         self.0.iter().map(|(kind, bucket)| (*kind, bucket))
     }
 
@@ -28,7 +39,7 @@ impl Summary {
         Self(
             self.0
                 .iter()
-                .filter(|(kind, _)| matches!(kind, ActivityKind::Work { .. }))
+                .filter(|(kind, _)| matches!(kind, SummaryKind::Work(..)))
                 .map(|(kind, bucket)| (*kind, bucket.clone()))
                 .collect(),
         )
@@ -41,23 +52,23 @@ impl Summary {
     pub(crate) fn work_active_minutes(&self) -> i64 {
         self.0
             .iter()
-            .filter(|(kind, _)| matches!(kind, ActivityKind::Work { .. }))
+            .filter(|(kind, _)| matches!(kind, SummaryKind::Work(..)))
             .map(|(_, bucket)| bucket.active_time().num_minutes().max(0))
             .sum()
     }
 
     #[cfg(test)]
-    pub(crate) fn active_time(&self, kind: ActivityKind) -> TimeDelta {
+    pub(crate) fn active_time(&self, kind: SummaryKind) -> TimeDelta {
         self.bucket(kind).active
     }
 
     #[cfg(test)]
-    pub(crate) fn break_time(&self, kind: ActivityKind) -> TimeDelta {
+    pub(crate) fn break_time(&self, kind: SummaryKind) -> TimeDelta {
         self.bucket(kind).break_time
     }
 
     #[cfg(test)]
-    fn bucket(&self, kind: ActivityKind) -> TimeBucket {
+    fn bucket(&self, kind: SummaryKind) -> TimeBucket {
         self.0.get(&kind).cloned().unwrap_or_default()
     }
 }
@@ -246,8 +257,6 @@ impl TimeBucket {
     }
 }
 
-type SummaryMap = HashMap<ActivityKind, TimeBucket>;
-
 fn clipped_range(
     last_timestamp: Option<DateTime<Local>>,
     timestamp: DateTime<Local>,
@@ -271,7 +280,7 @@ fn add_dates(bucket: &mut TimeBucket, start: DateTime<Local>, end: DateTime<Loca
 
 fn add_time(
     summary: &mut SummaryMap,
-    kind: ActivityKind,
+    kind: SummaryKind,
     field: impl Fn(&mut TimeBucket) -> &mut TimeDelta,
     last_timestamp: Option<DateTime<Local>>,
     timestamp: DateTime<Local>,
@@ -292,19 +301,30 @@ fn finalize_open_bucket(
 ) {
     match state {
         DayState::Idle => {}
-        DayState::Active(kind) => {
-            add_time(summary, kind, TimeBucket::active_mut, last_timestamp, window.end, window)
-        }
-        DayState::Breaking(kind) => {
-            add_time(summary, kind, TimeBucket::break_time_mut, last_timestamp, window.end, window)
-        }
+        DayState::Active(kind) => add_time(
+            summary,
+            SummaryKind::from(kind),
+            TimeBucket::active_mut,
+            last_timestamp,
+            window.end,
+            window,
+        ),
+
+        DayState::Breaking(kind) => add_time(
+            summary,
+            SummaryKind::from(kind),
+            TimeBucket::break_time_mut,
+            last_timestamp,
+            window.end,
+            window,
+        ),
     }
 }
 
 pub fn summary(
-    entries: &[DayEntryView],
+    records: &[Record],
     window: SummaryWindow,
-) -> Result<Summary, DayEntryValidationError> {
+) -> Result<Summary, DayRecordValidationError> {
     struct State {
         state: DayState,
         last_timestamp: Option<DateTime<Local>>,
@@ -317,48 +337,65 @@ pub fn summary(
     let init_state =
         State { state: DayState::Idle, last_timestamp: None, summary: SummaryMap::new() };
 
-    let result = entries.iter().filter(|entry| entry.timestamp < window.end).try_fold(
-        init_state,
-        |fold_state, entry| -> Result<State, DayEntryValidationError> {
+    // FIXME: Need to respect Absence
+    let result = records
+        .iter()
+        .filter_map(Record::as_work)
+        .filter(|record| *record.timestamp() < window.end)
+        .try_fold(init_state, |fold_state, record| -> Result<State, DayRecordValidationError> {
             let State { state, last_timestamp, mut summary } = fold_state;
-            let next_state = transition_day_state(state, entry.id, &entry.command)?;
+            let next_state = transition_day_state(state, *record.id(), record.command())?;
 
             match (state, next_state) {
-                (DayState::Idle, DayState::Active(_)) => {
-                    Ok(State { state: next_state, last_timestamp: Some(entry.timestamp), summary })
-                }
+                (DayState::Idle, DayState::Active(_)) => Ok(State {
+                    state: next_state,
+                    last_timestamp: Some(*record.timestamp()),
+                    summary,
+                }),
                 (DayState::Active(kind), DayState::Breaking(_)) => {
                     add_time(
                         &mut summary,
-                        kind,
+                        SummaryKind::from(kind),
                         TimeBucket::active_mut,
                         last_timestamp,
-                        entry.timestamp,
+                        *record.timestamp(),
                         window,
                     );
-                    Ok(State { state: next_state, last_timestamp: Some(entry.timestamp), summary })
+                    Ok(State {
+                        state: next_state,
+                        last_timestamp: Some(*record.timestamp()),
+                        summary,
+                    })
                 }
                 (DayState::Breaking(kind), DayState::Active(_)) => {
                     add_time(
                         &mut summary,
-                        kind,
+                        SummaryKind::from(kind),
                         TimeBucket::break_time_mut,
                         last_timestamp,
-                        entry.timestamp,
+                        *record.timestamp(),
                         window,
                     );
-                    Ok(State { state: next_state, last_timestamp: Some(entry.timestamp), summary })
+                    Ok(State {
+                        state: next_state,
+                        last_timestamp: Some(*record.timestamp()),
+                        summary,
+                    })
                 }
                 (DayState::Active(kind), DayState::Idle) => {
                     add_time(
                         &mut summary,
-                        kind,
+                        SummaryKind::from(kind),
                         TimeBucket::active_mut,
                         last_timestamp,
-                        entry.timestamp,
+                        *record.timestamp(),
                         window,
                     );
-                    Ok(State { state: next_state, last_timestamp: Some(entry.timestamp), summary })
+                    Ok(State {
+                        state: next_state,
+                        last_timestamp: Some(*record.timestamp()),
+                        summary,
+                    })
                 }
 
                 (DayState::Active(_), DayState::Active(_)) => {
@@ -366,8 +403,7 @@ pub fn summary(
                 }
                 _ => unreachable!("summary transitions should use the shared validator"),
             }
-        },
-    )?;
+        })?;
 
     let State { state, last_timestamp, mut summary } = result;
     finalize_open_bucket(&mut summary, state, last_timestamp, window);
@@ -377,7 +413,7 @@ pub fn summary(
 
 #[cfg(test)]
 mod test {
-    use crate::domain::Command;
+    use crate::domain::WorkCommand;
 
     use super::*;
     use chrono::TimeZone;
@@ -390,17 +426,20 @@ mod test {
         SummaryWindow::new(timestamp(start_day, start_hour), timestamp(end_day, end_hour))
     }
 
-    fn entry(id: u64, day: u32, hour: u32, command: Command) -> DayEntryView {
-        DayEntryView { id: id.into(), timestamp: timestamp(day, hour), command }
+    fn record(id: u64, day: u32, hour: u32, command: WorkCommand) -> Record {
+        Record::from_input(
+            id.into(),
+            crate::domain::RecordInput::Work(crate::domain::WorkRecordInput::new(
+                timestamp(day, hour),
+                command,
+            )),
+        )
     }
 
-    fn summarize(
-        window: SummaryWindow,
-        entries: impl IntoIterator<Item = DayEntryView>,
-    ) -> Summary {
-        let entries = entries.into_iter().collect::<Vec<_>>();
+    fn summarize(window: SummaryWindow, records: impl IntoIterator<Item = Record>) -> Summary {
+        let records = records.into_iter().collect::<Vec<_>>();
 
-        summary(&entries, window).unwrap()
+        summary(&records, window).unwrap()
     }
 
     fn hours(n: i64) -> TimeDelta {
@@ -409,7 +448,7 @@ mod test {
 
     fn assert_bucket(
         summary: &Summary,
-        kind: ActivityKind,
+        kind: SummaryKind,
         active: TimeDelta,
         break_time: TimeDelta,
     ) {
@@ -417,7 +456,7 @@ mod test {
         assert_eq!(summary.break_time(kind), break_time);
     }
 
-    fn assert_bucket_dates(summary: &Summary, kind: ActivityKind, dates: &[NaiveDate]) {
+    fn assert_bucket_dates(summary: &Summary, kind: SummaryKind, dates: &[NaiveDate]) {
         let actual = summary.bucket(kind).dates;
         let expected = dates.iter().copied().collect::<HashSet<_>>();
 
@@ -426,16 +465,21 @@ mod test {
 
     #[test]
     fn summary_accumulates_completed_active_and_break_time() {
-        let kind = ActivityKind::Vacation;
+        let kind = SummaryKind::Work(WorkContext::Home);
 
         let summary = summarize(
             window(28, 0, 28, 18),
             [
-                entry(1, 28, 8, Command::Start { kind }),
-                entry(2, 28, 9, Command::Log { title: "still working".into(), description: None }),
-                entry(3, 28, 12, Command::BreakStart),
-                entry(4, 28, 13, Command::BreakEnd { description: None }),
-                entry(5, 28, 17, Command::End { title: "done".into(), description: None }),
+                record(1, 28, 8, WorkCommand::Start { context: WorkContext::Home }),
+                record(
+                    2,
+                    28,
+                    9,
+                    WorkCommand::Log { title: "still working".into(), description: None },
+                ),
+                record(3, 28, 12, WorkCommand::BreakStart),
+                record(4, 28, 13, WorkCommand::BreakEnd { description: None }),
+                record(5, 28, 17, WorkCommand::End { title: "done".into(), description: None }),
             ],
         );
 
@@ -445,13 +489,18 @@ mod test {
 
     #[test]
     fn summary_clips_open_active_time_at_window_end() {
-        let kind = ActivityKind::Vacation;
+        let kind = SummaryKind::Work(WorkContext::Home);
 
         let summary = summarize(
             window(28, 0, 28, 12),
             [
-                entry(1, 28, 8, Command::Start { kind }),
-                entry(2, 28, 10, Command::Log { title: "still working".into(), description: None }),
+                record(1, 28, 8, WorkCommand::Start { context: WorkContext::Home }),
+                record(
+                    2,
+                    28,
+                    10,
+                    WorkCommand::Log { title: "still working".into(), description: None },
+                ),
             ],
         );
 
@@ -460,11 +509,14 @@ mod test {
 
     #[test]
     fn summary_clips_open_break_time_at_window_end() {
-        let kind = ActivityKind::Vacation;
+        let kind = SummaryKind::Work(WorkContext::Home);
 
         let summary = summarize(
             window(28, 0, 28, 12),
-            [entry(1, 28, 8, Command::Start { kind }), entry(2, 28, 10, Command::BreakStart)],
+            [
+                record(1, 28, 8, WorkCommand::Start { context: WorkContext::Home }),
+                record(2, 28, 10, WorkCommand::BreakStart),
+            ],
         );
 
         assert_bucket(&summary, kind, hours(2), hours(2));
@@ -472,13 +524,13 @@ mod test {
 
     #[test]
     fn summary_counts_active_time_from_window_start_for_carry_in_state() {
-        let kind = ActivityKind::Vacation;
+        let kind = SummaryKind::Work(WorkContext::Home);
 
         let summary = summarize(
             window(28, 0, 30, 0),
             [
-                entry(1, 27, 10, Command::Start { kind }),
-                entry(2, 29, 12, Command::End { title: "done".into(), description: None }),
+                record(1, 27, 10, WorkCommand::Start { context: WorkContext::Home }),
+                record(2, 29, 12, WorkCommand::End { title: "done".into(), description: None }),
             ],
         );
 
@@ -495,15 +547,15 @@ mod test {
 
     #[test]
     fn summary_counts_break_time_from_window_start_for_carry_in_state() {
-        let kind = ActivityKind::Vacation;
+        let kind = SummaryKind::Work(WorkContext::Home);
 
         let summary = summarize(
             window(28, 0, 29, 0),
             [
-                entry(1, 27, 8, Command::Start { kind }),
-                entry(2, 27, 12, Command::BreakStart),
-                entry(3, 28, 10, Command::BreakEnd { description: None }),
-                entry(4, 28, 12, Command::End { title: "done".into(), description: None }),
+                record(1, 27, 8, WorkCommand::Start { context: WorkContext::Home }),
+                record(2, 27, 12, WorkCommand::BreakStart),
+                record(3, 28, 10, WorkCommand::BreakEnd { description: None }),
+                record(4, 28, 12, WorkCommand::End { title: "done".into(), description: None }),
             ],
         );
 
@@ -512,9 +564,12 @@ mod test {
 
     #[test]
     fn summary_counts_full_window_for_open_session_without_in_range_entries() {
-        let kind = ActivityKind::Vacation;
+        let kind = SummaryKind::Work(WorkContext::Home);
 
-        let summary = summarize(window(28, 0, 29, 0), [entry(1, 27, 8, Command::Start { kind })]);
+        let summary = summarize(
+            window(28, 0, 29, 0),
+            [record(1, 27, 8, WorkCommand::Start { context: WorkContext::Home })],
+        );
 
         assert_bucket(&summary, kind, hours(24), TimeDelta::zero());
         assert_bucket_dates(&summary, kind, &[NaiveDate::from_ymd_opt(2026, 1, 28).unwrap()]);
@@ -524,8 +579,8 @@ mod test {
     fn summary_rejects_invalid_transition() {
         let err = summary(
             &[
-                entry(1, 28, 8, Command::Start { kind: ActivityKind::Vacation }),
-                entry(2, 28, 9, Command::BreakEnd { description: None }),
+                record(1, 28, 8, WorkCommand::Start { context: WorkContext::Home }),
+                record(2, 28, 9, WorkCommand::BreakEnd { description: None }),
             ],
             window(28, 0, 28, 12),
         )

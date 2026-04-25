@@ -3,18 +3,18 @@ mod index;
 mod validation;
 
 pub(crate) use day_state::DayState;
-pub(crate) use index::EntryValidationIndex;
+pub(crate) use index::WorkRecordValidationIndex;
 pub(crate) use validation::{
-    CommandLabel, DayEntryValidationError, DayEntryValidationIssue, TransitionReason,
+    CommandLabel, DayRecordValidationError, DayRecordValidationIssue, TransitionReason,
     transition_day_state,
 };
 
 #[cfg(test)]
 mod tests {
-    use super::super::{ActivityKind, Command, Entry, EntryId, EntryPatch, WorkContext};
+    use super::super::{RecordId, WorkCommand, WorkContext, WorkRecord, WorkRecordInput};
     use super::*;
-    use index::index_entries_by_date;
-    use validation::{DayEntryInfo, validate_day_entries};
+    use index::index_records_by_date;
+    use validation::{DayRecordInfo, validate_day_records};
 
     use chrono::{Local, NaiveDate, TimeZone};
     use std::collections::BTreeMap;
@@ -23,26 +23,26 @@ mod tests {
         Local.with_ymd_and_hms(2025, 1, day, hour, min, 0).unwrap()
     }
 
-    fn entry(id: u64, ts: chrono::DateTime<Local>, cmd: Command) -> Entry {
-        Entry::new(id.into(), 1.into(), ts, cmd)
+    fn entry(id: u64, ts: chrono::DateTime<Local>, cmd: WorkCommand) -> WorkRecord {
+        WorkRecord::new(id.into(), ts, cmd)
     }
 
-    fn make_entry(id: u64, mins: u32, cmd: Command) -> Entry {
+    fn make_entry(id: u64, mins: u32, cmd: WorkCommand) -> WorkRecord {
         entry(id, ts(10, 16, mins), cmd)
     }
 
-    fn entries_at_same_day(cmds: &[Command]) -> Vec<Entry> {
+    fn entries_at_same_day(cmds: &[WorkCommand]) -> Vec<WorkRecord> {
         cmds.iter()
             .enumerate()
             .map(|(i, cmd)| make_entry((i + 1) as u64, (i as u32) * 5, cmd.clone()))
             .collect()
     }
 
-    fn refs(entries: &[Entry]) -> Vec<&Entry> {
+    fn refs(entries: &[WorkRecord]) -> Vec<&WorkRecord> {
         entries.iter().collect()
     }
 
-    fn id_refs(entries: &[Entry]) -> Vec<&Entry> {
+    fn id_refs(entries: &[WorkRecord]) -> Vec<&WorkRecord> {
         entries.iter().collect()
     }
 
@@ -51,18 +51,21 @@ mod tests {
 
         #[test]
         fn try_from_empty_returns_error() {
-            let err = DayEntryInfo::try_new(&Vec::new(), &Default::default()).unwrap_err();
+            let err = DayRecordInfo::try_new(&Vec::new(), &Default::default()).unwrap_err();
             assert_eq!(err.to_string(), "Day entries validation failed: entries must not be empty");
         }
 
         #[test]
         fn try_from_mixed_dates_returns_error() {
-            let entry1 = entry(1, ts(4, 16, 8), Command::default());
-            let entry2 =
-                entry(2, Local.with_ymd_and_hms(4025, 1, 4, 16, 9, 0).unwrap(), Command::default());
+            let entry1 = entry(1, ts(4, 16, 8), WorkCommand::default());
+            let entry2 = entry(
+                2,
+                Local.with_ymd_and_hms(4025, 1, 4, 16, 9, 0).unwrap(),
+                WorkCommand::default(),
+            );
 
             let err =
-                DayEntryInfo::try_new(&vec![&entry1, &entry2], &Default::default()).unwrap_err();
+                DayRecordInfo::try_new(&vec![&entry1, &entry2], &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 "Day entries validation failed: entries must all be of the same date"
@@ -75,8 +78,8 @@ mod tests {
 
         #[test]
         fn returns_empty_map_for_empty_input() {
-            let input: Vec<&Entry> = Vec::new();
-            let by_date = index_entries_by_date(&input).unwrap();
+            let input: Vec<&WorkRecord> = Vec::new();
+            let by_date = index_records_by_date(&input).unwrap();
             assert!(by_date.is_empty());
         }
 
@@ -85,28 +88,31 @@ mod tests {
             let entry1 = entry(
                 1,
                 Local.with_ymd_and_hms(2026, 1, 4, 8, 0, 0).unwrap(),
-                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
+                WorkCommand::Start { context: WorkContext::Office },
             );
-            let entry2 =
-                entry(2, Local.with_ymd_and_hms(2026, 1, 4, 9, 0, 0).unwrap(), Command::BreakStart);
+            let entry2 = entry(
+                2,
+                Local.with_ymd_and_hms(2026, 1, 4, 9, 0, 0).unwrap(),
+                WorkCommand::BreakStart,
+            );
             let entry3 = entry(
                 3,
                 Local.with_ymd_and_hms(2026, 1, 4, 9, 30, 0).unwrap(),
-                Command::BreakEnd { description: None },
+                WorkCommand::BreakEnd { description: None },
             );
             let entry4 = entry(
                 4,
                 Local.with_ymd_and_hms(2026, 1, 4, 10, 0, 0).unwrap(),
-                Command::End { title: "".into(), description: None },
+                WorkCommand::End { title: "".into(), description: None },
             );
             let entry5 = entry(
                 5,
                 Local.with_ymd_and_hms(2026, 1, 5, 10, 0, 0).unwrap(),
-                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
+                WorkCommand::Start { context: WorkContext::Office },
             );
 
-            let entries: Vec<&Entry> = vec![&entry1, &entry2, &entry3, &entry4, &entry5];
-            let by_date = index_entries_by_date(&entries).unwrap();
+            let entries: Vec<&WorkRecord> = vec![&entry1, &entry2, &entry3, &entry4, &entry5];
+            let by_date = index_records_by_date(&entries).unwrap();
 
             assert_eq!(by_date.len(), 2);
             assert!(by_date.contains_key(&entry1.timestamp().date_naive()));
@@ -145,61 +151,61 @@ mod tests {
         fn valid_full_day_returns_ok() {
             #[rustfmt::skip]
             let cmds = [
-                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
-                Command::Log { title: "doing stuff".into(), description: None },
-                Command::BreakStart,
-                Command::BreakEnd { description: None },
-                Command::Log { title: "doing other stuff".into(), description: None },
-                Command::End { title: "done with all stuff".into(), description: None },
+                WorkCommand::Start { context: WorkContext::Office },
+                WorkCommand::Log { title: "doing stuff".into(), description: None },
+                WorkCommand::BreakStart,
+                WorkCommand::BreakEnd { description: None },
+                WorkCommand::Log { title: "doing other stuff".into(), description: None },
+                WorkCommand::End { title: "done with all stuff".into(), description: None },
             ];
 
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            assert!(validate_day_entries(&entries, &Default::default()).is_ok());
+            assert!(validate_day_records(&entries, &Default::default()).is_ok());
         }
 
         #[test]
         fn multiple_checkin_checkout_cycles_returns_ok() {
             #[rustfmt::skip]
             let cmds = [
-                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
-                Command::End { title: "id 2".into(), description: None },
-                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
-                Command::End { title: "id 4".into(), description: None },
-                Command::Start { kind: ActivityKind::Work { context: WorkContext::Office } },
-                Command::End { title: "id 6".into(), description: None },
+                WorkCommand::Start { context: WorkContext::Office },
+                WorkCommand::End { title: "id 2".into(), description: None },
+                WorkCommand::Start { context: WorkContext::Office },
+                WorkCommand::End { title: "id 4".into(), description: None },
+                WorkCommand::Start { context: WorkContext::Office },
+                WorkCommand::End { title: "id 6".into(), description: None },
             ];
 
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            assert!(validate_day_entries(&entries, &Default::default()).is_ok());
+            assert!(validate_day_records(&entries, &Default::default()).is_ok());
         }
 
         #[test]
         fn given_active_start_returns_error() {
             let cmds = [
-                Command::Start { kind: Default::default() },
-                Command::Start { kind: Default::default() },
+                WorkCommand::Start { context: Default::default() },
+                WorkCommand::Start { context: Default::default() },
             ];
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
+            let err = validate_day_records(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
-                "Day entries validation failed: Entry 2 - cannot start work while already active (work)"
+                "Day entries validation failed: Entry 2 - cannot start home while already active (home)"
             )
         }
 
         #[test]
         fn given_idle_end_returns_error_message() {
-            let cmds = [Command::End { title: "".into(), description: None }];
+            let cmds = [WorkCommand::End { title: "".into(), description: None }];
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
+            let err = validate_day_records(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 "Day entries validation failed: Entry 1 - cannot end while idle"
@@ -208,11 +214,11 @@ mod tests {
 
         #[test]
         fn given_idle_log_returns_error_message() {
-            let cmds = [Command::Log { title: "".into(), description: None }];
+            let cmds = [WorkCommand::Log { title: "".into(), description: None }];
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
+            let err = validate_day_records(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 "Day entries validation failed: Entry 1 - cannot log while idle"
@@ -221,11 +227,11 @@ mod tests {
 
         #[test]
         fn given_idle_break_start_returns_error_message() {
-            let cmds = [Command::BreakStart];
+            let cmds = [WorkCommand::BreakStart];
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
+            let err = validate_day_records(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 "Day entries validation failed: Entry 1 - cannot start break while idle"
@@ -235,13 +241,13 @@ mod tests {
         #[test]
         fn given_active_break_end_returns_error_message() {
             let cmds = [
-                Command::Start { kind: Default::default() },
-                Command::BreakEnd { description: None },
+                WorkCommand::Start { context: Default::default() },
+                WorkCommand::BreakEnd { description: None },
             ];
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
+            let err = validate_day_records(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 "Day entries validation failed: Entry 2 - cannot end break when not breaking"
@@ -251,14 +257,14 @@ mod tests {
         #[test]
         fn given_breaking_end_returns_error_message() {
             let cmds = [
-                Command::Start { kind: Default::default() },
-                Command::BreakStart,
-                Command::End { title: "".into(), description: None },
+                WorkCommand::Start { context: Default::default() },
+                WorkCommand::BreakStart,
+                WorkCommand::End { title: "".into(), description: None },
             ];
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
+            let err = validate_day_records(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 "Day entries validation failed: Entry 3 - cannot end while breaking"
@@ -268,14 +274,14 @@ mod tests {
         #[test]
         fn given_breaking_log_returns_error_message() {
             let cmds = [
-                Command::Start { kind: Default::default() },
-                Command::BreakStart,
-                Command::Log { title: "".into(), description: None },
+                WorkCommand::Start { context: Default::default() },
+                WorkCommand::BreakStart,
+                WorkCommand::Log { title: "".into(), description: None },
             ];
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
+            let err = validate_day_records(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 "Day entries validation failed: Entry 3 - cannot log while breaking"
@@ -285,14 +291,14 @@ mod tests {
         #[test]
         fn given_breaking_break_start_returns_error_message() {
             let cmds = [
-                Command::Start { kind: Default::default() },
-                Command::BreakStart,
-                Command::BreakStart,
+                WorkCommand::Start { context: Default::default() },
+                WorkCommand::BreakStart,
+                WorkCommand::BreakStart,
             ];
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
 
-            let err = validate_day_entries(&entries, &Default::default()).unwrap_err();
+            let err = validate_day_records(&entries, &Default::default()).unwrap_err();
             assert_eq!(
                 err.to_string(),
                 "Day entries validation failed: Entry 3 - cannot start break while already breaking"
@@ -302,29 +308,28 @@ mod tests {
         #[test]
         fn given_active_prev_state_allows_log_then_end() {
             let cmds = [
-                Command::Log { title: "handoff".into(), description: None },
-                Command::End { title: "wrap".into(), description: None },
+                WorkCommand::Log { title: "handoff".into(), description: None },
+                WorkCommand::End { title: "wrap".into(), description: None },
             ];
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
-            let prev_state = DayState::Active(ActivityKind::Work { context: WorkContext::Office });
+            let prev_state = DayState::Active(WorkContext::Office);
 
-            let end_state = validate_day_entries(&entries, &prev_state).unwrap();
+            let end_state = validate_day_records(&entries, &prev_state).unwrap();
             assert_eq!(end_state, DayState::Idle);
         }
 
         #[test]
         fn given_breaking_prev_state_allows_break_end_then_end() {
             let cmds = [
-                Command::BreakEnd { description: None },
-                Command::End { title: "wrap".into(), description: None },
+                WorkCommand::BreakEnd { description: None },
+                WorkCommand::End { title: "wrap".into(), description: None },
             ];
             let entries = entries_at_same_day(&cmds);
             let entries = refs(&entries);
-            let prev_state =
-                DayState::Breaking(ActivityKind::Work { context: WorkContext::Office });
+            let prev_state = DayState::Breaking(WorkContext::Office);
 
-            let end_state = validate_day_entries(&entries, &prev_state).unwrap();
+            let end_state = validate_day_records(&entries, &prev_state).unwrap();
             assert_eq!(end_state, DayState::Idle);
         }
     }
@@ -337,18 +342,18 @@ mod tests {
             let day1 = [entry(
                 1,
                 Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                Command::Start { kind: Default::default() },
+                WorkCommand::Start { context: Default::default() },
             )];
             let day2 = [
                 entry(
                     2,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     3,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
 
@@ -358,10 +363,10 @@ mod tests {
 
             let entries = id_refs(&all);
 
-            let err = EntryValidationIndex::try_new(&entries).unwrap_err().to_string();
+            let err = WorkRecordValidationIndex::try_new(&entries).unwrap_err().to_string();
             assert_eq!(
                 err.to_string(),
-                "Day entries validation failed: Entry 2 - cannot start work while already active (work)"
+                "Day entries validation failed: Entry 2 - cannot start home while already active (home)"
             );
         }
 
@@ -370,29 +375,29 @@ mod tests {
             let day1 = vec![entry(
                 0,
                 Local.with_ymd_and_hms(2026, 1, 11, 5, 4, 19).unwrap(),
-                Command::Start { kind: Default::default() },
+                WorkCommand::Start { context: Default::default() },
             )];
             let day2 = vec![
                 entry(
                     1,
                     Local.with_ymd_and_hms(2026, 1, 14, 20, 39, 15).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
                 entry(
                     2,
                     Local.with_ymd_and_hms(2026, 1, 14, 21, 9, 40).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     3,
                     Local.with_ymd_and_hms(2026, 1, 14, 21, 9, 47).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let day3 = vec![entry(
                 4,
                 Local.with_ymd_and_hms(2026, 1, 18, 6, 4, 54).unwrap(),
-                Command::Start { kind: Default::default() },
+                WorkCommand::Start { context: Default::default() },
             )];
 
             let mut all = Vec::new();
@@ -400,18 +405,18 @@ mod tests {
             all.extend_from_slice(&day2);
             all.extend_from_slice(&day3);
             let entries = id_refs(&all);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            let mut expected: BTreeMap<NaiveDate, DayEntryInfo> = BTreeMap::new();
-            let day_entries_1 = DayEntryInfo {
+            let mut expected: BTreeMap<NaiveDate, DayRecordInfo> = BTreeMap::new();
+            let day_entries_1 = DayRecordInfo {
                 ids: day1.iter().map(|e| *e.id()).collect(),
                 end_state: DayState::Active(Default::default()),
             };
-            let day_entries_2 = DayEntryInfo {
+            let day_entries_2 = DayRecordInfo {
                 ids: day2.iter().map(|e| *e.id()).collect(),
                 end_state: DayState::Idle,
             };
-            let day_entries_3 = DayEntryInfo {
+            let day_entries_3 = DayRecordInfo {
                 ids: day3.iter().map(|e| *e.id()).collect(),
                 end_state: DayState::Active(Default::default()),
             };
@@ -427,16 +432,16 @@ mod tests {
             let ts2 = Local.with_ymd_and_hms(2025, 1, 10, 10, 0, 0).unwrap();
             let ts3 = Local.with_ymd_and_hms(2025, 1, 10, 11, 0, 0).unwrap();
             let day1 = [
-                entry(1, ts1, Command::Start { kind: Default::default() }),
-                entry(2, ts2, Command::Log { title: "".into(), description: None }),
-                entry(3, ts3, Command::End { title: "".into(), description: None }),
+                entry(1, ts1, WorkCommand::Start { context: Default::default() }),
+                entry(2, ts2, WorkCommand::Log { title: "".into(), description: None }),
+                entry(3, ts3, WorkCommand::End { title: "".into(), description: None }),
             ];
 
             let ts4 = Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap();
             let ts5 = Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap();
             let day2 = [
-                entry(4, ts4, Command::Start { kind: Default::default() }),
-                entry(5, ts5, Command::Log { title: "".into(), description: None }),
+                entry(4, ts4, WorkCommand::Start { context: Default::default() }),
+                entry(5, ts5, WorkCommand::Log { title: "".into(), description: None }),
             ];
 
             let mut all = Vec::new();
@@ -444,20 +449,20 @@ mod tests {
             all.extend_from_slice(&day2);
 
             let entries = id_refs(&all);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            let mut expected: BTreeMap<NaiveDate, DayEntryInfo> = BTreeMap::new();
-            let day_entries_1 = DayEntryInfo {
+            let mut expected: BTreeMap<NaiveDate, DayRecordInfo> = BTreeMap::new();
+            let day_entries_1 = DayRecordInfo {
                 ids: day1.iter().map(|e| *e.id()).collect(),
                 end_state: DayState::Idle,
             };
-            let day_entries_2 = DayEntryInfo {
+            let day_entries_2 = DayRecordInfo {
                 ids: day2.iter().map(|e| *e.id()).collect(),
                 end_state: DayState::Active(Default::default()),
             };
             expected.insert(ts1.date_naive(), day_entries_1);
             expected.insert(ts4.date_naive(), day_entries_2);
-            let expected = EntryValidationIndex { days: expected };
+            let expected = WorkRecordValidationIndex { days: expected };
 
             assert_eq!(by_day, expected);
         }
@@ -468,24 +473,24 @@ mod tests {
                 entry(
                     1,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     2,
                     Local.with_ymd_and_hms(2025, 1, 10, 10, 0, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let day2 = [
                 entry(
                     3,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     4,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
 
@@ -494,16 +499,16 @@ mod tests {
             all.extend_from_slice(&day2);
 
             let entries = id_refs(&all);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            let patch = EntryPatch::new(
+            let patch = WorkRecordInput::new(
                 Local.with_ymd_and_hms(2025, 1, 10, 11, 0, 0).unwrap(),
-                Command::Log { title: "late log".into(), description: None },
+                WorkCommand::Log { title: "late log".into(), description: None },
             );
 
-            let new_id: EntryId = 5.into();
+            let new_id: RecordId = 5.into();
             let err =
-                by_day.validate_insert_entry(&entries, &patch, new_id).unwrap_err().to_string();
+                by_day.validate_insert_record(&entries, &patch, new_id).unwrap_err().to_string();
 
             assert_eq!(err, "Day entries validation failed: Entry 5 - cannot log while idle");
         }
@@ -514,24 +519,24 @@ mod tests {
                 entry(
                     1,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     2,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 10, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let day2 = [
                 entry(
                     3,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     4,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
 
@@ -540,15 +545,15 @@ mod tests {
             all.extend_from_slice(&day2);
 
             let entries = id_refs(&all);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            let patch = EntryPatch::new(
+            let patch = WorkRecordInput::new(
                 Local.with_ymd_and_hms(2025, 1, 11, 9, 2, 0).unwrap(),
-                Command::Log { title: "note".into(), description: None },
+                WorkCommand::Log { title: "note".into(), description: None },
             );
 
-            let new_id: EntryId = 5.into();
-            assert!(by_day.validate_insert_entry(&entries, &patch, new_id).is_ok());
+            let new_id: RecordId = 5.into();
+            assert!(by_day.validate_insert_record(&entries, &patch, new_id).is_ok());
         }
 
         #[test]
@@ -558,29 +563,29 @@ mod tests {
                 entry(
                     4,
                     Local.with_ymd_and_hms(2026, 1, 18, 6, 4, 54).unwrap(),
-                    Command::Start { kind: ActivityKind::Sick },
+                    WorkCommand::Start { context: WorkContext::Home },
                 ),
                 entry(
                     5,
                     Local.with_ymd_and_hms(2026, 1, 18, 7, 13, 39).unwrap(),
-                    Command::BreakStart,
+                    WorkCommand::BreakStart,
                 ),
             ];
             let day2 = [
                 entry(
                     6,
                     Local.with_ymd_and_hms(2026, 3, 29, 7, 13, 40).unwrap(),
-                    Command::BreakEnd { description: None },
+                    WorkCommand::BreakEnd { description: None },
                 ),
                 entry(
                     7,
                     Local.with_ymd_and_hms(2026, 3, 29, 7, 13, 41).unwrap(),
-                    Command::Log { title: "first".into(), description: Some("first".into()) },
+                    WorkCommand::Log { title: "first".into(), description: Some("first".into()) },
                 ),
                 entry(
                     8,
                     Local.with_ymd_and_hms(2026, 3, 29, 7, 13, 42).unwrap(),
-                    Command::End { title: "second".into(), description: Some("second".into()) },
+                    WorkCommand::End { title: "second".into(), description: Some("second".into()) },
                 ),
             ];
 
@@ -589,14 +594,14 @@ mod tests {
             all.extend_from_slice(&day2);
 
             let entries = id_refs(&all);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            let patch = EntryPatch::new(
+            let patch = WorkRecordInput::new(
                 Local.with_ymd_and_hms(2026, 4, 6, 9, 0, 0).unwrap(),
-                Command::Start { kind: ActivityKind::Work { context: WorkContext::Home } },
+                WorkCommand::Start { context: WorkContext::Home },
             );
 
-            assert!(by_day.validate_insert_entry(&entries, &patch, 9.into()).is_ok());
+            assert!(by_day.validate_insert_record(&entries, &patch, 9.into()).is_ok());
         }
 
         #[test]
@@ -605,24 +610,24 @@ mod tests {
                 entry(
                     1,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     2,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 5, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let day2 = [
                 entry(
                     3,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     4,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
 
@@ -631,12 +636,13 @@ mod tests {
             all.extend_from_slice(&day2);
 
             let entries = id_refs(&all);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            let err = by_day.validate_remove_entry(&entries, day1[1].id()).unwrap_err().to_string();
+            let err =
+                by_day.validate_remove_record(&entries, day1[1].id()).unwrap_err().to_string();
             assert_eq!(
                 err,
-                "Day entries validation failed: Entry 3 - cannot start work while already active (work)"
+                "Day entries validation failed: Entry 3 - cannot start home while already active (home)"
             );
         }
 
@@ -646,24 +652,24 @@ mod tests {
                 entry(
                     1,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     2,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 5, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let day2 = [
                 entry(
                     3,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     4,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
 
@@ -672,9 +678,10 @@ mod tests {
             all.extend_from_slice(&day2);
 
             let entries = id_refs(&all);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            let err = by_day.validate_remove_entry(&entries, day2[0].id()).unwrap_err().to_string();
+            let err =
+                by_day.validate_remove_record(&entries, day2[0].id()).unwrap_err().to_string();
             assert!(err.contains("cannot end while idle"));
         }
 
@@ -683,15 +690,15 @@ mod tests {
             let only = [entry(
                 1,
                 Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                Command::Start { kind: Default::default() },
+                WorkCommand::Start { context: Default::default() },
             )];
 
             let entries = id_refs(&only);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            by_day.validate_remove_entry(&entries, only[0].id()).unwrap();
+            by_day.validate_remove_record(&entries, only[0].id()).unwrap();
 
-            assert!(by_day.validate_remove_entry(&entries, only[0].id()).is_ok());
+            assert!(by_day.validate_remove_record(&entries, only[0].id()).is_ok());
         }
 
         #[test]
@@ -700,41 +707,41 @@ mod tests {
                 entry(
                     1,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     2,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 5, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let day2 = [
                 entry(
                     3,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     4,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 3, 0).unwrap(),
-                    Command::Log { title: "".into(), description: None },
+                    WorkCommand::Log { title: "".into(), description: None },
                 ),
                 entry(
                     5,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let day3 = [
                 entry(
                     6,
                     Local.with_ymd_and_hms(2025, 1, 12, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     7,
                     Local.with_ymd_and_hms(2025, 1, 12, 9, 5, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
 
@@ -744,9 +751,9 @@ mod tests {
             all.extend_from_slice(&day3);
 
             let entries = id_refs(&all);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            by_day.validate_remove_entry(&entries, day2[1].id()).expect("expect valid entries");
+            by_day.validate_remove_record(&entries, day2[1].id()).expect("expect valid entries");
         }
 
         #[test]
@@ -755,64 +762,64 @@ mod tests {
                 entry(
                     1,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     2,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
-                    Command::Log { title: "a".into(), description: None },
+                    WorkCommand::Log { title: "a".into(), description: None },
                 ),
                 entry(
                     3,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 10, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let day2 = [
                 entry(
                     4,
                     Local.with_ymd_and_hms(2025, 1, 12, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     5,
                     Local.with_ymd_and_hms(2025, 1, 12, 9, 5, 0).unwrap(),
-                    Command::Log { title: "a".into(), description: None },
+                    WorkCommand::Log { title: "a".into(), description: None },
                 ),
                 entry(
                     6,
                     Local.with_ymd_and_hms(2025, 1, 12, 9, 10, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let day3 = [
                 entry(
                     7,
                     Local.with_ymd_and_hms(2025, 1, 13, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     8,
                     Local.with_ymd_and_hms(2025, 1, 13, 9, 5, 0).unwrap(),
-                    Command::Log { title: "a".into(), description: None },
+                    WorkCommand::Log { title: "a".into(), description: None },
                 ),
                 entry(
                     9,
                     Local.with_ymd_and_hms(2025, 1, 13, 9, 10, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let days: Vec<_> = vec![day1, day2.clone(), day3].into_iter().flatten().collect();
 
             let entries = id_refs(&days);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            let patch = EntryPatch::new(
+            let patch = WorkRecordInput::new(
                 Local.with_ymd_and_hms(2025, 1, 11, 9, 2, 0).unwrap(),
-                Command::Log { title: "moved".into(), description: None },
+                WorkCommand::Log { title: "moved".into(), description: None },
             );
 
-            let result = by_day.validate_update_entry(&entries, day2[1].id(), &patch);
+            let result = by_day.validate_update_record(&entries, day2[1].id(), &patch);
 
             assert!(result.is_ok(), "expected Ok, but was Err: {:?}", result.unwrap_err());
         }
@@ -823,64 +830,64 @@ mod tests {
                 entry(
                     1,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     2,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
-                    Command::Log { title: "a".into(), description: None },
+                    WorkCommand::Log { title: "a".into(), description: None },
                 ),
                 entry(
                     3,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 10, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let day2 = [
                 entry(
                     4,
                     Local.with_ymd_and_hms(2025, 1, 12, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     5,
                     Local.with_ymd_and_hms(2025, 1, 12, 9, 5, 0).unwrap(),
-                    Command::Log { title: "a".into(), description: None },
+                    WorkCommand::Log { title: "a".into(), description: None },
                 ),
                 entry(
                     6,
                     Local.with_ymd_and_hms(2025, 1, 12, 9, 10, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let day3 = [
                 entry(
                     7,
                     Local.with_ymd_and_hms(2025, 1, 13, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     8,
                     Local.with_ymd_and_hms(2025, 1, 13, 9, 5, 0).unwrap(),
-                    Command::Log { title: "a".into(), description: None },
+                    WorkCommand::Log { title: "a".into(), description: None },
                 ),
                 entry(
                     9,
                     Local.with_ymd_and_hms(2025, 1, 13, 9, 10, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let days: Vec<_> = vec![day1, day2.clone(), day3].into_iter().flatten().collect();
 
             let entries = id_refs(&days);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            let patch = EntryPatch::new(
+            let patch = WorkRecordInput::new(
                 Local.with_ymd_and_hms(2025, 1, 12, 9, 2, 0).unwrap(),
-                Command::Log { title: "moved".into(), description: None },
+                WorkCommand::Log { title: "moved".into(), description: None },
             );
 
-            let result = by_day.validate_update_entry(&entries, day2[1].id(), &patch);
+            let result = by_day.validate_update_record(&entries, day2[1].id(), &patch);
 
             assert!(result.is_ok(), "expected Ok, but was Err: {:?}", result.unwrap_err());
         }
@@ -891,30 +898,30 @@ mod tests {
                 entry(
                     1,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     2,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
-                    Command::Log { title: "a".into(), description: None },
+                    WorkCommand::Log { title: "a".into(), description: None },
                 ),
                 entry(
                     3,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 10, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
 
             let entries = id_refs(&day);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            let patch = EntryPatch::new(
+            let patch = WorkRecordInput::new(
                 Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
-                Command::End { title: "nope".into(), description: None },
+                WorkCommand::End { title: "nope".into(), description: None },
             );
 
             let err = by_day
-                .validate_update_entry(&entries, day[1].id(), &patch)
+                .validate_update_record(&entries, day[1].id(), &patch)
                 .unwrap_err()
                 .to_string();
             assert!(err.contains("cannot end while idle"));
@@ -926,30 +933,30 @@ mod tests {
                 entry(
                     1,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     2,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
-                    Command::Log { title: "a".into(), description: None },
+                    WorkCommand::Log { title: "a".into(), description: None },
                 ),
                 entry(
                     3,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 10, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
 
             let entries = id_refs(&day);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            let patch = EntryPatch::new(
+            let patch = WorkRecordInput::new(
                 Local.with_ymd_and_hms(2025, 1, 11, 8, 55, 0).unwrap(),
-                Command::End { title: "".into(), description: None },
+                WorkCommand::End { title: "".into(), description: None },
             );
 
             let err = by_day
-                .validate_update_entry(&entries, day[2].id(), &patch)
+                .validate_update_record(&entries, day[2].id(), &patch)
                 .unwrap_err()
                 .to_string();
             assert!(err.contains("cannot end while idle"));
@@ -960,18 +967,18 @@ mod tests {
             let only = [entry(
                 1,
                 Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                Command::Start { kind: Default::default() },
+                WorkCommand::Start { context: Default::default() },
             )];
 
             let entries = id_refs(&only);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            let patch = EntryPatch::new(
+            let patch = WorkRecordInput::new(
                 Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
-                Command::Start { kind: Default::default() },
+                WorkCommand::Start { context: Default::default() },
             );
 
-            let result = by_day.validate_update_entry(&entries, only[0].id(), &patch);
+            let result = by_day.validate_update_record(&entries, only[0].id(), &patch);
             assert!(result.is_ok(), "expected Ok, but was Err: {:?}", result.unwrap_err());
         }
 
@@ -981,29 +988,29 @@ mod tests {
                 entry(
                     1,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     2,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 5, 0).unwrap(),
-                    Command::Log { title: "a".into(), description: None },
+                    WorkCommand::Log { title: "a".into(), description: None },
                 ),
                 entry(
                     3,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 10, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
             let day2 = [
                 entry(
                     4,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     5,
                     Local.with_ymd_and_hms(2025, 1, 11, 9, 5, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
 
@@ -1012,15 +1019,15 @@ mod tests {
             all.extend_from_slice(&day2);
 
             let entries = id_refs(&all);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
 
-            let patch = EntryPatch::new(
+            let patch = WorkRecordInput::new(
                 Local.with_ymd_and_hms(2025, 1, 11, 9, 6, 0).unwrap(),
-                Command::Log { title: "moved".into(), description: None },
+                WorkCommand::Log { title: "moved".into(), description: None },
             );
 
             let err = by_day
-                .validate_update_entry(&entries, day1[1].id(), &patch)
+                .validate_update_record(&entries, day1[1].id(), &patch)
                 .unwrap_err()
                 .to_string();
             assert!(err.contains("cannot log while idle"));
@@ -1031,12 +1038,12 @@ mod tests {
             let entry1 = entry(
                 3,
                 Local.with_ymd_and_hms(2025, 1, 10, 9, 10, 0).unwrap(),
-                Command::End { title: "".into(), description: None },
+                WorkCommand::End { title: "".into(), description: None },
             );
 
             let entries = vec![entry1.clone()];
             let entries = id_refs(&entries);
-            let err = EntryValidationIndex::try_new(&entries).unwrap_err().to_string();
+            let err = WorkRecordValidationIndex::try_new(&entries).unwrap_err().to_string();
 
             assert!(err.contains("cannot end while idle"));
         }
@@ -1047,22 +1054,22 @@ mod tests {
                 entry(
                     1,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 0, 0).unwrap(),
-                    Command::Start { kind: Default::default() },
+                    WorkCommand::Start { context: Default::default() },
                 ),
                 entry(
                     2,
                     Local.with_ymd_and_hms(2025, 1, 10, 9, 5, 0).unwrap(),
-                    Command::End { title: "".into(), description: None },
+                    WorkCommand::End { title: "".into(), description: None },
                 ),
             ];
 
             let entries = id_refs(&day);
-            let by_day = EntryValidationIndex::try_new(&entries).unwrap();
-            let missing_id: EntryId = 999.into();
+            let by_day = WorkRecordValidationIndex::try_new(&entries).unwrap();
+            let missing_id: RecordId = 999.into();
 
-            let err = by_day.validate_remove_entry(&entries, &missing_id).unwrap_err().to_string();
+            let err = by_day.validate_remove_record(&entries, &missing_id).unwrap_err().to_string();
 
-            assert!(err.contains("entry 999 should exist during validation"));
+            assert!(err.contains("record 999 should exist during validation"));
         }
     }
 }

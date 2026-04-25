@@ -1,38 +1,37 @@
 use std::fmt::{Display, Formatter};
 
-use crate::domain::{ActivityKind, Command, Entry, EntryId, day_entries::DayState};
+use crate::domain::{RecordId, WorkCommand, WorkContext, WorkRecord, day_entries::DayState};
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub(super) struct DayEntryInfo {
-    pub(super) ids: Vec<EntryId>,
+pub(super) struct DayRecordInfo {
+    pub(super) ids: Vec<RecordId>,
     pub(super) end_state: DayState,
 }
 
-impl DayEntryInfo {
+impl DayRecordInfo {
     pub(super) fn try_new(
-        entries: &Vec<&Entry>,
+        records: &Vec<&WorkRecord>,
         prev_state: &DayState,
-    ) -> Result<Self, DayEntryValidationError> {
-        if entries.is_empty() {
-            return Err(DayEntryValidationError::new(DayEntryValidationIssue::EmptyEntries));
+    ) -> Result<Self, DayRecordValidationError> {
+        if records.is_empty() {
+            return Err(DayRecordValidationError::new(DayRecordValidationIssue::EmptyEntries));
         }
-        let first_date = entries[0].date();
+        let first_date = records[0].date();
 
-        if !entries.iter().all(|entry| entry.date() == first_date) {
-            return Err(DayEntryValidationError::new(DayEntryValidationIssue::MixedDates));
+        if !records.iter().all(|entry| entry.date() == first_date) {
+            return Err(DayRecordValidationError::new(DayRecordValidationIssue::MixedDates));
         }
 
-        let end_state = validate_day_entries(entries, prev_state)?;
+        let end_state = validate_day_records(records, prev_state)?;
 
-        let ids = entries.iter().map(|entry| *entry.id()).collect();
+        let ids = records.iter().map(|entry| *entry.id()).collect();
         Ok(Self { end_state, ids })
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum CommandLabel {
-    Start,
-    StartWithKind(ActivityKind),
+    Start(WorkContext),
     End,
     Log,
     BreakStart,
@@ -42,8 +41,7 @@ pub(crate) enum CommandLabel {
 impl Display for CommandLabel {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Start => f.write_str("start"),
-            Self::StartWithKind(kind) => f.write_str(&format!("start {kind}")),
+            Self::Start(context) => f.write_str(&format!("start {context}")),
             Self::End => f.write_str("end"),
             Self::Log => f.write_str("log"),
             Self::BreakStart => f.write_str("start break"),
@@ -52,14 +50,14 @@ impl Display for CommandLabel {
     }
 }
 
-impl From<&Command> for CommandLabel {
-    fn from(command: &Command) -> Self {
+impl From<&WorkCommand> for CommandLabel {
+    fn from(command: &WorkCommand) -> Self {
         match command {
-            Command::Start { .. } => Self::Start,
-            Command::End { .. } => Self::End,
-            Command::Log { .. } => Self::Log,
-            Command::BreakStart => Self::BreakStart,
-            Command::BreakEnd { .. } => Self::BreakEnd,
+            WorkCommand::Start { context } => Self::Start(*context),
+            WorkCommand::End { .. } => Self::End,
+            WorkCommand::Log { .. } => Self::Log,
+            WorkCommand::BreakStart => Self::BreakStart,
+            WorkCommand::BreakEnd { .. } => Self::BreakEnd,
         }
     }
 }
@@ -67,27 +65,27 @@ impl From<&Command> for CommandLabel {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum TransitionReason {
     WhileIdle,
-    AlreadyActive(ActivityKind),
+    AlreadyActive(WorkContext),
     NotBreaking,
     WhileBreaking,
     AlreadyBreaking,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum DayEntryValidationIssue {
+pub(crate) enum DayRecordValidationIssue {
     EmptyEntries,
     MixedDates,
-    InvalidTransition { entry_id: EntryId, attempted: CommandLabel, reason: TransitionReason },
+    InvalidTransition { entry_id: RecordId, attempted: CommandLabel, reason: TransitionReason },
 }
 
-impl Display for DayEntryValidationIssue {
+impl Display for DayRecordValidationIssue {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            DayEntryValidationIssue::EmptyEntries => f.write_str("entries must not be empty"),
-            DayEntryValidationIssue::MixedDates => {
+            DayRecordValidationIssue::EmptyEntries => f.write_str("entries must not be empty"),
+            DayRecordValidationIssue::MixedDates => {
                 f.write_str("entries must all be of the same date")
             }
-            DayEntryValidationIssue::InvalidTransition { entry_id, attempted, reason } => {
+            DayRecordValidationIssue::InvalidTransition { entry_id, attempted, reason } => {
                 match reason {
                     TransitionReason::WhileIdle => {
                         write!(f, "Entry {entry_id} - cannot {attempted} while idle")
@@ -115,70 +113,71 @@ impl Display for DayEntryValidationIssue {
 
 #[derive(Debug, thiserror::Error)]
 #[error("Day entries validation failed: {issue}")]
-pub(crate) struct DayEntryValidationError {
-    issue: DayEntryValidationIssue,
+pub(crate) struct DayRecordValidationError {
+    issue: DayRecordValidationIssue,
 }
 
-impl DayEntryValidationError {
-    pub fn new(issue: DayEntryValidationIssue) -> Self {
+impl DayRecordValidationError {
+    pub fn new(issue: DayRecordValidationIssue) -> Self {
         Self { issue }
     }
 
-    pub fn issue(&self) -> DayEntryValidationIssue {
+    pub fn issue(&self) -> DayRecordValidationIssue {
         self.issue
     }
 }
 
 pub(crate) fn transition_day_state(
     state: DayState,
-    entry_id: EntryId,
-    command: &Command,
-) -> Result<DayState, DayEntryValidationError> {
+    entry_id: RecordId,
+    command: &WorkCommand,
+) -> Result<DayState, DayRecordValidationError> {
     use DayState::*;
 
     match (state, command) {
-        (Idle, Command::Start { kind, .. }) => Ok(Active(*kind)),
+        (Idle, WorkCommand::Start { context }) => Ok(Active(*context)),
         (Idle, command) => {
-            Err(DayEntryValidationError::new(DayEntryValidationIssue::InvalidTransition {
+            Err(DayRecordValidationError::new(DayRecordValidationIssue::InvalidTransition {
                 entry_id,
                 attempted: command.into(),
                 reason: TransitionReason::WhileIdle,
             }))
         }
 
-        (Active(_), Command::Log { .. }) => Ok(state),
+        (Active(_), WorkCommand::Log { .. }) => Ok(state),
 
-        (Active(kind), Command::BreakStart) => Ok(Breaking(kind)),
-        (Breaking(kind), Command::BreakEnd { .. }) => Ok(Active(kind)),
+        (Active(kind), WorkCommand::BreakStart) => Ok(Breaking(kind)),
+        (Breaking(kind), WorkCommand::BreakEnd { .. }) => Ok(Active(kind)),
 
-        (Active(_), Command::End { .. }) => Ok(Idle),
+        (Active(_), WorkCommand::End { .. }) => Ok(Idle),
 
-        (Active(activity_kind), Command::Start { kind }) => {
-            Err(DayEntryValidationError::new(DayEntryValidationIssue::InvalidTransition {
+        (Active(prev_context), WorkCommand::Start { context }) => {
+            Err(DayRecordValidationError::new(DayRecordValidationIssue::InvalidTransition {
                 entry_id,
-                attempted: CommandLabel::StartWithKind(*kind),
-                reason: TransitionReason::AlreadyActive(activity_kind),
+                attempted: CommandLabel::Start(*context),
+                reason: TransitionReason::AlreadyActive(prev_context),
             }))
         }
 
-        (Active(_), Command::BreakEnd { .. }) => {
-            Err(DayEntryValidationError::new(DayEntryValidationIssue::InvalidTransition {
+        (Active(_), WorkCommand::BreakEnd { .. }) => {
+            Err(DayRecordValidationError::new(DayRecordValidationIssue::InvalidTransition {
                 entry_id,
                 attempted: CommandLabel::BreakEnd,
                 reason: TransitionReason::NotBreaking,
             }))
         }
 
-        (Breaking(_), Command::Start { .. } | Command::End { .. } | Command::Log { .. }) => {
-            Err(DayEntryValidationError::new(DayEntryValidationIssue::InvalidTransition {
-                entry_id,
-                attempted: command.into(),
-                reason: TransitionReason::WhileBreaking,
-            }))
-        }
+        (
+            Breaking(_),
+            WorkCommand::Start { .. } | WorkCommand::End { .. } | WorkCommand::Log { .. },
+        ) => Err(DayRecordValidationError::new(DayRecordValidationIssue::InvalidTransition {
+            entry_id,
+            attempted: command.into(),
+            reason: TransitionReason::WhileBreaking,
+        })),
 
-        (Breaking(_), Command::BreakStart) => {
-            Err(DayEntryValidationError::new(DayEntryValidationIssue::InvalidTransition {
+        (Breaking(_), WorkCommand::BreakStart) => {
+            Err(DayRecordValidationError::new(DayRecordValidationIssue::InvalidTransition {
                 entry_id,
                 attempted: CommandLabel::BreakStart,
                 reason: TransitionReason::AlreadyBreaking,
@@ -187,11 +186,11 @@ pub(crate) fn transition_day_state(
     }
 }
 
-pub(super) fn validate_day_entries(
-    entries: &[&Entry],
+pub(super) fn validate_day_records(
+    records: &[&WorkRecord],
     prev_state: &DayState,
-) -> Result<DayState, DayEntryValidationError> {
-    entries.iter().try_fold(*prev_state, |state, entry| {
-        transition_day_state(state, *entry.id(), entry.command())
+) -> Result<DayState, DayRecordValidationError> {
+    records.iter().try_fold(*prev_state, |state, record| {
+        transition_day_state(state, *record.id(), record.command())
     })
 }

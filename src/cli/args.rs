@@ -3,7 +3,10 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use std::path::PathBuf;
 
-use crate::domain::{ActivityKind, Period, ReportGroupBy, SummaryScope, WorkContext};
+use crate::domain::{
+    AbsenceKind, AbsencePortion, AbsenceRecordInput, Period, ReportGroupBy, SummaryScope,
+    WorkContext,
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -11,24 +14,27 @@ use crate::domain::{ActivityKind, Period, ReportGroupBy, SummaryScope, WorkConte
     about,
     after_help = "\
 Examples:
-  workaholick start work office
-  workaholick log \"Code review\" \"PR #184\"
-  workaholick end \"Wrap up\" \"Release prep\"
+  workaholick work start office
+  workaholick work log \"Code review\" --description \"PR #184\"
+  workaholick work end \"Wrap up\" --description \"Release prep\"
+  workaholick absence vacation --date 2026-05-01
+  workaholick absence sick --date 2026-05-01 --portion half-day --note \"doctor\"
   workaholick day
   workaholick summary week -1
   workaholick report --from 2026-04-01 --to 2026-04-06 --group-by title
 "
 )]
 pub struct Cli {
+    /// Path to the config file to use
     #[arg(short, long, value_name = "FILE")]
     pub config: Option<PathBuf>,
 
+    /// Command to execute
     #[command(subcommand)]
     pub command: CliCommand,
 }
 
-#[derive(Subcommand, Debug, strum::Display)]
-#[strum(serialize_all = "kebab-case")]
+#[derive(Subcommand, Debug)]
 pub enum CliCommand {
     /// Start in web mode
     #[command()]
@@ -46,57 +52,39 @@ pub enum CliCommand {
         shell: CompletionShell,
     },
 
-    // --- Write commands  ---
-    /// Start tracking a time segment
-    #[command(visible_alias = "s")]
-    Start {
+    /// Track timed work activity
+    #[command(visible_alias = "w")]
+    Work {
+        /// Work action to execute
         #[command(subcommand)]
-        kind: ActivityKindCommand,
+        command: WorkSubcommand,
     },
 
-    /// End the current active segment
-    #[command(visible_alias = "e")]
-    End {
-        // Title of what you finished
-        title: String,
-        /// Optional description of what you finished
-        description: Option<String>,
+    /// Record an absence for a date
+    #[command(visible_alias = "a")]
+    Absence {
+        /// Kind of absence to record
+        #[arg(value_enum)]
+        kind: AbsenceKind,
+
+        /// Absence details
+        #[command(flatten)]
+        details: AbsenceDetailsArgs,
     },
 
-    /// Finish a block of work
-    #[command(visible_alias = "l")]
-    Log {
-        // Title of what you finished
-        title: String,
-        /// Optional description of what you finished
-        description: Option<String>,
-    },
-
-    /// Start a break                          
-    #[command(visible_alias = "bs")]
-    BreakStart,
-
-    /// End a break                            
-    #[command(visible_alias = "be")]
-    BreakEnd {
-        /// Optional description for the break
-        description: Option<String>,
-    },
-
-    /// Delete one or more entries
+    /// Delete one or more records
     Delete {
-        /// ID of the entry to delete
+        /// ID of the record to delete
         id: u64,
     },
 
-    /// Edit entry
+    /// Edit record
     Edit {
-        /// ID of the entry to edit
+        /// ID of the record to edit
         id: u64,
     },
 
-    // --- Query commands ---
-    /// Show all entries for a day
+    /// Show all records for a day
     #[command(visible_alias = "d")]
     Day {
         /// Date to inspect (YYYY-MM-DD), latest day if left empty
@@ -110,47 +98,6 @@ pub enum CliCommand {
     /// Show completed work items for a period or date range
     #[command(visible_alias = "rep")]
     Report(ReportArgs),
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Subcommand)]
-pub enum ActivityKindCommand {
-    Work {
-        /// Set the place of work
-        context: WorkContextCommand,
-    },
-    Vacation,
-    Holiday,
-    Sick,
-    SickChild,
-}
-
-impl From<ActivityKindCommand> for ActivityKind {
-    fn from(time_kind_arg: ActivityKindCommand) -> Self {
-        match time_kind_arg {
-            ActivityKindCommand::Work { context } => Self::Work { context: context.into() },
-            ActivityKindCommand::Vacation => Self::Vacation,
-            ActivityKindCommand::Sick => Self::Sick,
-            ActivityKindCommand::SickChild => Self::SickChild,
-            ActivityKindCommand::Holiday => Self::Holiday,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum, PartialEq)]
-pub enum WorkContextCommand {
-    Home,
-    Office,
-    Travel,
-}
-
-impl From<WorkContextCommand> for WorkContext {
-    fn from(work_context_arg: WorkContextCommand) -> Self {
-        match work_context_arg {
-            WorkContextCommand::Home => Self::Home,
-            WorkContextCommand::Office => Self::Office,
-            WorkContextCommand::Travel => Self::Travel,
-        }
-    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -191,12 +138,79 @@ impl From<CompletionShell> for Shell {
     }
 }
 
+/// Actions within the `work` command namespace
+#[derive(Debug, Clone, Subcommand)]
+pub enum WorkSubcommand {
+    /// Start tracking a time segment
+    #[command(visible_alias = "s")]
+    Start {
+        /// Set the place of work
+        #[arg(value_enum)]
+        context: WorkContext,
+    },
+
+    /// End the current active segment
+    #[command(visible_alias = "e")]
+    End {
+        /// Title of what you finished
+        title: String,
+        /// Optional description of what you finished
+        #[arg(long)]
+        description: Option<String>,
+    },
+
+    /// Finish a block of work
+    #[command(visible_alias = "l")]
+    Log {
+        /// Title of what you finished
+        title: String,
+        /// Optional description of what you finished
+        #[arg(long)]
+        description: Option<String>,
+    },
+
+    /// Start a break
+    #[command(visible_alias = "bs")]
+    BreakStart,
+
+    /// End a break
+    #[command(visible_alias = "be")]
+    BreakEnd {
+        /// Optional description for the break
+        #[arg(long)]
+        description: Option<String>,
+    },
+}
+
+/// Shared arguments for absence creation
+#[derive(Args, Debug, Clone)]
+pub struct AbsenceDetailsArgs {
+    /// Date of the absence (YYYY-MM-DD)
+    #[arg(long)]
+    pub date: NaiveDate,
+
+    /// Full day by default, set to half-day when needed
+    #[arg(long, value_enum, default_value = "full-day")]
+    pub portion: AbsencePortion,
+
+    /// Optional note for the absence
+    #[arg(long)]
+    pub note: Option<String>,
+}
+
+impl AbsenceDetailsArgs {
+    pub(crate) fn into_input(self, kind: AbsenceKind) -> AbsenceRecordInput {
+        AbsenceRecordInput::new(self.date, kind, self.portion, self.note)
+    }
+}
+
+/// Scope selection shared by summary and report commands
 #[derive(Args, Debug, Clone)]
 #[command(group(ArgGroup::new("scope").args(["period", "from"]).required(false)))]
 pub struct ScopeArgs {
     /// Preset period to summarize
     #[arg(value_enum, conflicts_with_all = ["from", "to"])]
-    pub period: Option<PeriodArg>,
+    pub period: Option<Period>,
 
     /// Relative period offset (zero or negative), e.g. `-1` for the previous period
     #[arg(
@@ -221,7 +235,7 @@ impl ScopeArgs {
     pub fn scope(&self) -> SummaryScope {
         match (self.period, self.offset, self.from, self.to) {
             (Some(period), offset, None, None) => {
-                SummaryScope::Period { period: Period::from(period), offset: offset.unwrap_or(0) }
+                SummaryScope::Period { period, offset: offset.unwrap_or(0) }
             }
             (None, None, Some(from), Some(to)) => SummaryScope::Range { from, to },
             (None, None, None, None) => SummaryScope::Period { period: Period::Week, offset: 0 },
@@ -236,6 +250,7 @@ fn parse_period_offset(value: &str) -> Result<i64, String> {
     if offset > 0 { Err("period offset must be zero or negative".to_string()) } else { Ok(offset) }
 }
 
+/// Arguments for the `summary` command
 #[derive(Args, Debug, Clone)]
 pub struct SummaryArgs {
     #[command(flatten)]
@@ -248,6 +263,7 @@ impl SummaryArgs {
     }
 }
 
+/// Arguments for the `report` command
 #[derive(Args, Debug, Clone)]
 pub struct ReportArgs {
     #[command(flatten)]
@@ -255,7 +271,7 @@ pub struct ReportArgs {
 
     /// Group the report rows
     #[arg(long, value_enum)]
-    pub group_by: Option<ReportGroupByArg>,
+    pub group_by: Option<ReportGroupBy>,
 
     /// Append the aggregate summary for the same scope
     #[arg(long)]
@@ -265,46 +281,6 @@ pub struct ReportArgs {
 impl ReportArgs {
     pub fn scope(&self) -> SummaryScope {
         self.scope_args.scope()
-    }
-}
-
-#[derive(Copy, Clone, Debug, ValueEnum, PartialEq, Eq)]
-pub enum ReportGroupByArg {
-    Title,
-    TitleDescription,
-}
-
-impl From<ReportGroupByArg> for ReportGroupBy {
-    fn from(value: ReportGroupByArg) -> Self {
-        match value {
-            ReportGroupByArg::Title => ReportGroupBy::Title,
-            ReportGroupByArg::TitleDescription => ReportGroupBy::TitleDescription,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, ValueEnum)]
-pub enum PeriodArg {
-    /// This week (default)
-    #[value(alias = "w")]
-    Week,
-
-    /// This month
-    #[value(alias = "m")]
-    Month,
-
-    /// This year
-    #[value(alias = "y")]
-    Year,
-}
-
-impl From<PeriodArg> for Period {
-    fn from(p: PeriodArg) -> Self {
-        match p {
-            PeriodArg::Week => Period::Week,
-            PeriodArg::Month => Period::Month,
-            PeriodArg::Year => Period::Year,
-        }
     }
 }
 
@@ -377,7 +353,7 @@ mod tests {
         };
 
         assert_eq!(args.scope(), SummaryScope::Period { period: Period::Week, offset: -1 });
-        assert_eq!(args.group_by, Some(ReportGroupByArg::Title));
+        assert_eq!(args.group_by, Some(ReportGroupBy::Title));
         assert!(args.summary);
     }
 
@@ -390,7 +366,7 @@ mod tests {
             panic!("expected report command");
         };
 
-        assert_eq!(args.group_by, Some(ReportGroupByArg::TitleDescription));
+        assert_eq!(args.group_by, Some(ReportGroupBy::TitleDescription));
     }
 
     #[test]

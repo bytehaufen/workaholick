@@ -3,11 +3,11 @@ use colored::Colorize;
 use std::backtrace::BacktraceStatus;
 
 use crate::domain::{
-    CommandLabel, DayEntryValidationError, DayEntryValidationIssue, TransitionReason,
+    CommandLabel, DayRecordValidationError, DayRecordValidationIssue, TransitionReason,
 };
 
 pub fn render_error(err: &Error) -> String {
-    let Some(issue) = find_validation_error(err).map(DayEntryValidationError::issue) else {
+    let Some(issue) = find_validation_error(err).map(DayRecordValidationError::issue) else {
         return format!("{err:?}");
     };
 
@@ -16,45 +16,44 @@ pub fn render_error(err: &Error) -> String {
     rendered
 }
 
-fn find_validation_error(err: &Error) -> Option<&DayEntryValidationError> {
-    err.downcast_ref::<DayEntryValidationError>()
-        .or_else(|| err.chain().find_map(|cause| cause.downcast_ref::<DayEntryValidationError>()))
+fn find_validation_error(err: &Error) -> Option<&DayRecordValidationError> {
+    err.downcast_ref::<DayRecordValidationError>()
+        .or_else(|| err.chain().find_map(|cause| cause.downcast_ref::<DayRecordValidationError>()))
 }
 
-fn render_colored_validation_error(issue: DayEntryValidationIssue) -> String {
+fn render_colored_validation_error(issue: DayRecordValidationIssue) -> String {
     match issue {
-        DayEntryValidationIssue::EmptyEntries | DayEntryValidationIssue::MixedDates => {
+        DayRecordValidationIssue::EmptyEntries | DayRecordValidationIssue::MixedDates => {
             format!("Day entries validation failed: {issue}")
         }
-        DayEntryValidationIssue::InvalidTransition { entry_id, attempted, reason } => {
-            match reason {
-                TransitionReason::WhileIdle => format!(
-                    "Day entries validation failed: Entry {entry_id} - cannot {} while {}",
-                    colorize_attempted(attempted),
-                    "idle".yellow()
-                ),
-                TransitionReason::AlreadyActive(active_kind) => format!(
-                    "Day entries validation failed: Entry {entry_id} - cannot {} while already active ({})",
-                    colorize_attempted(attempted),
-                    active_kind.to_string().yellow()
-                ),
-                TransitionReason::NotBreaking => format!(
-                    "Day entries validation failed: Entry {entry_id} - cannot {} when {}",
-                    colorize_attempted(attempted),
-                    "not breaking".yellow()
-                ),
-                TransitionReason::WhileBreaking => format!(
-                    "Day entries validation failed: Entry {entry_id} - cannot {} while {}",
-                    colorize_attempted(attempted),
-                    "breaking".yellow()
-                ),
-                TransitionReason::AlreadyBreaking => format!(
-                    "Day entries validation failed: Entry {entry_id} - cannot {} while already {}",
-                    colorize_attempted(attempted),
-                    "breaking".yellow()
-                ),
-            }
-        }
+        DayRecordValidationIssue::InvalidTransition { entry_id, attempted, reason } => match reason
+        {
+            TransitionReason::WhileIdle => format!(
+                "Day entries validation failed: Entry {entry_id} - cannot {} while {}",
+                colorize_attempted(attempted),
+                "idle".yellow()
+            ),
+            TransitionReason::AlreadyActive(active_kind) => format!(
+                "Day entries validation failed: Entry {entry_id} - cannot {} while already active ({})",
+                colorize_attempted(attempted),
+                active_kind.to_string().yellow()
+            ),
+            TransitionReason::NotBreaking => format!(
+                "Day entries validation failed: Entry {entry_id} - cannot {} when {}",
+                colorize_attempted(attempted),
+                "not breaking".yellow()
+            ),
+            TransitionReason::WhileBreaking => format!(
+                "Day entries validation failed: Entry {entry_id} - cannot {} while {}",
+                colorize_attempted(attempted),
+                "breaking".yellow()
+            ),
+            TransitionReason::AlreadyBreaking => format!(
+                "Day entries validation failed: Entry {entry_id} - cannot {} while already {}",
+                colorize_attempted(attempted),
+                "breaking".yellow()
+            ),
+        },
     }
 }
 
@@ -85,7 +84,7 @@ fn append_backtrace(err: &Error, rendered: &mut String) {
 mod tests {
     use super::*;
     use crate::domain::{
-        ActivityKind, Command, CommandLabel, Entry, EntryId, EntryValidationIndex,
+        CommandLabel, RecordId, WorkCommand, WorkContext, WorkRecord, WorkRecordValidationIndex,
     };
     use anyhow::anyhow;
     use chrono::{Local, TimeZone};
@@ -105,7 +104,7 @@ mod tests {
 
     #[test]
     fn keeps_structural_errors_plain() {
-        let text = render_colored_validation_error(DayEntryValidationIssue::EmptyEntries);
+        let text = render_colored_validation_error(DayRecordValidationIssue::EmptyEntries);
 
         assert_eq!(text, "Day entries validation failed: entries must not be empty");
     }
@@ -113,12 +112,10 @@ mod tests {
     #[test]
     fn colorizes_transition_errors() {
         let text = with_color_override(true, || {
-            render_colored_validation_error(DayEntryValidationIssue::InvalidTransition {
-                entry_id: EntryId::from(42),
-                attempted: CommandLabel::StartWithKind(ActivityKind::Vacation),
-                reason: TransitionReason::AlreadyActive(ActivityKind::Work {
-                    context: crate::domain::WorkContext::Office,
-                }),
+            render_colored_validation_error(DayRecordValidationIssue::InvalidTransition {
+                entry_id: RecordId::from(42),
+                attempted: CommandLabel::Start(WorkContext::Office),
+                reason: TransitionReason::AlreadyActive(WorkContext::Office),
             })
         });
 
@@ -138,15 +135,15 @@ mod tests {
     fn render_error_reformats_validation_errors() {
         let text = with_color_override(true, || {
             let ts = Local.with_ymd_and_hms(2026, 1, 12, 10, 0, 0).unwrap();
-            let entry = Entry::new(
-                1.into(),
+            let entry = WorkRecord::new(
                 1.into(),
                 ts,
-                Command::Log { title: "status".into(), description: None },
+                WorkCommand::Log { title: "status".into(), description: None },
             );
             let entries = vec![&entry];
 
-            let err = anyhow::Error::from(EntryValidationIndex::try_new(&entries).unwrap_err());
+            let err =
+                anyhow::Error::from(WorkRecordValidationIndex::try_new(&entries).unwrap_err());
             render_error(&err)
         });
 
@@ -160,16 +157,16 @@ mod tests {
     fn render_error_finds_validation_errors_inside_context() {
         let rendered = with_color_override(false, || {
             let ts = Local.with_ymd_and_hms(2026, 1, 12, 10, 0, 0).unwrap();
-            let entry = Entry::new(
-                1.into(),
+            let entry = WorkRecord::new(
                 1.into(),
                 ts,
-                Command::Log { title: "status".into(), description: None },
+                WorkCommand::Log { title: "status".into(), description: None },
             );
             let entries = vec![&entry];
 
-            let err = anyhow::Error::from(EntryValidationIndex::try_new(&entries).unwrap_err())
-                .context("outer");
+            let err =
+                anyhow::Error::from(WorkRecordValidationIndex::try_new(&entries).unwrap_err())
+                    .context("outer");
 
             assert!(find_validation_error(&err).is_some());
             render_error(&err)
