@@ -1,19 +1,21 @@
 use chrono::NaiveDate;
-use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
+use clap::{
+    ArgGroup, Args, ColorChoice, Parser, Subcommand, ValueEnum,
+    builder::{PossibleValuesParser, TypedValueParser, styling::Style},
+};
 use clap_complete::Shell;
 use std::path::PathBuf;
+use strum::VariantNames;
 
 use crate::domain::{
     AbsenceKind, AbsencePortion, AbsenceRecordInput, Period, ReportGroupBy, SummaryScope,
     WorkContext,
 };
 
-#[derive(Parser, Debug)]
-#[command(
-    version,
-    about,
-    after_help = "\
-Examples:
+const HEADER: Style = clap_cargo::style::HEADER;
+fn examples_help() -> String {
+    format!(
+        "{HEADER}Examples:{HEADER:#}
   workaholick work start office
   workaholick work log \"Code review\" --description \"PR #184\"
   workaholick work end \"Wrap up\" --description \"Release prep\"
@@ -23,6 +25,16 @@ Examples:
   workaholick summary week -1
   workaholick report --from 2026-04-01 --to 2026-04-06 --group-by title
 "
+    )
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    version,
+    about,
+    color = ColorChoice::Auto,
+    styles= clap_cargo::style::CLAP_STYLING,
+    after_help = examples_help()
 )]
 pub struct Cli {
     /// Path to the config file to use
@@ -64,7 +76,7 @@ pub enum CliCommand {
     #[command(visible_alias = "a")]
     Absence {
         /// Kind of absence to record
-        #[arg(value_enum)]
+        #[arg( value_parser = absence_kind_parser())]
         kind: AbsenceKind,
 
         /// Absence details
@@ -145,7 +157,7 @@ pub enum WorkSubcommand {
     #[command(visible_alias = "s")]
     Start {
         /// Set the place of work
-        #[arg(value_enum)]
+        #[arg( value_parser = work_context_parser())]
         context: WorkContext,
     },
 
@@ -155,7 +167,6 @@ pub enum WorkSubcommand {
         /// Title of what you finished
         title: String,
         /// Optional description of what you finished
-        #[arg(long)]
         description: Option<String>,
     },
 
@@ -165,7 +176,6 @@ pub enum WorkSubcommand {
         /// Title of what you finished
         title: String,
         /// Optional description of what you finished
-        #[arg(long)]
         description: Option<String>,
     },
 
@@ -286,6 +296,14 @@ impl ReportArgs {
 
 pub fn parse() -> Cli {
     Cli::parse()
+}
+
+fn work_context_parser() -> impl TypedValueParser<Value = WorkContext> {
+    PossibleValuesParser::new(WorkContext::VARIANTS.iter().copied()).try_map(|s| s.parse())
+}
+
+fn absence_kind_parser() -> impl TypedValueParser<Value = AbsenceKind> {
+    PossibleValuesParser::new(AbsenceKind::VARIANTS.iter().copied()).try_map(|s| s.parse())
 }
 
 #[cfg(test)]
