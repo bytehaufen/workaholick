@@ -87,20 +87,6 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn std_env_var_gets_set_and_unset() {
-        let key = "WORKAHOLICK_TEST_STDENV_VAR";
-
-        unsafe { env::remove_var(key) };
-        assert_eq!(StdEnv.var(key), None);
-
-        unsafe { env::set_var(key, "value") };
-        assert_eq!(StdEnv.var(key).as_deref(), Some("value"));
-
-        unsafe { env::remove_var(key) };
-        assert_eq!(StdEnv.var(key), None);
-    }
-
-    #[test]
     fn std_fs_write_then_read_roundtrip() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("file.txt");

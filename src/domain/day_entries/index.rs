@@ -24,8 +24,7 @@ impl WorkRecordValidationIndex {
 
         let mut relevant_records: Vec<&WorkRecord> = Vec::new();
 
-        let resolve =
-            |id| -> anyhow::Result<&WorkRecord> { Ok(Self::resolve_record(records, id)?) };
+        let resolve = |id| -> anyhow::Result<&WorkRecord> { Self::resolve_record(records, id) };
 
         // Current day (inclusive new one)
         if let Some(day) = self.days.get(&date) {
@@ -60,8 +59,7 @@ impl WorkRecordValidationIndex {
 
         let mut relevant_records: Vec<&WorkRecord> = Vec::new();
 
-        let resolve =
-            |id| -> anyhow::Result<&WorkRecord> { Ok(Self::resolve_record(records, id)?) };
+        let resolve = |id| -> anyhow::Result<&WorkRecord> { Self::resolve_record(records, id) };
 
         // Current day, excluding the removed one
         let day = self.days.get(&date).expect("current day should exist");
@@ -111,7 +109,7 @@ impl WorkRecordValidationIndex {
             let updated = WorkRecord::from_input(*id, input.clone());
             let initial_state = self.state_before(input.date());
             let resolve = |record_id| -> anyhow::Result<&WorkRecord> {
-                Ok(Self::resolve_record(records, record_id)?)
+                Self::resolve_record(records, record_id)
             };
 
             let mut relevant_records: Vec<&WorkRecord> = Vec::new();

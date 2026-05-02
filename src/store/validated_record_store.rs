@@ -66,7 +66,7 @@ impl<STORE: RecordReader + RecordWriter> RecordWriter for ValidatedRecordStore<S
         match &input {
             RecordInput::Work(work_record_input) => self.work_index.validate_insert_record(
                 &self.work_records(),
-                &work_record_input,
+                work_record_input,
                 fake_id,
             )?,
             // FIXME: Add absence validation

@@ -142,8 +142,7 @@ mod tests {
             );
             let entries = vec![&entry];
 
-            let err =
-                anyhow::Error::from(WorkRecordValidationIndex::try_new(&entries).unwrap_err());
+            let err = WorkRecordValidationIndex::try_new(&entries).unwrap_err();
             render_error(&err)
         });
 
@@ -164,9 +163,7 @@ mod tests {
             );
             let entries = vec![&entry];
 
-            let err =
-                anyhow::Error::from(WorkRecordValidationIndex::try_new(&entries).unwrap_err())
-                    .context("outer");
+            let err = WorkRecordValidationIndex::try_new(&entries).unwrap_err().context("outer");
 
             assert!(find_validation_error(&err).is_some());
             render_error(&err)

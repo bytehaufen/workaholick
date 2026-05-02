@@ -5,7 +5,7 @@ use crate::App;
 use crate::cli::args::WorkSubcommand;
 use crate::config::OutputFormatter;
 use crate::editor::{Editor, ports::FileType};
-use crate::{RecordReader, RecordWriter, web};
+use crate::{RecordReader, RecordWriter};
 
 use anyhow::Result;
 
@@ -28,7 +28,6 @@ fn run_inner<S: RecordReader + RecordWriter>(
         CliCommand::Config { .. } => anyhow::bail!("config handled in main"),
         CliCommand::Completions { .. } => anyhow::bail!("completions handled in main"),
 
-        CliCommand::Web => web::run(app),
         CliCommand::Work { command } => {
             let id = match command {
                 WorkSubcommand::Start { context } => app.start_work(context)?,
@@ -86,12 +85,7 @@ fn run_inner<S: RecordReader + RecordWriter>(
             let report = app.report(scope.clone())?;
             let summary = if report_args.summary { Some(app.report_summary(scope)?) } else { None };
 
-            format::print_report(
-                formatter,
-                &report,
-                report_args.group_by.map(Into::into),
-                summary.as_ref(),
-            )
+            format::print_report(formatter, &report, report_args.group_by, summary.as_ref())
         }
     }
 }

@@ -55,7 +55,7 @@ impl Formatter for MarkdownFormatter {
         }
 
         if !work_records_str.is_empty() {
-            output.push_str(&format!("## Work records\n\n"));
+            output.push_str("## Work records\n\n");
             output.push_str("| Time | ID | Event |\n");
             output.push_str("| ---: | ---: | :-- |\n");
             output.push_str(&work_records_str);
@@ -63,7 +63,7 @@ impl Formatter for MarkdownFormatter {
         }
 
         if !absence_records_str.is_empty() {
-            output.push_str(&format!("## Absence records\n\n"));
+            output.push_str("## Absence records\n\n");
             output.push_str("| ID | Kind | Portion | Note |\n");
             output.push_str("| ---: | --: | --: | :-- |\n");
             output.push_str(&absence_records_str);
@@ -193,37 +193,35 @@ impl Formatter for MarkdownFormatter {
             }
         } else if report.rows.is_empty() {
             output.push_str("_No completed work items._\n");
+        } else if report.show_description {
+            output.push_str("| Date | Start | End | Duration | Title | Description |\n");
+            output.push_str("| :-- | :-- | :-- | --: | :-- | :-- |\n");
+
+            report.rows.iter().for_each(|row| {
+                output.push_str(&format!(
+                    "| {} | {} | {} | {} | {} | {} |\n",
+                    row.date,
+                    row.start,
+                    row.end,
+                    row.duration,
+                    escape_markdown_table_cell(&row.title),
+                    escape_markdown_table_cell(&row.description),
+                ));
+            });
         } else {
-            if report.show_description {
-                output.push_str("| Date | Start | End | Duration | Title | Description |\n");
-                output.push_str("| :-- | :-- | :-- | --: | :-- | :-- |\n");
+            output.push_str("| Date | Start | End | Duration | Title |\n");
+            output.push_str("| :-- | :-- | :-- | --: | :-- |\n");
 
-                report.rows.iter().for_each(|row| {
-                    output.push_str(&format!(
-                        "| {} | {} | {} | {} | {} | {} |\n",
-                        row.date,
-                        row.start,
-                        row.end,
-                        row.duration,
-                        escape_markdown_table_cell(&row.title),
-                        escape_markdown_table_cell(&row.description),
-                    ));
-                });
-            } else {
-                output.push_str("| Date | Start | End | Duration | Title |\n");
-                output.push_str("| :-- | :-- | :-- | --: | :-- |\n");
-
-                report.rows.iter().for_each(|row| {
-                    output.push_str(&format!(
-                        "| {} | {} | {} | {} | {} |\n",
-                        row.date,
-                        row.start,
-                        row.end,
-                        row.duration,
-                        escape_markdown_table_cell(&row.title),
-                    ));
-                });
-            }
+            report.rows.iter().for_each(|row| {
+                output.push_str(&format!(
+                    "| {} | {} | {} | {} | {} |\n",
+                    row.date,
+                    row.start,
+                    row.end,
+                    row.duration,
+                    escape_markdown_table_cell(&row.title),
+                ));
+            });
         }
 
         if let Some(summary) = summary {

@@ -48,10 +48,6 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum CliCommand {
-    /// Start in web mode
-    #[command()]
-    Web,
-
     /// Get and set config
     Config {
         #[command(subcommand)]

@@ -5,7 +5,6 @@ pub mod config;
 mod domain;
 mod editor;
 mod store;
-mod web;
 
 pub use crate::app::App;
 pub use crate::app::DayOverview;
