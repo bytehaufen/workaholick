@@ -2,11 +2,14 @@
 name = "workaholick"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.91.0"
 description = "Track work, break, and daily activity from the terminal"
+license = "MIT"
+repository = "https://github.com/bytehaufen/workaholick"
+readme = "README.md"
 
 [features]
 default = ["markdown"]
-web-frontend = []
 markdown = ["dep:termimad"]
 
 [dependencies]
@@ -28,3 +31,11 @@ tempfile = "3.24.0"
 termimad = { version = "0.34.1", optional = true }
 thiserror = "2.0.17"
 toml = "0.9.10"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"

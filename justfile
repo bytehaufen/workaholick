@@ -1,39 +1,79 @@
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
 # List all available just recipes
 default:
     @just --list
 
-# Build Rust documentation and open it in the browser
-doc:
-    cargo doc --no-deps
-    xdg-open http://0.0.0.0:8000/workaholick/index.html
-    simple-http-server target/doc
-
-# Format all Nix and Rust source files
+# Format Nix and Rust files
 fmt:
     nix fmt .
-    :
-    cargo fmt
+    cargo fmt --all
+
+# Check Rust formatting only
+fmt-check:
+    cargo fmt --all -- --check
+
+# Alias for local CI parity
+ci: nix-check build
+
+# Run through Cargo
+run *ARGS:
+    cargo run -- {{ ARGS }}
+
+# Run through Nix app
+nix-run *ARGS:
+    nix run . -- {{ ARGS }}
+
+# Fast local check
+check:
+    cargo check --workspace --all-targets --all-features
 
 # Run all Nix flake checks defined in `flake.nix`
-check:
-    nix flake check -L
+nix-check:
+    nix flake check --print-build-logs
 
 # Build the project using Nix
 build:
-    nix build "#workaholick" -L
+    nix build . --print-build-logs
 
-# Run all Rust tests (accepts extra arguments)
+# Local Clippy check
+clippy:
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+# Run all Rust tests
 test *ARGS:
-    cargo test -- --nocapture {{ ARGS }}
+    cargo test --workspace --all-targets --all-features  {{ ARGS }} -- --nocapture
 
-# Print Rust test coverage to stdout
+# Watch local checks
+watch:
+    cargo watch -c -x "clippy --workspace --all-targets --all-features"
+
+# Build Rust documentation and open it in the browser
+doc:
+    cargo doc --open --no-deps
+
+# Print test coverage
 cov *ARGS:
-    cargo llvm-cov {{ ARGS }}
+    cargo llvm-cov --workspace --all-features {{ ARGS }}
 
-# Generate HTML test coverage report
+# Generate and open HTML coverage report
 cov-html *ARGS:
-    cargo llvm-cov --html {{ ARGS }}
+    cargo llvm-cov --workspace --all-features --html --open {{ ARGS }}
 
-# Generate HTML test coverage report and open it in the browser
-cov-html-open *ARGS:
-    cargo llvm-cov --open {{ ARGS }}
+# Run pre-commit hooks on all files
+pre-commit:
+    pre-commit run --all-files
+
+# Install pre-commit hooks manually
+hooks:
+    pre-commit install
+
+# Update lock files
+update:
+    nix flake update
+    cargo update
+
+# Remove local build outputs
+clean:
+    cargo clean
+    rm -rf result
