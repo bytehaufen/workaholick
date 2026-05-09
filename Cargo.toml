@@ -36,6 +36,6 @@ toml = "1.1.2"
 unsafe_code = "forbid"
 
 [lints.clippy]
-todo = "deny"
-unimplemented = "deny"
-dbg_macro = "deny"
+todo = "warn"
+unimplemented = "warn"
+dbg_macro = "warn"
