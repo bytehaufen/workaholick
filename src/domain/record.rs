@@ -101,7 +101,7 @@ impl RecordInput {
     pub fn date(&self) -> NaiveDate {
         match self {
             RecordInput::Work(work_record_input) => work_record_input.date(),
-            RecordInput::Absence(absence_record_input) => absence_record_input.date(),
+            RecordInput::Absence(absence_record_input) => *absence_record_input.date(),
         }
     }
 }

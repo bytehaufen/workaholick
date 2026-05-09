@@ -114,8 +114,12 @@ impl AbsenceRecordInput {
         AbsenceRecordInput { date, kind, portion, note }
     }
 
-    pub fn date(&self) -> NaiveDate {
-        self.date
+    pub fn date(&self) -> &NaiveDate {
+        &self.date
+    }
+
+    pub fn portion(&self) -> &AbsencePortion {
+        &self.portion
     }
 
     pub fn from_absence_record(record: &AbsenceRecord) -> Self {

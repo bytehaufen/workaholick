@@ -1,4 +1,9 @@
-use crate::domain::{Record, RecordId, RecordInput, WorkRecord, WorkRecordValidationIndex};
+use chrono::NaiveDate;
+
+use crate::domain::{
+    AbsencePortion, AbsenceRecord, AbsenceRecordInput, Record, RecordId, RecordInput, WorkRecord,
+    WorkRecordValidationIndex,
+};
 
 use super::{RecordReader, RecordWriter};
 
@@ -36,6 +41,54 @@ impl<STORE: RecordReader + RecordWriter> ValidatedRecordStore<STORE> {
     fn sort_records(&mut self) {
         self.records.sort_by_key(Record::sort_key);
     }
+
+    fn absences_on(&self, date: NaiveDate) -> impl Iterator<Item = &AbsenceRecord> {
+        self.records.iter().filter_map(move |record| match record {
+            Record::Absence(absence_record) if *absence_record.date() == date => {
+                Some(absence_record)
+            }
+            _ => None,
+        })
+    }
+
+    fn work_records_on(&self, date: NaiveDate) -> impl Iterator<Item = &WorkRecord> {
+        self.records.iter().filter_map(move |record| match record {
+            Record::Work(work_record) if work_record.date() == date => Some(work_record),
+            _ => None,
+        })
+    }
+
+    fn validate_insert_absence(&self, input: &AbsenceRecordInput) -> anyhow::Result<()> {
+        let (full_days, half_days) = self
+            .records
+            .iter()
+            .filter_map(|record| match record {
+                Record::Absence(absence_record) if input.date() == absence_record.date() => {
+                    Some(absence_record.portion())
+                }
+                _ => None,
+            })
+            .fold((0, 0), |(full_days, half_days), portion| match portion {
+                AbsencePortion::FullDay => (full_days + 1, half_days),
+                AbsencePortion::HalfDay => (full_days, half_days + 1),
+            });
+
+        let date = input.date();
+
+        match input.portion() {
+            AbsencePortion::FullDay if full_days > 0 || half_days > 0 => {
+                anyhow::bail!("absence already exists for {date}")
+            }
+            AbsencePortion::HalfDay if full_days > 0 => {
+                anyhow::bail!("full-day absence already exists for {date}")
+            }
+            AbsencePortion::HalfDay if half_days >= 2 => {
+                anyhow::bail!("two half-day absences already exist for {date}")
+            }
+
+            _ => Ok(()),
+        }
+    }
 }
 
 impl<STORE: RecordReader + RecordWriter> RecordReader for ValidatedRecordStore<STORE> {
@@ -69,8 +122,9 @@ impl<STORE: RecordReader + RecordWriter> RecordWriter for ValidatedRecordStore<S
                 work_record_input,
                 fake_id,
             )?,
-            // FIXME: Add absence validation
-            RecordInput::Absence(_absence_record_input) => todo!(),
+            RecordInput::Absence(absence_record_input) => {
+                self.validate_insert_absence(absence_record_input)?
+            }
         }
 
         let id = self.store.insert(input)?;
@@ -103,12 +157,26 @@ impl<STORE: RecordReader + RecordWriter> RecordWriter for ValidatedRecordStore<S
     }
 
     fn update(&mut self, id: &RecordId, input: RecordInput) -> anyhow::Result<()> {
-        match &input {
-            RecordInput::Work(record_input) => {
-                self.work_index.validate_update_record(&self.work_records(), id, record_input)?
+        let existing = self
+            .records
+            .iter()
+            .find(|record| record.id() == id)
+            .ok_or_else(|| anyhow::anyhow!("record {id} missing in validation cache"))?;
+
+        match (existing, &input) {
+            (Record::Work(..), RecordInput::Work(work_input)) => {
+                self.work_index.validate_update_record(&self.work_records(), id, work_input)?
             }
-            // FIXME: Add absence validation
-            RecordInput::Absence(_record_input) => todo!(),
+            // FIXME: Implement
+            (Record::Absence(..), RecordInput::Absence(absence_input)) => todo!(),
+
+            // Changing record type is not allowed
+            (Record::Work(..), RecordInput::Absence(..)) => anyhow::bail!(
+                "record {id} is a work record and cannot be updated with absence input"
+            ),
+            (Record::Absence(..), RecordInput::Work(..)) => anyhow::bail!(
+                "record {id} is an absence record and cannot be updated with work input"
+            ),
         }
 
         self.store.update(id, input.clone())?;
@@ -128,11 +196,14 @@ impl<STORE: RecordReader + RecordWriter> RecordWriter for ValidatedRecordStore<S
 #[cfg(test)]
 mod tests {
     use anyhow::{Context, Result};
-    use chrono::{Local, TimeZone};
+    use chrono::{Local, NaiveDate, TimeZone};
     use std::{cell::RefCell, rc::Rc};
 
     use super::*;
-    use crate::domain::{RecordInput, WorkCommand, WorkContext, WorkRecordInput};
+    use crate::domain::{
+        AbsenceKind, AbsencePortion, AbsenceRecordInput, RecordInput, WorkCommand, WorkContext,
+        WorkRecordInput,
+    };
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum StoreCall {
@@ -352,5 +423,32 @@ mod tests {
 
         assert!(store.is_empty());
         assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn update_rejects_changing_record_type() {
+        let ts = Local.with_ymd_and_hms(2026, 5, 3, 5, 30, 0).unwrap();
+        let store = FakeEntryStore::default().seed(vec![(
+            69.into(),
+            work_input(ts, WorkCommand::Start { context: WorkContext::Home }),
+        )]);
+
+        let calls = store.calls_handle();
+
+        let input = RecordInput::Absence(AbsenceRecordInput::new(
+            NaiveDate::from_ymd_opt(2026, 5, 3).unwrap(),
+            AbsenceKind::Vacation,
+            AbsencePortion::FullDay,
+            Some("".to_string()),
+        ));
+
+        let mut store = ValidatedRecordStore::new(store).unwrap();
+
+        let result = store.update(&69.into(), input);
+
+        result.expect_err("record 69 is a work record and cannot be updated with absence input");
+
+        let calls = calls.borrow();
+        assert!(!calls.contains(&StoreCall::Update))
     }
 }
