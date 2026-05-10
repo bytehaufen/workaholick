@@ -374,7 +374,7 @@ mod tests {
         domain::{SummaryKind, WorkContext},
     };
 
-    #[derive(Clone, Copy)]
+    #[derive(Debug, Clone, Copy)]
     struct FixedClock {
         now: DateTime<Local>,
         today: NaiveDate,
@@ -1010,5 +1010,29 @@ mod tests {
         assert_eq!(report.rows()[0].start(), ts(10, 0));
         assert_eq!(report.rows()[0].end(), ts(10, 10));
         assert_eq!(report.rows()[0].duration_minutes(), 10 * 60);
+    }
+
+    #[test]
+    fn app_start_rejects_invalid_persisted_work_timeline() {
+        let now = ts(9, 6);
+        let store = FakeStore::default().seed(vec![(
+            1.into(),
+            RecordInput::Work(WorkRecordInput::new(
+                ts(8, 6),
+                WorkCommand::Log { title: "worked harder".to_string(), description: None },
+            )),
+        )]);
+
+        let err = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "Day entries validation failed: Entry 1 - cannot log while idle"
+        );
     }
 }
