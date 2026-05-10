@@ -13,15 +13,12 @@ pub(crate) use validation::{
 mod tests {
     use super::super::{RecordId, WorkCommand, WorkContext, WorkRecord, WorkRecordInput};
     use super::*;
+    use crate::test_support::*;
     use index::index_records_by_date;
     use validation::{DayRecordInfo, validate_day_records};
 
     use chrono::{Local, NaiveDate, TimeZone};
     use std::collections::BTreeMap;
-
-    fn ts(day: u32, hour: u32, min: u32) -> chrono::DateTime<Local> {
-        Local.with_ymd_and_hms(2025, 1, day, hour, min, 0).unwrap()
-    }
 
     fn entry(id: u64, ts: chrono::DateTime<Local>, cmd: WorkCommand) -> WorkRecord {
         WorkRecord::new(id.into(), ts, cmd)

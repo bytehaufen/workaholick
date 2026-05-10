@@ -372,6 +372,7 @@ mod tests {
     use crate::{
         config::ScheduleConfig,
         domain::{SummaryKind, WorkContext},
+        test_support::*,
     };
 
     #[derive(Debug, Clone, Copy)]
@@ -459,14 +460,6 @@ mod tests {
         }
     }
 
-    fn ts(day: u32, hour: u32) -> DateTime<Local> {
-        Local.with_ymd_and_hms(2026, 1, day, hour, 0, 0).unwrap()
-    }
-
-    fn date(day: u32) -> NaiveDate {
-        ts(day, 0).date_naive()
-    }
-
     #[test]
     fn app_uses_injected_clock_timestamp() {
         let fixed_now = Local.with_ymd_and_hms(2026, 1, 10, 9, 30, 0).unwrap();
@@ -542,7 +535,7 @@ mod tests {
 
     #[test]
     fn summary_window_for_historical_range_ends_at_next_midnight() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
             FakeStore::default(),
@@ -553,13 +546,13 @@ mod tests {
         let window =
             app.summary_window(SummaryScope::Range { from: date(10), to: date(12) }).unwrap();
 
-        assert_eq!(window.start(), ts(10, 0));
-        assert_eq!(window.end(), ts(13, 0));
+        assert_eq!(window.start(), ts(10, 0, 0));
+        assert_eq!(window.end(), ts(13, 0, 0,));
     }
 
     #[test]
     fn summary_window_for_range_including_today_clamps_end_to_now() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
             FakeStore::default(),
@@ -570,13 +563,13 @@ mod tests {
         let window =
             app.summary_window(SummaryScope::Range { from: date(10), to: date(15) }).unwrap();
 
-        assert_eq!(window.start(), ts(10, 0));
+        assert_eq!(window.start(), ts(10, 0, 0));
         assert_eq!(window.end(), now);
     }
 
     #[test]
     fn summary_window_for_current_week_clamps_end_to_now() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
             FakeStore::default(),
@@ -587,13 +580,13 @@ mod tests {
         let window =
             app.summary_window(SummaryScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
-        assert_eq!(window.start(), ts(12, 0));
+        assert_eq!(window.start(), ts(12, 0, 0));
         assert_eq!(window.end(), now);
     }
 
     #[test]
     fn summary_window_for_previous_week_uses_previous_calendar_week() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
             FakeStore::default(),
@@ -604,13 +597,13 @@ mod tests {
         let window =
             app.summary_window(SummaryScope::Period { period: Period::Week, offset: -1 }).unwrap();
 
-        assert_eq!(window.start(), ts(5, 0));
-        assert_eq!(window.end(), ts(12, 0));
+        assert_eq!(window.start(), ts(5, 0, 0));
+        assert_eq!(window.end(), ts(12, 0, 0));
     }
 
     #[test]
     fn summary_window_for_previous_month_uses_previous_calendar_month() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
             FakeStore::default(),
@@ -627,7 +620,7 @@ mod tests {
 
     #[test]
     fn summary_window_for_previous_year_uses_previous_calendar_year() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
             FakeStore::default(),
@@ -644,7 +637,7 @@ mod tests {
 
     #[test]
     fn summary_rejects_positive_period_offset() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
             FakeStore::default(),
@@ -661,7 +654,7 @@ mod tests {
 
     #[test]
     fn summary_rejects_reversed_explicit_range() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
             FakeStore::default(),
@@ -676,11 +669,11 @@ mod tests {
 
     #[test]
     fn summary_rejects_future_explicit_range_without_overlap() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let store = FakeStore::default().seed(vec![(
             1.into(),
             RecordInput::Work(WorkRecordInput::new(
-                ts(10, 9),
+                ts(10, 9, 0),
                 WorkCommand::Start { context: WorkContext::Office },
             )),
         )]);
@@ -698,61 +691,76 @@ mod tests {
 
     #[test]
     fn weekly_summary_uses_configured_schedule_and_day_breakdown() {
-        let now = ts(18, 18);
+        let now = ts(18, 18, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
             (
                 1.into(),
-                RecordInput::Work(WorkRecordInput::new(ts(12, 8), WorkCommand::Start { context })),
+                RecordInput::Work(WorkRecordInput::new(
+                    ts(12, 8, 0),
+                    WorkCommand::Start { context },
+                )),
             ),
             (
                 2.into(),
                 RecordInput::Work(WorkRecordInput::new(
-                    ts(12, 9),
+                    ts(12, 9, 0),
                     WorkCommand::End { title: "done".into(), description: None },
                 )),
             ),
             (
                 3.into(),
-                RecordInput::Work(WorkRecordInput::new(ts(13, 8), WorkCommand::Start { context })),
+                RecordInput::Work(WorkRecordInput::new(
+                    ts(13, 8, 0),
+                    WorkCommand::Start { context },
+                )),
             ),
             (
                 4.into(),
                 RecordInput::Work(WorkRecordInput::new(
-                    ts(13, 10),
+                    ts(13, 10, 0),
                     WorkCommand::End { title: "done".into(), description: None },
                 )),
             ),
             (
                 5.into(),
-                RecordInput::Work(WorkRecordInput::new(ts(14, 8), WorkCommand::Start { context })),
+                RecordInput::Work(WorkRecordInput::new(
+                    ts(14, 8, 0),
+                    WorkCommand::Start { context },
+                )),
             ),
             (
                 6.into(),
                 RecordInput::Work(WorkRecordInput::new(
-                    ts(14, 11),
+                    ts(14, 11, 0),
                     WorkCommand::End { title: "done".into(), description: None },
                 )),
             ),
             (
                 7.into(),
-                RecordInput::Work(WorkRecordInput::new(ts(15, 8), WorkCommand::Start { context })),
+                RecordInput::Work(WorkRecordInput::new(
+                    ts(15, 8, 0),
+                    WorkCommand::Start { context },
+                )),
             ),
             (
                 8.into(),
                 RecordInput::Work(WorkRecordInput::new(
-                    ts(15, 12),
+                    ts(15, 12, 0),
                     WorkCommand::End { title: "done".into(), description: None },
                 )),
             ),
             (
                 9.into(),
-                RecordInput::Work(WorkRecordInput::new(ts(16, 8), WorkCommand::Start { context })),
+                RecordInput::Work(WorkRecordInput::new(
+                    ts(16, 8, 0),
+                    WorkCommand::Start { context },
+                )),
             ),
             (
                 10.into(),
                 RecordInput::Work(WorkRecordInput::new(
-                    ts(16, 13),
+                    ts(16, 13, 0),
                     WorkCommand::End { title: "done".into(), description: None },
                 )),
             ),
@@ -778,11 +786,11 @@ mod tests {
 
     #[test]
     fn non_week_summary_does_not_include_weekly_target() {
-        let now = ts(12, 12);
+        let now = ts(12, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![(
             1.into(),
-            RecordInput::Work(WorkRecordInput::new(ts(12, 8), WorkCommand::Start { context })),
+            RecordInput::Work(WorkRecordInput::new(ts(12, 8, 0), WorkCommand::Start { context })),
         )]);
         let app = App::new_with_clock(
             Config::default(),
@@ -802,28 +810,34 @@ mod tests {
 
     #[test]
     fn month_summary_includes_weekly_balance_breakdown() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
             (
                 1.into(),
-                RecordInput::Work(WorkRecordInput::new(ts(5, 8), WorkCommand::Start { context })),
+                RecordInput::Work(WorkRecordInput::new(
+                    ts(5, 8, 0),
+                    WorkCommand::Start { context },
+                )),
             ),
             (
                 2.into(),
                 RecordInput::Work(WorkRecordInput::new(
-                    ts(5, 16),
+                    ts(5, 16, 0),
                     WorkCommand::End { title: "done".into(), description: None },
                 )),
             ),
             (
                 3.into(),
-                RecordInput::Work(WorkRecordInput::new(ts(12, 8), WorkCommand::Start { context })),
+                RecordInput::Work(WorkRecordInput::new(
+                    ts(12, 8, 0),
+                    WorkCommand::Start { context },
+                )),
             ),
             (
                 4.into(),
                 RecordInput::Work(WorkRecordInput::new(
-                    ts(12, 16),
+                    ts(12, 16, 0),
                     WorkCommand::End { title: "done".into(), description: None },
                 )),
             ),
@@ -876,11 +890,11 @@ mod tests {
 
     #[test]
     fn summary_for_historical_range_closes_open_day_at_midnight() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![(
             1.into(),
-            RecordInput::Work(WorkRecordInput::new(ts(10, 8), WorkCommand::Start { context })),
+            RecordInput::Work(WorkRecordInput::new(ts(10, 8, 0), WorkCommand::Start { context })),
         )]);
         let app = App::new_with_clock(
             Config::default(),
@@ -903,17 +917,20 @@ mod tests {
 
     #[test]
     fn summary_for_range_uses_entries_before_scope_for_carry_in_state() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
             (
                 1.into(),
-                RecordInput::Work(WorkRecordInput::new(ts(9, 20), WorkCommand::Start { context })),
+                RecordInput::Work(WorkRecordInput::new(
+                    ts(9, 20, 0),
+                    WorkCommand::Start { context },
+                )),
             ),
             (
                 2.into(),
                 RecordInput::Work(WorkRecordInput::new(
-                    ts(10, 10),
+                    ts(10, 10, 0),
                     WorkCommand::End { title: "done".into(), description: None },
                 )),
             ),
@@ -939,12 +956,15 @@ mod tests {
 
     #[test]
     fn report_returns_completed_items_for_the_scope() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
             (
                 1.into(),
-                RecordInput::Work(WorkRecordInput::new(ts(10, 8), WorkCommand::Start { context })),
+                RecordInput::Work(WorkRecordInput::new(
+                    ts(10, 8, 0),
+                    WorkCommand::Start { context },
+                )),
             ),
             (
                 2.into(),
@@ -956,7 +976,7 @@ mod tests {
             (
                 3.into(),
                 RecordInput::Work(WorkRecordInput::new(
-                    ts(10, 12),
+                    ts(10, 12, 0),
                     WorkCommand::End { title: "wrap".into(), description: None },
                 )),
             ),
@@ -979,7 +999,7 @@ mod tests {
 
     #[test]
     fn report_uses_entries_before_scope_for_carry_in_state() {
-        let now = ts(15, 12);
+        let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
             (
@@ -992,7 +1012,7 @@ mod tests {
             (
                 2.into(),
                 RecordInput::Work(WorkRecordInput::new(
-                    ts(10, 10),
+                    ts(10, 10, 0),
                     WorkCommand::End { title: "done".into(), description: None },
                 )),
             ),
@@ -1007,18 +1027,18 @@ mod tests {
         let report = app.report(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(report.rows().len(), 1);
-        assert_eq!(report.rows()[0].start(), ts(10, 0));
-        assert_eq!(report.rows()[0].end(), ts(10, 10));
+        assert_eq!(report.rows()[0].start(), ts(10, 0, 0));
+        assert_eq!(report.rows()[0].end(), ts(10, 10, 0));
         assert_eq!(report.rows()[0].duration_minutes(), 10 * 60);
     }
 
     #[test]
     fn app_start_rejects_invalid_persisted_work_timeline() {
-        let now = ts(9, 6);
+        let now = ts(9, 6, 0);
         let store = FakeStore::default().seed(vec![(
             1.into(),
             RecordInput::Work(WorkRecordInput::new(
-                ts(8, 6),
+                ts(8, 6, 0),
                 WorkCommand::Log { title: "worked harder".to_string(), description: None },
             )),
         )]);

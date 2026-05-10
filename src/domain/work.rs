@@ -48,7 +48,7 @@ pub enum WorkContext {
     Travel,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkRecord {
     id: RecordId,
     #[serde(with = "serde_datetime")]

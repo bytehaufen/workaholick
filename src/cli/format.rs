@@ -477,9 +477,10 @@ mod tests {
     use super::*;
     use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        Record, RecordInput, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkCommand,
-        WorkContext, WorkItemReport, WorkRecordInput, summary,
+        SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkCommand, WorkContext,
+        WorkItemReport, summary,
     };
+    use crate::test_support::*;
     use chrono::{Local, TimeZone};
 
     #[test]
@@ -680,20 +681,12 @@ mod tests {
     fn prepare_summary_sorts_rows_and_builds_total() {
         let window = SummaryWindow::new(ts(12, 0, 0), ts(15, 0, 0));
         let records = vec![
-            work_record(1, ts(12, 0, 0), WorkCommand::Start { context: WorkContext::Home }),
-            work_record(
-                2,
-                ts(12, 2, 15),
-                WorkCommand::End { title: "done".into(), description: None },
-            ),
-            work_record(3, ts(13, 4, 0), WorkCommand::Start { context: WorkContext::Office }),
-            work_record(4, ts(13, 6, 0), WorkCommand::BreakStart),
-            work_record(5, ts(13, 6, 30), WorkCommand::BreakEnd { description: None }),
-            work_record(
-                6,
-                ts(13, 8, 0),
-                WorkCommand::End { title: "done".into(), description: None },
-            ),
+            work_record(1, 12, 0, 0, WorkCommand::Start { context: WorkContext::Home }),
+            work_record(2, 12, 2, 15, WorkCommand::End { title: "done".into(), description: None }),
+            work_record(3, 13, 4, 0, WorkCommand::Start { context: WorkContext::Office }),
+            work_record(4, 13, 6, 0, WorkCommand::BreakStart),
+            work_record(5, 13, 6, 30, WorkCommand::BreakEnd { description: None }),
+            work_record(6, 13, 8, 0, WorkCommand::End { title: "done".into(), description: None }),
         ];
         let report = SummaryReport::with_weekly_balance(
             window,
@@ -796,13 +789,5 @@ mod tests {
         assert!(display.weekly_days.is_empty());
         assert_eq!(display.target, None);
         assert_eq!(display.balance, None);
-    }
-
-    fn ts(day: u32, hour: u32, minute: u32) -> chrono::DateTime<Local> {
-        Local.with_ymd_and_hms(2026, 1, day, hour, minute, 0).unwrap()
-    }
-
-    fn work_record(id: u64, timestamp: chrono::DateTime<Local>, command: WorkCommand) -> Record {
-        Record::from_input(id.into(), RecordInput::Work(WorkRecordInput::new(timestamp, command)))
     }
 }

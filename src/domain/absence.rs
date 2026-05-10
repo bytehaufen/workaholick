@@ -47,7 +47,7 @@ pub enum AbsencePortion {
     HalfDay,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AbsenceRecord {
     id: RecordId,
     date: NaiveDate,

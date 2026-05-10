@@ -348,39 +348,12 @@ pub fn report(
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
-
     use super::*;
-    use crate::domain::{
-        AbsenceKind, AbsencePortion, AbsenceRecordInput, RecordInput, WorkCommand, WorkContext,
-        WorkRecordInput,
-    };
-
-    fn ts(day: u32, hour: u32, minute: u32) -> DateTime<Local> {
-        Local.with_ymd_and_hms(2026, 1, day, hour, minute, 0).unwrap()
-    }
+    use crate::domain::{AbsenceKind, AbsencePortion, WorkCommand, WorkContext};
+    use crate::test_support::*;
 
     fn window(start_day: u32, start_hour: u32, end_day: u32, end_hour: u32) -> SummaryWindow {
         SummaryWindow::new(ts(start_day, start_hour, 0), ts(end_day, end_hour, 0))
-    }
-
-    fn work_record(id: u64, day: u32, hour: u32, minute: u32, command: WorkCommand) -> Record {
-        Record::from_input(
-            id.into(),
-            RecordInput::Work(WorkRecordInput::new(ts(day, hour, minute), command)),
-        )
-    }
-
-    fn absence_record(id: u64, day: u32, kind: AbsenceKind) -> Record {
-        Record::from_input(
-            id.into(),
-            RecordInput::Absence(AbsenceRecordInput::new(
-                ts(day, 0, 0).date_naive(),
-                kind,
-                AbsencePortion::FullDay,
-                None,
-            )),
-        )
     }
 
     #[test]
@@ -466,7 +439,7 @@ mod tests {
     fn report_ignores_absence_records() {
         let report = report(
             &[
-                absence_record(1, 10, AbsenceKind::Holiday),
+                absence_record(1, 10, AbsenceKind::Holiday, AbsencePortion::HalfDay),
                 work_record(2, 10, 8, 0, WorkCommand::Start { context: WorkContext::Office }),
                 work_record(
                     3,

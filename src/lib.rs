@@ -13,3 +13,7 @@ pub use crate::store::EntryStore;
 pub use crate::store::JsonlFileStore;
 pub use crate::store::RecordReader;
 pub use crate::store::RecordWriter;
+
+#[cfg(test)]
+/// Shared test helpers
+mod test_support;

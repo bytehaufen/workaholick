@@ -444,9 +444,10 @@ mod tests {
     use super::*;
     use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        Record, RecordInput, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkCommand,
-        WorkContext, WorkItemReport, WorkRecordInput, summary,
+        Record, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkCommand, WorkContext,
+        WorkItemReport, summary,
     };
+    use crate::test_support::work_record;
     use chrono::{Local, TimeZone};
 
     #[test]
@@ -552,36 +553,12 @@ ID  Kind      Portion   Note
     #[test]
     fn plain_format_summary_renders_sorted_rows_and_totals() {
         let report = summary_report(vec![
-            work_record(
-                1,
-                Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
-                WorkCommand::Start { context: WorkContext::Home },
-            ),
-            work_record(
-                2,
-                Local.with_ymd_and_hms(2026, 1, 12, 2, 15, 0).unwrap(),
-                WorkCommand::End { title: "done".into(), description: None },
-            ),
-            work_record(
-                3,
-                Local.with_ymd_and_hms(2026, 1, 13, 4, 0, 0).unwrap(),
-                WorkCommand::Start { context: WorkContext::Office },
-            ),
-            work_record(
-                4,
-                Local.with_ymd_and_hms(2026, 1, 13, 6, 0, 0).unwrap(),
-                WorkCommand::BreakStart,
-            ),
-            work_record(
-                5,
-                Local.with_ymd_and_hms(2026, 1, 13, 6, 30, 0).unwrap(),
-                WorkCommand::BreakEnd { description: None },
-            ),
-            work_record(
-                6,
-                Local.with_ymd_and_hms(2026, 1, 13, 8, 0, 0).unwrap(),
-                WorkCommand::End { title: "done".into(), description: None },
-            ),
+            work_record(1, 12, 0, 0, WorkCommand::Start { context: WorkContext::Home }),
+            work_record(2, 12, 2, 15, WorkCommand::End { title: "done".into(), description: None }),
+            work_record(3, 13, 4, 0, WorkCommand::Start { context: WorkContext::Office }),
+            work_record(4, 13, 6, 0, WorkCommand::BreakStart),
+            work_record(5, 13, 6, 30, WorkCommand::BreakEnd { description: None }),
+            work_record(6, 13, 8, 0, WorkCommand::End { title: "done".into(), description: None }),
         ]);
 
         let rendered = PlainFormatter::format_summary(&report);
@@ -781,10 +758,6 @@ No completed work items.
                 ),
             ],
         )
-    }
-
-    fn work_record(id: u64, timestamp: chrono::DateTime<Local>, command: WorkCommand) -> Record {
-        Record::from_input(id.into(), RecordInput::Work(WorkRecordInput::new(timestamp, command)))
     }
 
     fn detailed_report() -> WorkItemReport {
