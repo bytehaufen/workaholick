@@ -2,6 +2,7 @@ mod absence;
 mod day_entries;
 mod period;
 mod record;
+pub(crate) mod record_set;
 pub(crate) mod report;
 mod serde_datetime;
 mod summary;

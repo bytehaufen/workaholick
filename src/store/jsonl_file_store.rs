@@ -3,8 +3,8 @@ use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
-use indexmap::IndexMap;
 
+use crate::domain::record_set::{ChangeOutcome, RecordChange, RecordSet};
 use crate::domain::{Record, RecordId, RecordInput};
 
 use super::{RecordReader, RecordWriter};
@@ -16,7 +16,7 @@ pub struct JsonlFileStore {
     file_path: PathBuf,
     _lock_file: File,
     lock_path: PathBuf,
-    records_by_id: IndexMap<RecordId, Record>,
+    records_by_id: RecordSet,
 }
 
 impl Drop for JsonlFileStore {
@@ -38,7 +38,7 @@ impl JsonlFileStore {
 
         let try_load = || {
             let records = Self::read_file(file_path)?;
-            Self::normalize_records(records)
+            RecordSet::try_from_records(records)
         };
 
         let records_by_id = match try_load() {
@@ -115,7 +115,7 @@ impl JsonlFileStore {
 
         let mut writer = BufWriter::with_capacity(BUFFER_SIZE, file);
 
-        self.records_by_id.iter().try_for_each(|(_, record)| -> anyhow::Result<()> {
+        self.records_by_id.iter().try_for_each(|record| -> anyhow::Result<()> {
             serde_json::to_writer(&mut writer, record)?;
             writeln!(writer)?;
             Ok(())
@@ -142,35 +142,12 @@ impl JsonlFileStore {
 
         Ok((file, path))
     }
-
-    fn insert_sorted(&mut self, id: RecordId, record: Record) {
-        self.records_by_id
-            .insert_sorted_by(id, record, |_i1, e1, _i2, e2| e1.sort_key().cmp(&e2.sort_key()));
-    }
-
-    fn normalize_records(
-        records: Vec<Record>,
-    ) -> std::result::Result<IndexMap<RecordId, Record>, anyhow::Error> {
-        let len = records.len();
-        let mut records_by_id =
-            records.into_iter().try_fold(IndexMap::with_capacity(len), |mut records_by_id, record| {
-                let id = *record.id();
-                if records_by_id.insert(id, record).is_some() {
-                    anyhow::bail!("duplicate id {id} in records");
-                }
-
-                Ok(records_by_id)
-            })?;
-
-        records_by_id.sort_by_key(|_, e| e.sort_key());
-
-        Ok(records_by_id)
-    }
 }
 
 impl RecordReader for JsonlFileStore {
+    // TODO: Re-think over return value after refactor
     fn iter(&self) -> Box<dyn Iterator<Item = &Record> + '_> {
-        Box::new(self.records_by_id.values())
+        Box::new(self.records_by_id.iter())
     }
 
     fn get(&self, id: &RecordId) -> Option<&Record> {
@@ -188,40 +165,49 @@ impl RecordReader for JsonlFileStore {
 
 impl RecordWriter for JsonlFileStore {
     fn next_id(&self) -> RecordId {
-        self.records_by_id.keys().max().map(|id| id.incremented()).unwrap_or_default()
+        self.records_by_id.next_id()
     }
 
-    fn insert(&mut self, new_input: RecordInput) -> anyhow::Result<RecordId> {
-        let id = self.next_id();
+    fn insert(&mut self, input: RecordInput) -> anyhow::Result<RecordId> {
+        // TODO: Update later, when abstraction matches
+        let id = self.records_by_id.next_id();
+        let outcome = self.records_by_id.apply_change(RecordChange::Insert { id, input })?;
 
-        let new_record = Record::from_input(id, new_input);
+        if let ChangeOutcome::Inserted { id } = outcome {
+            self.persist()?;
 
-        self.insert_sorted(id, new_record);
+            return Ok(id);
+        }
 
-        self.persist()?;
-
-        Ok(id)
+        // TODO: Should not be present after refactor
+        anyhow::bail!("already catched")
     }
 
     fn delete(&mut self, id: &RecordId) -> anyhow::Result<Record> {
-        // We do a slow shift remove, to do not mess the order in the stored file
-        let input =
-            self.records_by_id.shift_remove(id).with_context(|| format!("id {id} does not exist"))?;
+        // TODO: Update later, when abstraction matches
+        let outcome = self.records_by_id.apply_change(RecordChange::Delete { id: *id })?;
 
-        self.persist()?;
+        if let ChangeOutcome::Deleted { record } = outcome {
+            self.persist()?;
 
-        Ok(input)
+            return Ok(record);
+        }
+
+        // TODO: Should not be present after refactor
+        anyhow::bail!("already catched")
     }
 
     fn update(&mut self, id: &RecordId, input: RecordInput) -> Result<()> {
-        anyhow::ensure!(self.records_by_id.contains_key(id), "id {id} does not exist");
-        let updated_record = Record::from_input(*id, input);
-        self.records_by_id.shift_remove(id);
-        self.insert_sorted(*id, updated_record);
+        // TODO: Update later, when abstraction matches
+        let outcome = self.records_by_id.apply_change(RecordChange::Update { id: *id, input })?;
+        if let ChangeOutcome::Updated { previous: _ } = outcome {
+            self.persist()?;
 
-        self.persist()?;
+            return Ok(());
+        }
 
-        Ok(())
+        // TODO: Should not be present after refactor
+        anyhow::bail!("already catched")
     }
 }
 
@@ -277,8 +263,6 @@ mod tests {
 
         let store = JsonlFileStore::new(&file_path).unwrap();
         assert_eq!(store.records_by_id.len(), 2);
-        assert_eq!(store.records_by_id[0].id().value(), 0);
-        assert_eq!(store.records_by_id[1].id().value(), 1);
     }
 
     #[test]
@@ -316,8 +300,6 @@ mod tests {
 
         let store = JsonlFileStore::new(&file_path).unwrap();
         assert_eq!(store.records_by_id.len(), 2);
-        assert_eq!(store.records_by_id[0].id().value(), 0);
-        assert_eq!(store.records_by_id[1].id().value(), 2);
     }
 
     #[test]
@@ -371,10 +353,7 @@ mod tests {
 
         let store = JsonlFileStore::new(&file_path).unwrap();
         assert_eq!(store.records_by_id.len(), 3);
-        assert_eq!(store.records_by_id[0].id().value(), 0);
-        assert_eq!(store.records_by_id[1].id().value(), 1);
-        assert_eq!(store.records_by_id[2].id().value(), 2);
-        assert_eq!(work_record(&store.records_by_id[1]).timestamp().hour(), 18);
+        assert_eq!(work_record(store.records_by_id.get(&1.into()).unwrap()).timestamp().hour(), 18);
     }
 
     #[test]
@@ -435,7 +414,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(store.records_by_id.len(), 3);
-        assert_eq!(store.records_by_id[2].id().value(), 2);
     }
 
     #[test]
@@ -589,7 +567,7 @@ mod tests {
 
         let store = JsonlFileStore::new(&file_path).unwrap();
         assert_eq!(store.records_by_id.len(), 1);
-        assert_eq!(store.records_by_id[0].id().value(), 0);
+        assert_eq!(store.records_by_id.get(&0.into()).unwrap().id().value(), 0);
     }
 
     #[test]
