@@ -9,7 +9,7 @@ mod store;
 pub use crate::app::App;
 pub use crate::app::DayOverview;
 pub use crate::bootstrap::run_app;
-pub use crate::store::EntryStore;
+pub use crate::store::RecordStore;
 pub use crate::store::JsonlFileStore;
 pub use crate::store::RecordReader;
 pub use crate::store::RecordWriter;

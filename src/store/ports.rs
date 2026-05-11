@@ -17,5 +17,5 @@ pub trait RecordWriter {
     fn delete(&mut self, id: &RecordId) -> Result<Record>;
 }
 
-pub trait EntryStore: RecordReader + RecordWriter {}
-impl<T: RecordReader + RecordWriter> EntryStore for T {}
+pub trait RecordStore: RecordReader + RecordWriter {}
+impl<T: RecordReader + RecordWriter> RecordStore for T {}

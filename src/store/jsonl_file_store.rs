@@ -11,13 +11,12 @@ use super::{RecordReader, RecordWriter};
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
 
-/// JSONL file-based `EntryStore` implementation
 #[derive(Debug)]
 pub struct JsonlFileStore {
     file_path: PathBuf,
     _lock_file: File,
     lock_path: PathBuf,
-    records: IndexMap<RecordId, Record>,
+    records_by_id: IndexMap<RecordId, Record>,
 }
 
 impl Drop for JsonlFileStore {
@@ -38,12 +37,12 @@ impl JsonlFileStore {
         let (lock_file, lock_path) = Self::create_lock_file(file_path)?;
 
         let try_load = || {
-            let entries = Self::read_file(file_path)?;
-            Self::normalize_entries(entries)
+            let records = Self::read_file(file_path)?;
+            Self::normalize_records(records)
         };
 
-        let entries = match try_load() {
-            Ok(entries) => entries,
+        let records_by_id = match try_load() {
+            Ok(records_by_id) => records_by_id,
             Err(error) => {
                 drop(lock_file);
                 let _ = fs::remove_file(&lock_path);
@@ -51,7 +50,7 @@ impl JsonlFileStore {
             }
         };
 
-        Ok(Self { file_path: file_path.into(), _lock_file: lock_file, lock_path, records: entries })
+        Ok(Self { file_path: file_path.into(), _lock_file: lock_file, lock_path, records_by_id })
     }
 
     fn read_from<R: BufRead>(reader: R, path: &Path) -> Result<Vec<Record>> {
@@ -79,7 +78,7 @@ impl JsonlFileStore {
             .collect()
     }
 
-    /// Reads in the file at `path` in a by timeestamp sorted `Vec<Entry>`
+    /// Reads in the file at `path` in a by timeestamp sorted `Vec<Record>`
     fn read_file(path: &Path) -> Result<Vec<Record>> {
         if !path.exists() {
             return Ok(Vec::new());
@@ -116,8 +115,8 @@ impl JsonlFileStore {
 
         let mut writer = BufWriter::with_capacity(BUFFER_SIZE, file);
 
-        self.records.iter().try_for_each(|(_, entry)| -> anyhow::Result<()> {
-            serde_json::to_writer(&mut writer, entry)?;
+        self.records_by_id.iter().try_for_each(|(_, record)| -> anyhow::Result<()> {
+            serde_json::to_writer(&mut writer, record)?;
             writeln!(writer)?;
             Ok(())
         })?;
@@ -144,60 +143,60 @@ impl JsonlFileStore {
         Ok((file, path))
     }
 
-    fn insert_sorted(&mut self, id: RecordId, entry: Record) {
-        self.records
-            .insert_sorted_by(id, entry, |_i1, e1, _i2, e2| e1.sort_key().cmp(&e2.sort_key()));
+    fn insert_sorted(&mut self, id: RecordId, record: Record) {
+        self.records_by_id
+            .insert_sorted_by(id, record, |_i1, e1, _i2, e2| e1.sort_key().cmp(&e2.sort_key()));
     }
 
-    fn normalize_entries(
-        entries: Vec<Record>,
+    fn normalize_records(
+        records: Vec<Record>,
     ) -> std::result::Result<IndexMap<RecordId, Record>, anyhow::Error> {
-        let len = entries.len();
-        let mut entries =
-            entries.into_iter().try_fold(IndexMap::with_capacity(len), |mut entries, entry| {
-                let id = *entry.id();
-                if entries.insert(id, entry).is_some() {
-                    anyhow::bail!("duplicate id {id} in entries");
+        let len = records.len();
+        let mut records_by_id =
+            records.into_iter().try_fold(IndexMap::with_capacity(len), |mut records_by_id, record| {
+                let id = *record.id();
+                if records_by_id.insert(id, record).is_some() {
+                    anyhow::bail!("duplicate id {id} in records");
                 }
 
-                Ok(entries)
+                Ok(records_by_id)
             })?;
 
-        entries.sort_by_key(|_, e| e.sort_key());
+        records_by_id.sort_by_key(|_, e| e.sort_key());
 
-        Ok(entries)
+        Ok(records_by_id)
     }
 }
 
 impl RecordReader for JsonlFileStore {
     fn iter(&self) -> Box<dyn Iterator<Item = &Record> + '_> {
-        Box::new(self.records.values())
+        Box::new(self.records_by_id.values())
     }
 
     fn get(&self, id: &RecordId) -> Option<&Record> {
-        self.records.get(id)
+        self.records_by_id.get(id)
     }
 
     fn len(&self) -> usize {
-        self.records.len()
+        self.records_by_id.len()
     }
 
     fn is_empty(&self) -> bool {
-        self.records.is_empty()
+        self.records_by_id.is_empty()
     }
 }
 
 impl RecordWriter for JsonlFileStore {
     fn next_id(&self) -> RecordId {
-        self.records.keys().max().map(|id| id.incremented()).unwrap_or_default()
+        self.records_by_id.keys().max().map(|id| id.incremented()).unwrap_or_default()
     }
 
     fn insert(&mut self, new_input: RecordInput) -> anyhow::Result<RecordId> {
         let id = self.next_id();
 
-        let new_entry = Record::from_input(id, new_input);
+        let new_record = Record::from_input(id, new_input);
 
-        self.insert_sorted(id, new_entry);
+        self.insert_sorted(id, new_record);
 
         self.persist()?;
 
@@ -207,7 +206,7 @@ impl RecordWriter for JsonlFileStore {
     fn delete(&mut self, id: &RecordId) -> anyhow::Result<Record> {
         // We do a slow shift remove, to do not mess the order in the stored file
         let input =
-            self.records.shift_remove(id).with_context(|| format!("id {id} does not exist"))?;
+            self.records_by_id.shift_remove(id).with_context(|| format!("id {id} does not exist"))?;
 
         self.persist()?;
 
@@ -215,10 +214,10 @@ impl RecordWriter for JsonlFileStore {
     }
 
     fn update(&mut self, id: &RecordId, input: RecordInput) -> Result<()> {
-        anyhow::ensure!(self.records.contains_key(id), "id {id} does not exist");
-        let updated_entry = Record::from_input(*id, input);
-        self.records.shift_remove(id);
-        self.insert_sorted(*id, updated_entry);
+        anyhow::ensure!(self.records_by_id.contains_key(id), "id {id} does not exist");
+        let updated_record = Record::from_input(*id, input);
+        self.records_by_id.shift_remove(id);
+        self.insert_sorted(*id, updated_record);
 
         self.persist()?;
 
@@ -255,7 +254,7 @@ mod tests {
     #[test]
     fn insert_persists_and_reopen_reads_records() {
         let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
+        let file_path = dir.path().join("data.jsonl");
 
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
@@ -277,15 +276,15 @@ mod tests {
         }
 
         let store = JsonlFileStore::new(&file_path).unwrap();
-        assert_eq!(store.records.len(), 2);
-        assert_eq!(store.records[0].id().value(), 0);
-        assert_eq!(store.records[1].id().value(), 1);
+        assert_eq!(store.records_by_id.len(), 2);
+        assert_eq!(store.records_by_id[0].id().value(), 0);
+        assert_eq!(store.records_by_id[1].id().value(), 1);
     }
 
     #[test]
     fn delete_by_id_persists() {
         let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
+        let file_path = dir.path().join("data.jsonl");
 
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
@@ -316,15 +315,15 @@ mod tests {
         }
 
         let store = JsonlFileStore::new(&file_path).unwrap();
-        assert_eq!(store.records.len(), 2);
-        assert_eq!(store.records[0].id().value(), 0);
-        assert_eq!(store.records[1].id().value(), 2);
+        assert_eq!(store.records_by_id.len(), 2);
+        assert_eq!(store.records_by_id[0].id().value(), 0);
+        assert_eq!(store.records_by_id[1].id().value(), 2);
     }
 
     #[test]
     fn update_record_reorders_by_sort_key_and_persists() {
         let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
+        let file_path = dir.path().join("data.jsonl");
 
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
@@ -371,17 +370,17 @@ mod tests {
         }
 
         let store = JsonlFileStore::new(&file_path).unwrap();
-        assert_eq!(store.records.len(), 3);
-        assert_eq!(store.records[0].id().value(), 0);
-        assert_eq!(store.records[1].id().value(), 1);
-        assert_eq!(store.records[2].id().value(), 2);
-        assert_eq!(work_record(&store.records[1]).timestamp().hour(), 18);
+        assert_eq!(store.records_by_id.len(), 3);
+        assert_eq!(store.records_by_id[0].id().value(), 0);
+        assert_eq!(store.records_by_id[1].id().value(), 1);
+        assert_eq!(store.records_by_id[2].id().value(), 2);
+        assert_eq!(work_record(&store.records_by_id[1]).timestamp().hour(), 18);
     }
 
     #[test]
     fn update_and_delete_missing_id_return_error() {
         let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
+        let file_path = dir.path().join("data.jsonl");
         let mut store = JsonlFileStore::new(&file_path).unwrap();
 
         store
@@ -409,7 +408,7 @@ mod tests {
     #[test]
     fn insert_after_reopen_continues_ids() {
         let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
+        let file_path = dir.path().join("data.jsonl");
 
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
@@ -435,14 +434,14 @@ mod tests {
             ))
             .unwrap();
 
-        assert_eq!(store.records.len(), 3);
-        assert_eq!(store.records[2].id().value(), 2);
+        assert_eq!(store.records_by_id.len(), 3);
+        assert_eq!(store.records_by_id[2].id().value(), 2);
     }
 
     #[test]
     fn iter_returns_records_sorted_by_sort_key() {
         let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
+        let file_path = dir.path().join("data.jsonl");
 
         let records = vec![
             Record::from_input(
@@ -470,7 +469,7 @@ mod tests {
     #[test]
     fn get_returns_record_for_existing_id_and_none_for_missing_id() {
         let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
+        let file_path = dir.path().join("data.jsonl");
         let mut store = JsonlFileStore::new(&file_path).unwrap();
 
         let id = store
@@ -480,9 +479,9 @@ mod tests {
             ))
             .unwrap();
 
-        let entry = store.get(&id).expect("entry should be present");
+        let record = store.get(&id).expect("record should be present");
         assert_eq!(
-            *work_record(entry).command(),
+            *work_record(record).command(),
             WorkCommand::Log { title: "a".into(), description: Some("b".into()) }
         );
         assert!(store.get(&999.into()).is_none());
@@ -501,7 +500,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
+        let file_path = dir.path().join("data.jsonl");
 
         File::create(&file_path).unwrap();
         let mut perms = std::fs::metadata(&file_path).unwrap().permissions();
@@ -520,7 +519,7 @@ mod tests {
     #[test]
     fn persist_adds_context_when_rename_fails() {
         let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
+        let file_path = dir.path().join("data.jsonl");
 
         let mut store = JsonlFileStore::new(&file_path).unwrap();
         std::fs::create_dir(&file_path).unwrap();
@@ -539,7 +538,7 @@ mod tests {
     #[test]
     fn lock_file_prevents_second_instance_and_is_removed_on_drop() {
         let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
+        let file_path = dir.path().join("data.jsonl");
 
         {
             let _store1 = JsonlFileStore::new(&file_path).unwrap();
@@ -553,7 +552,7 @@ mod tests {
     #[test]
     fn lock_file_is_removed_in_new_if_err() {
         let dir = tempfile::tempdir().unwrap();
-        let store_file_path = dir.path().join("entries.jsonl");
+        let store_file_path = dir.path().join("data.jsonl");
         let lock_file_path = store_file_path.with_added_extension("lock");
 
         {
@@ -572,9 +571,9 @@ mod tests {
     #[test]
     fn read_file_ignores_blank_lines() {
         let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
+        let file_path = dir.path().join("data.jsonl");
 
-        let entry = Record::from_input(
+        let record = Record::from_input(
             RecordId::from(0),
             work_input(
                 Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap(),
@@ -584,19 +583,19 @@ mod tests {
 
         let mut file = std::fs::File::create(&file_path).unwrap();
         writeln!(file).unwrap();
-        serde_json::to_writer(&mut file, &entry).unwrap();
+        serde_json::to_writer(&mut file, &record).unwrap();
         writeln!(file).unwrap();
         writeln!(file).unwrap();
 
         let store = JsonlFileStore::new(&file_path).unwrap();
-        assert_eq!(store.records.len(), 1);
-        assert_eq!(store.records[0].id().value(), 0);
+        assert_eq!(store.records_by_id.len(), 1);
+        assert_eq!(store.records_by_id[0].id().value(), 0);
     }
 
     #[test]
     fn read_file_reports_line_number_on_invalid_json() {
         let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
+        let file_path = dir.path().join("data.jsonl");
 
         let mut file = File::create(&file_path).unwrap();
         writeln!(file, "{{ this is not json }}").unwrap();
@@ -609,7 +608,7 @@ mod tests {
     #[test]
     fn new_with_duplicate_ids_returns_error() {
         let dir = tempfile::tempdir().unwrap();
-        let store_file_path = dir.path().join("entries.jsonl");
+        let store_file_path = dir.path().join("data.jsonl");
 
         write_records(
             &store_file_path,
@@ -632,7 +631,7 @@ mod tests {
         );
 
         let error = JsonlFileStore::new(&store_file_path).unwrap_err();
-        assert_eq!(error.to_string(), "duplicate id 0 in entries");
+        assert_eq!(error.to_string(), "duplicate id 0 in records");
     }
 
     #[test]
@@ -648,7 +647,7 @@ mod tests {
         perms.set_mode(0o444);
         std::fs::set_permissions(&lock_dir, perms).unwrap();
 
-        let store_in_readonly = lock_dir.join("entries.jsonl");
+        let store_in_readonly = lock_dir.join("data.jsonl");
         let err = JsonlFileStore::new(&store_in_readonly).unwrap_err();
 
         let mut perms = std::fs::metadata(&lock_dir).unwrap().permissions();
@@ -663,7 +662,7 @@ mod tests {
     #[test]
     fn new_with_unsorted_records_normalizes_iteration_order() {
         let dir = tempfile::tempdir().unwrap();
-        let store_file_path = dir.path().join("entries.jsonl");
+        let store_file_path = dir.path().join("data.jsonl");
 
         write_records(
             &store_file_path,
@@ -700,14 +699,14 @@ mod tests {
         );
 
         let store = JsonlFileStore::new(&store_file_path).unwrap();
-        let ids: Vec<_> = store.iter().map(|entry| entry.id().value()).collect();
+        let ids: Vec<_> = store.iter().map(|record| record.id().value()).collect();
         assert_eq!(ids, vec![3, 2, 0, 1]);
     }
 
     #[test]
     fn len_and_is_empty_reflect_store_state() {
         let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("entries.jsonl");
+        let file_path = dir.path().join("data.jsonl");
 
         let mut store = JsonlFileStore::new(&file_path).unwrap();
         assert_eq!(store.len(), 0);
