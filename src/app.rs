@@ -371,7 +371,7 @@ mod tests {
     use super::*;
     use crate::{
         config::ScheduleConfig,
-        domain::{SummaryKind, WorkContext},
+        domain::{AbsenceKind, AbsencePortion::HalfDay, SummaryKind, WorkContext},
         test_support::*,
     };
 
@@ -1032,8 +1032,9 @@ mod tests {
         assert_eq!(report.rows()[0].duration_minutes(), 10 * 60);
     }
 
+    // Validation tests
     #[test]
-    fn app_start_rejects_invalid_persisted_work_timeline() {
+    fn start_rejects_invalid_persisted_work_timeline() {
         let now = ts(9, 6, 0);
         let store = FakeStore::default().seed(vec![(
             1.into(),
@@ -1054,5 +1055,121 @@ mod tests {
             err.to_string(),
             "Day entries validation failed: Entry 1 - cannot log while idle"
         );
+    }
+
+    #[test]
+    fn insert_rejects_invalid_work_timeline_mutations() {
+        let now = ts(11, 5, 15);
+        let store = FakeStore::default().seed(vec![
+            make_record_entry(1, 11, 5, 10, WorkCommand::Start { context: WorkContext::Home }),
+            make_record_entry(2, 11, 5, 11, WorkCommand::BreakStart),
+        ]);
+
+        let mut app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let err = app.log_work("refactoring round  42".into(), None).unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "Day entries validation failed: Entry 3 - cannot log while breaking"
+        );
+        assert_eq!(app.v_store.iter().count(), 2);
+    }
+
+    #[test]
+    fn update_rejects_invalid_work_timeline_permutations() {
+        let now = ts(11, 8, 8);
+        let store = FakeStore::default().seed(vec![
+            make_record_entry(1, 11, 8, 5, WorkCommand::Start { context: WorkContext::Home }),
+            make_record_entry(2, 11, 8, 6, WorkCommand::BreakStart),
+        ]);
+
+        let mut app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let update = RecordInput::Work(WorkRecordInput::new(
+            ts(11, 8, 6),
+            WorkCommand::Start { context: WorkContext::Home },
+        ));
+
+        let err = app.update_record(2.into(), update).unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "Day entries validation failed: Entry 2 - cannot start home while already active (home)"
+        );
+
+        let expected = app.v_store.get(&2.into()).unwrap().as_work().unwrap().command();
+        assert!(matches!(expected, WorkCommand::BreakStart));
+    }
+
+    #[test]
+    fn delete_rejects_invalid_work_timeline_permutations() {
+        let now = ts(11, 8, 28);
+        let store = FakeStore::default().seed(vec![
+            make_record_entry(1, 11, 8, 25, WorkCommand::Start { context: WorkContext::Home }),
+            make_record_entry(2, 11, 8, 26, WorkCommand::BreakStart),
+        ]);
+
+        let mut app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let err = app.delete_record(1.into()).unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "Day entries validation failed: Entry 2 - cannot start break while idle"
+        );
+
+        let expected = app.v_store.get(&1.into()).unwrap().as_work().unwrap().command();
+        assert!(matches!(expected, WorkCommand::Start { context: WorkContext::Home }));
+    }
+
+    #[test]
+    fn update_rejects_record_type_changes() {
+        let now = ts(11, 8, 35);
+        let store = FakeStore::default().seed(vec![make_record_entry(
+            1,
+            11,
+            8,
+            25,
+            WorkCommand::Start { context: WorkContext::Home },
+        )]);
+
+        let mut app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let update = RecordInput::Absence(AbsenceRecordInput::new(
+            ts(11, 8, 25).date_naive(),
+            AbsenceKind::Vacation,
+            HalfDay,
+            Some("".into()),
+        ));
+        let err = app.update_record(1.into(), update).unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "record 1 is a work record and cannot be updated with absence input"
+        );
+
+        let expected = app.v_store.get(&1.into()).unwrap().as_work().unwrap().command();
+        assert!(matches!(expected, WorkCommand::Start { context: WorkContext::Home }));
     }
 }
