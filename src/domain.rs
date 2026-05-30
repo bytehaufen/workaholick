@@ -6,6 +6,7 @@ pub(crate) mod record_set;
 pub(crate) mod report;
 mod serde_datetime;
 mod summary;
+mod timeline_validation;
 mod work;
 
 pub(crate) use absence::{AbsenceKind, AbsencePortion, AbsenceRecord, AbsenceRecordInput};

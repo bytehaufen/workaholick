@@ -171,7 +171,8 @@ impl RecordWriter for JsonlFileStore {
     fn insert(&mut self, input: RecordInput) -> anyhow::Result<RecordId> {
         // TODO: Update later, when abstraction matches
         let id = self.records_by_id.next_id();
-        let outcome = self.records_by_id.apply_change(RecordChange::Insert { id, input })?;
+        let change = RecordChange::Insert { id, input };
+        let outcome = self.records_by_id.apply_change(&change)?;
 
         if let ChangeOutcome::Inserted { id } = outcome {
             self.persist()?;
@@ -185,7 +186,8 @@ impl RecordWriter for JsonlFileStore {
 
     fn delete(&mut self, id: &RecordId) -> anyhow::Result<Record> {
         // TODO: Update later, when abstraction matches
-        let outcome = self.records_by_id.apply_change(RecordChange::Delete { id: *id })?;
+        let change = RecordChange::Delete { id: *id };
+        let outcome = self.records_by_id.apply_change(&change)?;
 
         if let ChangeOutcome::Deleted { record } = outcome {
             self.persist()?;
@@ -199,7 +201,8 @@ impl RecordWriter for JsonlFileStore {
 
     fn update(&mut self, id: &RecordId, input: RecordInput) -> Result<()> {
         // TODO: Update later, when abstraction matches
-        let outcome = self.records_by_id.apply_change(RecordChange::Update { id: *id, input })?;
+        let change = RecordChange::Update { id: *id, input };
+        let outcome = self.records_by_id.apply_change(&change)?;
         if let ChangeOutcome::Updated { previous: _ } = outcome {
             self.persist()?;
 
