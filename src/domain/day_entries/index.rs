@@ -176,7 +176,7 @@ impl WorkRecordValidationIndex {
     }
 }
 
-pub(super) fn index_records_by_date(
+pub(crate) fn index_records_by_date(
     records: &[&WorkRecord],
 ) -> Result<BTreeMap<NaiveDate, DayRecordInfo>, DayRecordValidationError> {
     index_records_by_date_with_initial_state(records, DayState::Idle)

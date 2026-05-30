@@ -3,7 +3,7 @@ mod index;
 mod validation;
 
 pub(crate) use day_state::DayState;
-pub(crate) use index::WorkRecordValidationIndex;
+pub(crate) use index::{WorkRecordValidationIndex, index_records_by_date};
 pub(crate) use validation::{
     CommandLabel, DayRecordValidationError, DayRecordValidationIssue, TransitionReason,
     transition_day_state,

@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use crate::domain::{RecordId, WorkCommand, WorkContext, WorkRecord, day_entries::DayState};
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub(super) struct DayRecordInfo {
+pub(crate) struct DayRecordInfo {
     pub(super) ids: Vec<RecordId>,
     pub(super) end_state: DayState,
 }
