@@ -42,7 +42,7 @@ clippy:
 
 # Run all Rust tests
 test *ARGS:
-    cargo test --workspace --all-targets --all-features  {{ ARGS }} -- --nocapture
+    cargo test --workspace --all-targets --all-features {{ ARGS }} -- --nocapture --color always
 
 # Watch local checks
 watch:
