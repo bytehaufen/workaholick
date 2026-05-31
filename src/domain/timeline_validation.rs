@@ -1,4 +1,12 @@
-use crate::domain::{Record, WorkRecord, record_set::RecordSet};
+use std::collections::BTreeMap;
+
+use chrono::NaiveDate;
+
+use crate::domain::{
+    AbsencePortion::{FullDay, HalfDay},
+    AbsenceRecord, Record, WorkRecord,
+    record_set::RecordSet,
+};
 
 use super::day_entries;
 
@@ -11,8 +19,15 @@ pub(crate) fn validate_records(records: &RecordSet) -> anyhow::Result<()> {
                 if let Record::Work(work_record) = record { Some(work_record) } else { None }
             })
             .collect();
+    let absence_records: Vec<&AbsenceRecord> = records
+        .iter()
+        .filter_map(|record| {
+            if let Record::Absence(absence_record) = record { Some(absence_record) } else { None }
+        })
+        .collect();
 
     validate_work_records(&work_records)?;
+    validate_absence_records(&absence_records)?;
 
     Ok(())
 }
@@ -25,13 +40,46 @@ fn validate_work_records(work_records: &[&WorkRecord]) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn validate_absence_records(absence_records: &[&AbsenceRecord]) -> anyhow::Result<()> {
+    #[derive(Default)]
+    struct DayAbsences {
+        full: u32,
+        half: u32,
+    }
+
+    let absences_by_day: BTreeMap<NaiveDate, DayAbsences> =
+        absence_records.iter().fold(BTreeMap::new(), |mut by_day, absence_record| {
+            match absence_record.portion() {
+                FullDay => by_day.entry(*absence_record.date()).or_default().full += 1,
+                HalfDay => by_day.entry(*absence_record.date()).or_default().half += 1,
+            };
+
+            by_day
+        });
+
+    absences_by_day.iter().try_for_each(|(date, day_absences)| match day_absences {
+        DayAbsences { full, half } if *full > 0 && *half > 0 => {
+            anyhow::bail!("full-day absence cannot be combined with half-day absences for {date}")
+        }
+        DayAbsences { full, .. } if *full > 1 => {
+            anyhow::bail!("more than one full-day absence for {date}")
+        }
+        DayAbsences { half, .. } if *half > 2 => {
+            anyhow::bail!("more than two half-day absences for {date}")
+        }
+
+        _ => Ok(()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use super::super::*;
     use crate::{
         domain::{
             WorkCommand, WorkContext, record_set::RecordSet, timeline_validation::validate_records,
         },
-        test_support::work_record,
+        test_support::{absence_record, work_record},
     };
 
     #[test]
@@ -55,12 +103,65 @@ mod tests {
     fn rejects_invalid_work_records() {
         let rec1 = work_record(1, 30, 6, 46, WorkCommand::BreakStart);
         let records = RecordSet::try_from_records(vec![rec1]).unwrap();
-
         let err = validate_records(&records).unwrap_err();
 
         assert_eq!(
             err.to_string(),
             "Day entries validation failed: Entry 1 - cannot start break while idle"
         );
+    }
+
+    #[test]
+    fn rejects_full_day_with_half_absence() {
+        let rec1 = absence_record(1, 31, AbsenceKind::Vacation, AbsencePortion::FullDay);
+        let rec2 = absence_record(2, 31, AbsenceKind::Vacation, AbsencePortion::HalfDay);
+
+        let records = RecordSet::try_from_records(vec![rec1, rec2]).unwrap();
+        assert_eq!(records.len(), 2);
+
+        let err = validate_records(&records).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "full-day absence cannot be combined with half-day absences for 2026-01-31"
+        );
+    }
+
+    #[test]
+    fn rejects_multiple_full_absences() {
+        let rec1 = absence_record(1, 31, AbsenceKind::Holiday, AbsencePortion::FullDay);
+        let rec2 = absence_record(2, 31, AbsenceKind::Vacation, AbsencePortion::FullDay);
+
+        let records = RecordSet::try_from_records(vec![rec1, rec2]).unwrap();
+        assert_eq!(records.len(), 2);
+
+        let err = validate_records(&records).unwrap_err();
+        assert_eq!(err.to_string(), "more than one full-day absence for 2026-01-31");
+    }
+
+    #[test]
+    fn rejects_more_than_two_half_absences() {
+        let rec1 = absence_record(1, 31, AbsenceKind::Sick, AbsencePortion::HalfDay);
+        let rec2 = absence_record(2, 31, AbsenceKind::Sick, AbsencePortion::HalfDay);
+        let rec3 = absence_record(3, 31, AbsenceKind::Sick, AbsencePortion::HalfDay);
+
+        let records = RecordSet::try_from_records(vec![rec1, rec2, rec3]).unwrap();
+        assert_eq!(records.len(), 3);
+
+        let err = validate_records(&records).unwrap_err();
+        assert_eq!(err.to_string(), "more than two half-day absences for 2026-01-31");
+    }
+
+    #[test]
+    fn accepts_valid_absences() {
+        let rec1 = absence_record(1, 1, AbsenceKind::Vacation, AbsencePortion::FullDay);
+        let rec2 = absence_record(2, 2, AbsenceKind::Sick, AbsencePortion::HalfDay);
+        let rec3 = absence_record(3, 2, AbsenceKind::Sick, AbsencePortion::HalfDay);
+        let rec4 = absence_record(4, 3, AbsenceKind::Vacation, AbsencePortion::FullDay);
+        let rec5 = absence_record(5, 4, AbsenceKind::Vacation, AbsencePortion::HalfDay);
+
+        let records = RecordSet::try_from_records(vec![rec1, rec2, rec3, rec4, rec5]).unwrap();
+        assert_eq!(records.len(), 5);
+
+        validate_records(&records).unwrap();
     }
 }
