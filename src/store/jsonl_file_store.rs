@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
-use crate::domain::record_set::{ChangeOutcome, RecordChange, RecordSet};
-use crate::domain::{Record, RecordId, RecordInput};
+use crate::domain::{ChangeOutcome, Record, RecordChange, RecordId, RecordInput, RecordSet};
 
 use super::{RecordReader, RecordWriter};
 

@@ -1,99 +1,33 @@
-use chrono::NaiveDate;
-
-use crate::domain::{
-    AbsencePortion, AbsenceRecord, AbsenceRecordInput, Record, RecordId, RecordInput, WorkRecord,
-    WorkRecordValidationIndex,
-};
+use crate::domain::{Record, RecordChange, RecordId, RecordInput, RecordSet, validate_records};
 
 use super::{RecordReader, RecordWriter};
 
 #[derive(Debug)]
 pub struct ValidatedRecordStore<STORE> {
     store: STORE,
-    records: Vec<Record>,
-    work_index: WorkRecordValidationIndex,
 }
 
 impl<STORE: RecordReader + RecordWriter> ValidatedRecordStore<STORE> {
     pub fn new(store: STORE) -> anyhow::Result<Self> {
         let records: Vec<Record> = store.iter().cloned().collect();
+        let record_set = RecordSet::try_from_records(records)?;
+        validate_records(&record_set)?;
 
-        let work_records: Vec<_> = store.iter().filter_map(Record::as_work).collect();
-
-        let work_index = Self::build_work_index(&work_records)?;
-
-        Ok(Self { store, records, work_index })
+        Ok(Self { store })
     }
 
-    fn work_records(&self) -> Vec<&WorkRecord> {
-        self.store.iter().filter_map(Record::as_work).collect()
-    }
+    fn validate_change(&self, change: &RecordChange) -> anyhow::Result<()> {
+        let records: Vec<_> = self.store.iter().cloned().collect();
+        let mut candidate = RecordSet::try_from_records(records)?;
+        let _change_outcome = candidate.apply_change(change)?;
 
-    fn build_work_index(records: &[&WorkRecord]) -> anyhow::Result<WorkRecordValidationIndex> {
-        WorkRecordValidationIndex::try_new(records)
-    }
-
-    fn refresh_index(&mut self) -> anyhow::Result<()> {
-        self.work_index = Self::build_work_index(&self.work_records())?;
-        Ok(())
-    }
-
-    fn sort_records(&mut self) {
-        self.records.sort_by_key(Record::sort_key);
-    }
-
-    fn absences_on(&self, date: NaiveDate) -> impl Iterator<Item = &AbsenceRecord> {
-        self.records.iter().filter_map(move |record| match record {
-            Record::Absence(absence_record) if *absence_record.date() == date => {
-                Some(absence_record)
-            }
-            _ => None,
-        })
-    }
-
-    fn work_records_on(&self, date: NaiveDate) -> impl Iterator<Item = &WorkRecord> {
-        self.records.iter().filter_map(move |record| match record {
-            Record::Work(work_record) if work_record.date() == date => Some(work_record),
-            _ => None,
-        })
-    }
-
-    fn validate_insert_absence(&self, input: &AbsenceRecordInput) -> anyhow::Result<()> {
-        let (full_days, half_days) = self
-            .records
-            .iter()
-            .filter_map(|record| match record {
-                Record::Absence(absence_record) if input.date() == absence_record.date() => {
-                    Some(absence_record.portion())
-                }
-                _ => None,
-            })
-            .fold((0, 0), |(full_days, half_days), portion| match portion {
-                AbsencePortion::FullDay => (full_days + 1, half_days),
-                AbsencePortion::HalfDay => (full_days, half_days + 1),
-            });
-
-        let date = input.date();
-
-        match input.portion() {
-            AbsencePortion::FullDay if full_days > 0 || half_days > 0 => {
-                anyhow::bail!("absence already exists for {date}")
-            }
-            AbsencePortion::HalfDay if full_days > 0 => {
-                anyhow::bail!("full-day absence already exists for {date}")
-            }
-            AbsencePortion::HalfDay if half_days >= 2 => {
-                anyhow::bail!("two half-day absences already exist for {date}")
-            }
-
-            _ => Ok(()),
-        }
+        validate_records(&candidate)
     }
 }
 
 impl<STORE: RecordReader + RecordWriter> RecordReader for ValidatedRecordStore<STORE> {
     fn iter(&self) -> Box<dyn Iterator<Item = &Record> + '_> {
-        Box::new(self.records.iter())
+        self.store.iter()
     }
 
     fn get(&self, id: &RecordId) -> Option<&Record> {
@@ -101,11 +35,11 @@ impl<STORE: RecordReader + RecordWriter> RecordReader for ValidatedRecordStore<S
     }
 
     fn len(&self) -> usize {
-        self.records.len()
+        self.store.len()
     }
 
     fn is_empty(&self) -> bool {
-        self.records.is_empty()
+        self.store.is_empty()
     }
 }
 
@@ -115,81 +49,24 @@ impl<STORE: RecordReader + RecordWriter> RecordWriter for ValidatedRecordStore<S
     }
 
     fn insert(&mut self, input: RecordInput) -> anyhow::Result<RecordId> {
-        let fake_id = self.store.next_id();
-        match &input {
-            RecordInput::Work(work_record_input) => self.work_index.validate_insert_record(
-                &self.work_records(),
-                work_record_input,
-                fake_id,
-            )?,
-            RecordInput::Absence(absence_record_input) => {
-                self.validate_insert_absence(absence_record_input)?
-            }
-        }
+        let record_change = RecordChange::Insert { id: self.store.next_id(), input: input.clone() };
 
-        let id = self.store.insert(input)?;
-        let record = self
-            .store
-            .get(&id)
-            .ok_or_else(|| anyhow::anyhow!("record {id} missing after insert"))?
-            .clone();
-        self.records.push(record);
-        self.sort_records();
-        self.refresh_index()?;
-
-        Ok(id)
+        self.validate_change(&record_change)?;
+        self.store.insert(input)
     }
 
     fn delete(&mut self, id: &RecordId) -> anyhow::Result<Record> {
-        self.work_index.validate_remove_record(&self.work_records(), id)?;
-        // FIXME: Add absence validation
+        let record_change = RecordChange::Delete { id: *id };
 
-        let record = self.store.delete(id)?;
-        let idx = self
-            .records
-            .iter()
-            .position(|existing| existing.id() == id)
-            .ok_or_else(|| anyhow::anyhow!("record {id} missing in validation cache"))?;
-        self.records.remove(idx);
-        self.refresh_index()?;
-
-        Ok(record)
+        self.validate_change(&record_change)?;
+        self.store.delete(id)
     }
 
     fn update(&mut self, id: &RecordId, input: RecordInput) -> anyhow::Result<()> {
-        let existing = self
-            .records
-            .iter()
-            .find(|record| record.id() == id)
-            .ok_or_else(|| anyhow::anyhow!("record {id} missing in validation cache"))?;
+        let record_change = RecordChange::Update { id: *id, input: input.clone() };
 
-        match (existing, &input) {
-            (Record::Work(..), RecordInput::Work(work_input)) => {
-                self.work_index.validate_update_record(&self.work_records(), id, work_input)?
-            }
-            // FIXME: Implement
-            (Record::Absence(..), RecordInput::Absence(absence_input)) => todo!(),
-
-            // Changing record type is not allowed
-            (Record::Work(..), RecordInput::Absence(..)) => anyhow::bail!(
-                "record {id} is a work record and cannot be updated with absence input"
-            ),
-            (Record::Absence(..), RecordInput::Work(..)) => anyhow::bail!(
-                "record {id} is an absence record and cannot be updated with work input"
-            ),
-        }
-
-        self.store.update(id, input.clone())?;
-        let idx = self
-            .records
-            .iter()
-            .position(|existing| existing.id() == id)
-            .ok_or_else(|| anyhow::anyhow!("record {id} missing in validation cache"))?;
-        self.records[idx] = Record::from_input(*id, input);
-        self.sort_records();
-        self.refresh_index()?;
-
-        Ok(())
+        self.validate_change(&record_change)?;
+        self.store.update(id, input)
     }
 }
 
