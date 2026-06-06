@@ -1,4 +1,4 @@
-use crate::domain::{Record, RecordId, RecordInput};
+use crate::domain::{ChangeOutcome, Record, RecordChange, RecordId, RecordInput, RecordSet};
 
 use anyhow::Result;
 
@@ -19,3 +19,8 @@ pub trait RecordWriter {
 
 pub trait RecordStore: RecordReader + RecordWriter {}
 impl<T: RecordReader + RecordWriter> RecordStore for T {}
+
+pub trait RecordRepository {
+    fn records(&self) -> &RecordSet;
+    fn commit(&mut self, change: RecordChange) -> anyhow::Result<ChangeOutcome>;
+}

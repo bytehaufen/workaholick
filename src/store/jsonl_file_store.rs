@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 
 use crate::domain::{ChangeOutcome, Record, RecordChange, RecordId, RecordInput, RecordSet};
+use crate::store::RecordRepository;
 
 use super::{RecordReader, RecordWriter};
 
@@ -143,6 +144,18 @@ impl JsonlFileStore {
     }
 }
 
+impl RecordRepository for JsonlFileStore {
+    fn records(&self) -> &RecordSet {
+        &self.records_by_id
+    }
+
+    fn commit(&mut self, change: RecordChange) -> anyhow::Result<ChangeOutcome> {
+        let change_outcome = self.records_by_id.apply_change(&change)?;
+        self.persist()?;
+        Ok(change_outcome)
+    }
+}
+
 impl RecordReader for JsonlFileStore {
     // TODO: Re-think over return value after refactor
     fn iter(&self) -> Box<dyn Iterator<Item = &Record> + '_> {
@@ -216,9 +229,13 @@ impl RecordWriter for JsonlFileStore {
 #[cfg(test)]
 mod tests {
     use chrono::{Local, TimeZone, Timelike};
+    use core::slice;
     use std::path::Path;
 
-    use crate::domain::{RecordInput, WorkCommand, WorkContext, WorkRecord, WorkRecordInput};
+    use crate::{
+        domain::{RecordInput, WorkCommand, WorkContext, WorkRecord, WorkRecordInput},
+        test_support::{self, ts},
+    };
 
     use super::*;
 
@@ -237,6 +254,88 @@ mod tests {
             writeln!(file).unwrap();
         }
         file.flush().unwrap();
+    }
+
+    #[test]
+    fn commit_insert_persists_and_returns_inserted_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("data.jsonl");
+
+        {
+            let mut store = JsonlFileStore::new(&file_path).unwrap();
+            let input = work_input(ts(6, 6, 19), WorkCommand::Start { context: WorkContext::Home });
+
+            let outcome = store.commit(RecordChange::Insert { id: 0.into(), input }).unwrap();
+
+            assert!(matches!(outcome, ChangeOutcome::Inserted { id}  if id == 0.into()));
+        }
+
+        let store = JsonlFileStore::new(&file_path).unwrap();
+
+        assert_eq!(store.len(), 1);
+        assert!(store.get(&0.into()).is_some());
+    }
+
+    #[test]
+    fn commit_delete_persists_and_returns_deleted_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("data.jsonl");
+
+        {
+            let work_record = test_support::work_record(
+                0,
+                6,
+                6,
+                25,
+                WorkCommand::Start { context: WorkContext::Home },
+            );
+            write_records(&file_path, slice::from_ref(&work_record));
+
+            let mut store = JsonlFileStore::new(&file_path).unwrap();
+            assert!(store.get(&0.into()).is_some());
+
+            let outcome = store.commit(RecordChange::Delete { id: 0.into() }).unwrap();
+
+            assert!(matches!(outcome, ChangeOutcome::Deleted { record}  if record  == work_record));
+        }
+
+        let store = JsonlFileStore::new(&file_path).unwrap();
+
+        assert_eq!(store.len(), 0);
+        assert!(store.get(&0.into()).is_none());
+    }
+
+    #[test]
+    fn commit_updates_persists_and_returns_previous_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("data.jsonl");
+
+        let input = work_input(ts(6, 6, 50), WorkCommand::Start { context: WorkContext::Office });
+
+        {
+            let work_record = test_support::work_record(
+                0,
+                6,
+                6,
+                48,
+                WorkCommand::Start { context: WorkContext::Home },
+            );
+            write_records(&file_path, slice::from_ref(&work_record));
+
+            let mut store = JsonlFileStore::new(&file_path).unwrap();
+            assert!(store.get(&0.into()).is_some());
+            let outcome =
+                store.commit(RecordChange::Update { id: 0.into(), input: input.clone() }).unwrap();
+
+            assert!(
+                matches!(outcome, ChangeOutcome::Updated { previous}  if previous  == work_record)
+            );
+        }
+
+        let store = JsonlFileStore::new(&file_path).unwrap();
+
+        assert_eq!(store.len(), 1);
+        assert_eq!(store.get(&0.into()).unwrap(), &Record::from_input(0.into(), input));
     }
 
     #[test]
