@@ -94,19 +94,15 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
     }
 
     ///// Common
-    pub fn get_record(&self, id: RecordId) -> Option<&Record> {
-        self.store.records().get(&id)
-    }
-
     pub fn get_record_input(&self, id: RecordId) -> Option<RecordInput> {
         let record = self.store.records().get(&id);
 
         record.map(RecordInput::from_record)
     }
 
-    pub fn update_record(&mut self, id: RecordId, input: RecordInput) -> anyhow::Result<()> {
+    pub fn update_record(&mut self, id: RecordId, input: RecordInput) -> anyhow::Result<Record> {
         match self.apply_validated_change(RecordChange::Update { id, input })? {
-            ChangeOutcome::Updated { .. } => Ok(()),
+            ChangeOutcome::Updated { previous } => Ok(previous),
             _ => unreachable!("update change must return update outcome"),
         }
     }
@@ -222,7 +218,6 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
 }
 
 pub struct DayOverview {
-    pub date: NaiveDate,
     pub work_records: Vec<WorkRecord>,
     pub absence_records: Vec<AbsenceRecord>,
 }
@@ -244,7 +239,7 @@ impl DayOverview {
                 (work_records, absence_records)
             });
 
-        Self { date, work_records, absence_records }
+        Self { work_records, absence_records }
     }
     pub fn is_empty(&self) -> bool {
         self.work_records.is_empty() && self.absence_records.is_empty()

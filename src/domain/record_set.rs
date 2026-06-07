@@ -20,7 +20,7 @@ pub(crate) enum ChangeOutcome {
 pub(crate) struct RecordSet(IndexMap<RecordId, Record>);
 
 impl RecordSet {
-    pub(crate) fn try_from_records(records: Vec<Record>) -> anyhow::Result<Self> {
+    pub fn try_from_records(records: Vec<Record>) -> anyhow::Result<Self> {
         let len = records.len();
         let mut records_by_id = records.into_iter().try_fold(
             IndexMap::with_capacity(len),
@@ -39,7 +39,7 @@ impl RecordSet {
         Ok(Self(records_by_id))
     }
 
-    pub(crate) fn apply_change(&mut self, change: &RecordChange) -> anyhow::Result<ChangeOutcome> {
+    pub fn apply_change(&mut self, change: &RecordChange) -> anyhow::Result<ChangeOutcome> {
         match change {
             RecordChange::Insert { id, input } => {
                 anyhow::ensure!(!self.0.contains_key(id), "id {id} already exists");
@@ -75,16 +75,18 @@ impl RecordSet {
         }
     }
 
-    pub(crate) fn get(&self, id: &RecordId) -> Option<&Record> {
+    pub fn get(&self, id: &RecordId) -> Option<&Record> {
         self.0.get(id)
     }
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &Record> {
+    pub fn iter(&self) -> impl Iterator<Item = &Record> {
         self.0.values()
     }
-    pub(crate) fn len(&self) -> usize {
+    #[allow(unused)]
+    pub fn len(&self) -> usize {
         self.0.len()
     }
-    pub(crate) fn is_empty(&self) -> bool {
+    #[allow(unused)]
+    pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 

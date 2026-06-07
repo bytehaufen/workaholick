@@ -454,7 +454,6 @@ mod tests {
     fn plain_format_day_includes_header_and_row() {
         let date = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
         let entries = DayOverview {
-            date,
             work_records: vec![crate::domain::WorkRecord::new(
                 7.into(),
                 Local.with_ymd_and_hms(2026, 1, 5, 9, 30, 0).unwrap(),
@@ -481,7 +480,6 @@ Work records
     fn plain_format_day_handles_large_ids() {
         let date = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
         let entries = DayOverview {
-            date,
             work_records: vec![
                 crate::domain::WorkRecord::new(
                     7.into(),
@@ -516,7 +514,6 @@ Work records
     fn plain_format_day_renders_absence_section() {
         let date = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
         let entries = DayOverview {
-            date,
             work_records: vec![crate::domain::WorkRecord::new(
                 7.into(),
                 Local.with_ymd_and_hms(2026, 1, 5, 9, 30, 0).unwrap(),

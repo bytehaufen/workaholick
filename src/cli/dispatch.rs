@@ -9,7 +9,7 @@ use crate::store::RecordRepository;
 
 use anyhow::Result;
 
-pub fn run<S: RecordRepository>(
+pub(crate) fn run<S: RecordRepository>(
     app: &mut App<S>,
     cli: Cli,
     editor: &dyn Editor,
