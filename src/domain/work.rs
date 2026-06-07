@@ -102,6 +102,7 @@ impl WorkRecordInput {
         WorkRecordInput { timestamp, command }
     }
 
+    #[allow(unused)]
     pub fn timestamp(&self) -> DateTime<Local> {
         self.timestamp
     }

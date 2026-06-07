@@ -98,6 +98,7 @@ impl RecordInput {
         }
     }
 
+    #[allow(unused)]
     pub fn date(&self) -> NaiveDate {
         match self {
             RecordInput::Work(work_record_input) => work_record_input.date(),
@@ -109,6 +110,7 @@ impl RecordInput {
         Self::Work(WorkRecordInput::new(timestamp, command))
     }
 
+    #[allow(unused)]
     pub fn new_absence(
         date: NaiveDate,
         kind: AbsenceKind,

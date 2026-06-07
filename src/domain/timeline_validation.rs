@@ -74,6 +74,7 @@ fn validate_absence_records(absence_records: &[&AbsenceRecord]) -> anyhow::Resul
 
 #[cfg(test)]
 mod tests {
+
     use super::super::*;
     use crate::{
         domain::{
@@ -163,5 +164,37 @@ mod tests {
         assert_eq!(records.len(), 5);
 
         validate_records(&records).unwrap();
+    }
+
+    #[test]
+    fn start_when_previous_day_is_active() {
+        let records = vec![
+            work_record(10, 9, 0, 0, WorkCommand::Start { context: Default::default() }),
+            work_record(2, 11, 9, 0, WorkCommand::Start { context: Default::default() }),
+            work_record(3, 11, 9, 5, WorkCommand::End { title: "".into(), description: None }),
+        ];
+
+        let err = validate_records(&RecordSet::try_from_records(records).unwrap())
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            err.to_string(),
+            "Day entries validation failed: Entry 2 - cannot start home while already active (home)"
+        );
+    }
+
+    #[test]
+    fn allows_spanning_open_sessions_over_day_boundary() {
+        let records = vec![
+            work_record(0, 11, 5, 4, WorkCommand::Start { context: Default::default() }),
+            work_record(1, 14, 20, 39, WorkCommand::End { title: "".into(), description: None }),
+            work_record(2, 14, 21, 9, WorkCommand::Start { context: Default::default() }),
+            work_record(3, 14, 21, 9, WorkCommand::End { title: "".into(), description: None }),
+            work_record(4, 18, 6, 4, WorkCommand::Start { context: Default::default() }),
+        ];
+
+        let record_set = &RecordSet::try_from_records(records).unwrap();
+        assert_eq!(record_set.len(), 5);
+        validate_records(record_set).unwrap();
     }
 }

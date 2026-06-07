@@ -84,9 +84,10 @@ fn append_backtrace(err: &Error, rendered: &mut String) {
 mod tests {
     use super::*;
     use crate::domain::{
-        CommandLabel, RecordId, WorkCommand, WorkContext, WorkRecord, WorkRecordValidationIndex,
+        CommandLabel, Record, RecordId, RecordSet, WorkCommand, WorkContext, WorkRecord,
+        validate_records,
     };
-    use anyhow::anyhow;
+    use anyhow::{Context, anyhow};
     use chrono::{Local, TimeZone};
     use colored::control;
     use std::sync::{Mutex, OnceLock};
@@ -135,14 +136,16 @@ mod tests {
     fn render_error_reformats_validation_errors() {
         let text = with_color_override(true, || {
             let ts = Local.with_ymd_and_hms(2026, 1, 12, 10, 0, 0).unwrap();
-            let entry = WorkRecord::new(
+            let work_record = WorkRecord::new(
                 1.into(),
                 ts,
                 WorkCommand::Log { title: "status".into(), description: None },
             );
-            let entries = vec![&entry];
+            let records = vec![Record::Work(work_record)];
 
-            let err = WorkRecordValidationIndex::try_new(&entries).unwrap_err();
+            let record_set = RecordSet::try_from_records(records).unwrap();
+            let err = validate_records(&record_set).unwrap_err();
+
             render_error(&err)
         });
 
@@ -156,14 +159,17 @@ mod tests {
     fn render_error_finds_validation_errors_inside_context() {
         let rendered = with_color_override(false, || {
             let ts = Local.with_ymd_and_hms(2026, 1, 12, 10, 0, 0).unwrap();
-            let entry = WorkRecord::new(
+            let work_record = WorkRecord::new(
                 1.into(),
                 ts,
                 WorkCommand::Log { title: "status".into(), description: None },
             );
-            let entries = vec![&entry];
 
-            let err = WorkRecordValidationIndex::try_new(&entries).unwrap_err().context("outer");
+            let err = validate_records(
+                &RecordSet::try_from_records(vec![Record::Work(work_record)]).unwrap(),
+            )
+            .context("outer")
+            .unwrap_err();
 
             assert!(find_validation_error(&err).is_some());
             render_error(&err)

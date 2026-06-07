@@ -12,7 +12,6 @@ mod work;
 pub(crate) use absence::{AbsenceKind, AbsencePortion, AbsenceRecord, AbsenceRecordInput};
 pub(crate) use day_entries::{
     CommandLabel, DayRecordValidationError, DayRecordValidationIssue, TransitionReason,
-    WorkRecordValidationIndex,
 };
 pub(crate) use period::Period;
 pub(crate) use record::{Record, RecordId, RecordInput};
