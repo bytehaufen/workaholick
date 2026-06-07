@@ -20,7 +20,7 @@ pub trait RecordWriter {
 pub trait RecordStore: RecordReader + RecordWriter {}
 impl<T: RecordReader + RecordWriter> RecordStore for T {}
 
-pub trait RecordRepository {
+pub(crate) trait RecordRepository {
     fn records(&self) -> &RecordSet;
     fn commit(&mut self, change: RecordChange) -> anyhow::Result<ChangeOutcome>;
 }

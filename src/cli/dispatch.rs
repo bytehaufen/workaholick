@@ -5,11 +5,11 @@ use crate::App;
 use crate::cli::args::WorkSubcommand;
 use crate::config::OutputFormatter;
 use crate::editor::{Editor, ports::FileType};
-use crate::{RecordReader, RecordWriter};
+use crate::store::RecordRepository;
 
 use anyhow::Result;
 
-pub fn run<S: RecordReader + RecordWriter>(
+pub fn run<S: RecordRepository>(
     app: &mut App<S>,
     cli: Cli,
     editor: &dyn Editor,
@@ -18,7 +18,7 @@ pub fn run<S: RecordReader + RecordWriter>(
     run_inner(app, cli, editor, formatter)
 }
 
-fn run_inner<S: RecordReader + RecordWriter>(
+fn run_inner<S: RecordRepository>(
     app: &mut App<S>,
     cli: Cli,
     editor: &dyn Editor,
