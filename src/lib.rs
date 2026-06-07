@@ -6,13 +6,10 @@ mod domain;
 mod editor;
 mod store;
 
-pub use crate::app::App;
-pub use crate::app::DayOverview;
+pub(crate) use crate::app::App;
+pub(crate) use crate::app::DayOverview;
 pub use crate::bootstrap::run_app;
-pub use crate::store::JsonlFileStore;
-pub use crate::store::RecordReader;
-pub use crate::store::RecordStore;
-pub use crate::store::RecordWriter;
+pub(crate) use crate::store::JsonlFileStore;
 
 #[cfg(test)]
 /// Shared test helpers

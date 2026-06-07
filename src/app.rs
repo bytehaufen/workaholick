@@ -29,7 +29,7 @@ impl Clock for SystemClock {
 }
 
 #[derive(Debug)]
-pub struct App<S: RecordRepository, C: Clock = SystemClock> {
+pub(crate) struct App<S: RecordRepository, C: Clock = SystemClock> {
     config: Config,
     store: S,
     clock: C,

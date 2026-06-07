@@ -9,6 +9,7 @@ pub(crate) enum RecordChange {
     Delete { id: RecordId },
 }
 
+#[derive(Debug)]
 pub(crate) enum ChangeOutcome {
     Inserted { id: RecordId },
     Updated { previous: Record },

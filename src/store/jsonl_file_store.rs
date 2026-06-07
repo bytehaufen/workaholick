@@ -4,10 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
-use crate::domain::{ChangeOutcome, Record, RecordChange, RecordId, RecordInput, RecordSet};
+use crate::domain::{ChangeOutcome, Record, RecordChange, RecordSet};
 use crate::store::RecordRepository;
-
-use super::{RecordReader, RecordWriter};
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
 
@@ -156,76 +154,6 @@ impl RecordRepository for JsonlFileStore {
     }
 }
 
-impl RecordReader for JsonlFileStore {
-    // TODO: Re-think over return value after refactor
-    fn iter(&self) -> Box<dyn Iterator<Item = &Record> + '_> {
-        Box::new(self.records_by_id.iter())
-    }
-
-    fn get(&self, id: &RecordId) -> Option<&Record> {
-        self.records_by_id.get(id)
-    }
-
-    fn len(&self) -> usize {
-        self.records_by_id.len()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.records_by_id.is_empty()
-    }
-}
-
-impl RecordWriter for JsonlFileStore {
-    fn next_id(&self) -> RecordId {
-        self.records_by_id.next_id()
-    }
-
-    fn insert(&mut self, input: RecordInput) -> anyhow::Result<RecordId> {
-        // TODO: Update later, when abstraction matches
-        let id = self.records_by_id.next_id();
-        let change = RecordChange::Insert { id, input };
-        let outcome = self.records_by_id.apply_change(&change)?;
-
-        if let ChangeOutcome::Inserted { id } = outcome {
-            self.persist()?;
-
-            return Ok(id);
-        }
-
-        // TODO: Should not be present after refactor
-        anyhow::bail!("already catched")
-    }
-
-    fn delete(&mut self, id: &RecordId) -> anyhow::Result<Record> {
-        // TODO: Update later, when abstraction matches
-        let change = RecordChange::Delete { id: *id };
-        let outcome = self.records_by_id.apply_change(&change)?;
-
-        if let ChangeOutcome::Deleted { record } = outcome {
-            self.persist()?;
-
-            return Ok(record);
-        }
-
-        // TODO: Should not be present after refactor
-        anyhow::bail!("already catched")
-    }
-
-    fn update(&mut self, id: &RecordId, input: RecordInput) -> Result<()> {
-        // TODO: Update later, when abstraction matches
-        let change = RecordChange::Update { id: *id, input };
-        let outcome = self.records_by_id.apply_change(&change)?;
-        if let ChangeOutcome::Updated { previous: _ } = outcome {
-            self.persist()?;
-
-            return Ok(());
-        }
-
-        // TODO: Should not be present after refactor
-        anyhow::bail!("already catched")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use chrono::{Local, TimeZone, Timelike};
@@ -233,7 +161,7 @@ mod tests {
     use std::path::Path;
 
     use crate::{
-        domain::{RecordInput, WorkCommand, WorkContext, WorkRecord, WorkRecordInput},
+        domain::{RecordId, RecordInput, WorkCommand, WorkContext, WorkRecord, WorkRecordInput},
         test_support::{self, ts},
     };
 
@@ -256,6 +184,12 @@ mod tests {
         file.flush().unwrap();
     }
 
+    impl JsonlFileStore {
+        fn next_id(&self) -> RecordId {
+            self.records().next_id()
+        }
+    }
+
     #[test]
     fn commit_insert_persists_and_returns_inserted_id() {
         let dir = tempfile::tempdir().unwrap();
@@ -272,8 +206,8 @@ mod tests {
 
         let store = JsonlFileStore::new(&file_path).unwrap();
 
-        assert_eq!(store.len(), 1);
-        assert!(store.get(&0.into()).is_some());
+        assert_eq!(store.records().len(), 1);
+        assert!(store.records().get(&0.into()).is_some());
     }
 
     #[test]
@@ -292,7 +226,7 @@ mod tests {
             write_records(&file_path, slice::from_ref(&work_record));
 
             let mut store = JsonlFileStore::new(&file_path).unwrap();
-            assert!(store.get(&0.into()).is_some());
+            assert!(store.records().get(&0.into()).is_some());
 
             let outcome = store.commit(RecordChange::Delete { id: 0.into() }).unwrap();
 
@@ -301,8 +235,8 @@ mod tests {
 
         let store = JsonlFileStore::new(&file_path).unwrap();
 
-        assert_eq!(store.len(), 0);
-        assert!(store.get(&0.into()).is_none());
+        assert_eq!(store.records().len(), 0);
+        assert!(store.records().get(&0.into()).is_none());
     }
 
     #[test]
@@ -323,7 +257,7 @@ mod tests {
             write_records(&file_path, slice::from_ref(&work_record));
 
             let mut store = JsonlFileStore::new(&file_path).unwrap();
-            assert!(store.get(&0.into()).is_some());
+            assert!(store.records().get(&0.into()).is_some());
             let outcome =
                 store.commit(RecordChange::Update { id: 0.into(), input: input.clone() }).unwrap();
 
@@ -334,8 +268,8 @@ mod tests {
 
         let store = JsonlFileStore::new(&file_path).unwrap();
 
-        assert_eq!(store.len(), 1);
-        assert_eq!(store.get(&0.into()).unwrap(), &Record::from_input(0.into(), input));
+        assert_eq!(store.records().len(), 1);
+        assert_eq!(store.records().get(&0.into()).unwrap(), &Record::from_input(0.into(), input));
     }
 
     #[test]
@@ -346,19 +280,25 @@ mod tests {
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
             store
-                .insert(work_input(
-                    Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap(),
-                    WorkCommand::Start { context: WorkContext::Office },
-                ))
+                .commit(RecordChange::Insert {
+                    id: store.next_id(),
+                    input: work_input(
+                        Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap(),
+                        WorkCommand::Start { context: WorkContext::Office },
+                    ),
+                })
                 .unwrap();
             store
-                .insert(work_input(
-                    Local.with_ymd_and_hms(2026, 2, 3, 4, 5, 6).unwrap(),
-                    WorkCommand::End {
-                        title: "The main thing".into(),
-                        description: Some("did some stuff".into()),
-                    },
-                ))
+                .commit(RecordChange::Insert {
+                    id: store.next_id(),
+                    input: work_input(
+                        Local.with_ymd_and_hms(2026, 2, 3, 4, 5, 6).unwrap(),
+                        WorkCommand::End {
+                            title: "The main thing".into(),
+                            description: Some("did some stuff".into()),
+                        },
+                    ),
+                })
                 .unwrap();
         }
 
@@ -374,27 +314,49 @@ mod tests {
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
             store
-                .insert(work_input(
-                    Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap(),
-                    WorkCommand::Log { title: "the a thing".into(), description: Some("a".into()) },
-                ))
+                .commit(RecordChange::Insert {
+                    id: store.next_id(),
+                    input: work_input(
+                        Local.with_ymd_and_hms(2025, 1, 2, 3, 4, 5).unwrap(),
+                        WorkCommand::Log {
+                            title: "the a thing".into(),
+                            description: Some("a".into()),
+                        },
+                    ),
+                })
                 .unwrap();
             store
-                .insert(work_input(
-                    Local.with_ymd_and_hms(2026, 2, 3, 4, 5, 6).unwrap(),
-                    WorkCommand::Log { title: "the b thing".into(), description: Some("b".into()) },
-                ))
+                .commit(RecordChange::Insert {
+                    id: store.next_id(),
+                    input: work_input(
+                        Local.with_ymd_and_hms(2026, 2, 3, 4, 5, 6).unwrap(),
+                        WorkCommand::Log {
+                            title: "the b thing".into(),
+                            description: Some("b".into()),
+                        },
+                    ),
+                })
                 .unwrap();
             store
-                .insert(work_input(
-                    Local.with_ymd_and_hms(2027, 3, 4, 5, 6, 7).unwrap(),
-                    WorkCommand::Log { title: "the c thing".into(), description: Some("c".into()) },
-                ))
+                .commit(RecordChange::Insert {
+                    id: store.next_id(),
+                    input: work_input(
+                        Local.with_ymd_and_hms(2027, 3, 4, 5, 6, 7).unwrap(),
+                        WorkCommand::Log {
+                            title: "the c thing".into(),
+                            description: Some("c".into()),
+                        },
+                    ),
+                })
                 .unwrap();
 
-            let deleted = store.delete(&RecordId::from(1)).unwrap();
+            let work_record = match store.commit(RecordChange::Delete { id: 1.into() }).unwrap() {
+                ChangeOutcome::Deleted { record: Record::Work(work_record) } => work_record,
+                _ => panic!("expected work record"),
+            };
+
             assert_eq!(
-                *work_record(&deleted).command(),
+                *work_record.command(),
                 WorkCommand::Log { title: "the b thing".into(), description: Some("b".into()) }
             );
         }
@@ -411,44 +373,53 @@ mod tests {
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
             store
-                .insert(work_input(
-                    Local.with_ymd_and_hms(2025, 12, 24, 17, 0, 0).unwrap(),
-                    WorkCommand::Start { context: WorkContext::Home },
-                ))
+                .commit(RecordChange::Insert {
+                    id: store.next_id(),
+                    input: work_input(
+                        Local.with_ymd_and_hms(2025, 12, 24, 17, 0, 0).unwrap(),
+                        WorkCommand::Start { context: WorkContext::Home },
+                    ),
+                })
                 .unwrap();
             store
-                .insert(work_input(
-                    Local.with_ymd_and_hms(2025, 12, 24, 14, 0, 0).unwrap(),
-                    WorkCommand::Log {
-                        title: "So hungry".into(),
-                        description: Some("eating potato salad".into()),
-                    },
-                ))
+                .commit(RecordChange::Insert {
+                    id: store.next_id(),
+                    input: work_input(
+                        Local.with_ymd_and_hms(2025, 12, 24, 14, 0, 0).unwrap(),
+                        WorkCommand::Log {
+                            title: "So hungry".into(),
+                            description: Some("eating potato salad".into()),
+                        },
+                    ),
+                })
                 .unwrap();
             store
-                .insert(work_input(
-                    Local.with_ymd_and_hms(2025, 12, 24, 20, 0, 0).unwrap(),
-                    WorkCommand::End {
-                        title: "So excited".into(),
-                        description: Some("unwrapping presents".into()),
-                    },
-                ))
+                .commit(RecordChange::Insert {
+                    id: store.next_id(),
+                    input: work_input(
+                        Local.with_ymd_and_hms(2025, 12, 24, 20, 0, 0).unwrap(),
+                        WorkCommand::End {
+                            title: "So excited".into(),
+                            description: Some("unwrapping presents".into()),
+                        },
+                    ),
+                })
                 .unwrap();
         }
 
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
             store
-                .update(
-                    &RecordId::from(1),
-                    work_input(
+                .commit(RecordChange::Update {
+                    id: 1.into(),
+                    input: work_input(
                         Local.with_ymd_and_hms(2025, 12, 24, 18, 0, 0).unwrap(),
                         WorkCommand::End {
                             title: "So excited".into(),
                             description: Some("un-wrapping presents".into()),
                         },
                     ),
-                )
+                })
                 .unwrap();
         }
 
@@ -464,24 +435,27 @@ mod tests {
         let mut store = JsonlFileStore::new(&file_path).unwrap();
 
         store
-            .insert(work_input(
-                Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
-                WorkCommand::Log { title: "the a thing".into(), description: Some("a".into()) },
-            ))
+            .commit(RecordChange::Insert {
+                id: store.next_id(),
+                input: work_input(
+                    Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
+                    WorkCommand::Log { title: "the a thing".into(), description: Some("a".into()) },
+                ),
+            })
             .unwrap();
 
         let update_err = store
-            .update(
-                &999.into(),
-                work_input(
+            .commit(RecordChange::Update {
+                id: 999.into(),
+                input: work_input(
                     Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
                     WorkCommand::Log { title: "the b thing".into(), description: Some("b".into()) },
                 ),
-            )
+            })
             .unwrap_err();
         assert_eq!(update_err.to_string(), "id 999 does not exist");
 
-        let delete_err = store.delete(&RecordId::from(123)).unwrap_err();
+        let delete_err = store.commit(RecordChange::Delete { id: 123.into() }).unwrap_err();
         assert_eq!(delete_err.to_string(), "id 123 does not exist");
     }
 
@@ -493,25 +467,34 @@ mod tests {
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
             store
-                .insert(work_input(
-                    Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
-                    WorkCommand::Log { title: "a".into(), description: None },
-                ))
+                .commit(RecordChange::Insert {
+                    id: store.next_id(),
+                    input: work_input(
+                        Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
+                        WorkCommand::Log { title: "a".into(), description: None },
+                    ),
+                })
                 .unwrap();
             store
-                .insert(work_input(
-                    Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
-                    WorkCommand::Log { title: "b".into(), description: None },
-                ))
+                .commit(RecordChange::Insert {
+                    id: store.next_id(),
+                    input: work_input(
+                        Local.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap(),
+                        WorkCommand::Log { title: "b".into(), description: None },
+                    ),
+                })
                 .unwrap();
         }
 
         let mut store = JsonlFileStore::new(&file_path).unwrap();
         store
-            .insert(work_input(
-                Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
-                WorkCommand::Log { title: "c".into(), description: None },
-            ))
+            .commit(RecordChange::Insert {
+                id: store.next_id(),
+                input: work_input(
+                    Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
+                    WorkCommand::Log { title: "c".into(), description: None },
+                ),
+            })
             .unwrap();
 
         assert_eq!(store.records_by_id.len(), 3);
@@ -541,7 +524,7 @@ mod tests {
         write_records(&file_path, &records);
 
         let store = JsonlFileStore::new(&file_path).unwrap();
-        let ids: Vec<_> = store.iter().map(|record| record.id().value()).collect();
+        let ids: Vec<_> = store.records().iter().map(|record| record.id().value()).collect();
         assert_eq!(ids, vec![2, 1]);
     }
 
@@ -551,19 +534,25 @@ mod tests {
         let file_path = dir.path().join("data.jsonl");
         let mut store = JsonlFileStore::new(&file_path).unwrap();
 
-        let id = store
-            .insert(work_input(
-                Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
-                WorkCommand::Log { title: "a".into(), description: Some("b".into()) },
-            ))
-            .unwrap();
+        let ChangeOutcome::Inserted { id } = store
+            .commit(RecordChange::Insert {
+                id: store.next_id(),
+                input: work_input(
+                    Local.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
+                    WorkCommand::Log { title: "a".into(), description: Some("b".into()) },
+                ),
+            })
+            .unwrap()
+        else {
+            panic!("expected insert change outcome");
+        };
 
-        let record = store.get(&id).expect("record should be present");
+        let record = store.records().get(&id).expect("record should be present");
         assert_eq!(
             *work_record(record).command(),
             WorkCommand::Log { title: "a".into(), description: Some("b".into()) }
         );
-        assert!(store.get(&999.into()).is_none());
+        assert!(store.records().get(&999.into()).is_none());
     }
 
     #[test]
@@ -604,10 +593,13 @@ mod tests {
         std::fs::create_dir(&file_path).unwrap();
 
         let err = store
-            .insert(work_input(
-                Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
-                WorkCommand::Log { title: "boom".into(), description: None },
-            ))
+            .commit(RecordChange::Insert {
+                id: store.next_id(),
+                input: work_input(
+                    Local.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
+                    WorkCommand::Log { title: "boom".into(), description: None },
+                ),
+            })
             .unwrap_err()
             .to_string();
 
@@ -778,7 +770,7 @@ mod tests {
         );
 
         let store = JsonlFileStore::new(&store_file_path).unwrap();
-        let ids: Vec<_> = store.iter().map(|record| record.id().value()).collect();
+        let ids: Vec<_> = store.records().iter().map(|record| record.id().value()).collect();
         assert_eq!(ids, vec![3, 2, 0, 1]);
     }
 
@@ -788,20 +780,27 @@ mod tests {
         let file_path = dir.path().join("data.jsonl");
 
         let mut store = JsonlFileStore::new(&file_path).unwrap();
-        assert_eq!(store.len(), 0);
-        assert!(store.is_empty());
+        assert_eq!(store.records().len(), 0);
+        assert!(store.records().is_empty());
 
-        let id = store
-            .insert(work_input(
-                Local.with_ymd_and_hms(2026, 3, 15, 5, 15, 0).unwrap(),
-                Default::default(),
-            ))
+        let change_outcome = store
+            .commit(RecordChange::Insert {
+                id: store.next_id(),
+                input: work_input(
+                    Local.with_ymd_and_hms(2026, 3, 15, 5, 15, 0).unwrap(),
+                    Default::default(),
+                ),
+            })
             .unwrap();
-        assert_eq!(store.len(), 1);
-        assert!(!store.is_empty());
+        assert_eq!(store.records().len(), 1);
+        assert!(!store.records().is_empty());
 
-        store.delete(&id).unwrap();
-        assert_eq!(store.len(), 0);
-        assert!(store.is_empty());
+        let ChangeOutcome::Inserted { id } = change_outcome else {
+            panic!("expected inserted outcome")
+        };
+
+        store.commit(RecordChange::Delete { id }).unwrap();
+        assert_eq!(store.records().len(), 0);
+        assert!(store.records().is_empty());
     }
 }
