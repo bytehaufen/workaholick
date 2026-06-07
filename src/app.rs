@@ -1164,10 +1164,7 @@ mod tests {
         ));
         let err = app.update_record(1.into(), update).unwrap_err();
 
-        assert_eq!(
-            err.to_string(),
-            "record 1 is a work record and cannot be updated with absence input"
-        );
+        assert_eq!(err.to_string(), "record 1 cannot be updated with a different record type");
 
         let expected = app.v_store.get(&1.into()).unwrap().as_work().unwrap().command();
         assert!(matches!(expected, WorkCommand::Start { context: WorkContext::Home }));
