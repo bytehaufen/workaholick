@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use chrono::NaiveDate;
 
 use crate::domain::{
-    AbsencePortion::{FullDay, HalfDay},
+    AbsencePortion::{self, FullDay, HalfDay},
     AbsenceRecord, Record, WorkRecord,
     record_set::RecordSet,
 };
@@ -28,6 +28,7 @@ pub(crate) fn validate_records(records: &RecordSet) -> anyhow::Result<()> {
 
     validate_work_records(&work_records)?;
     validate_absence_records(&absence_records)?;
+    validate_cross_rules(records)?;
 
     Ok(())
 }
@@ -72,9 +73,57 @@ fn validate_absence_records(absence_records: &[&AbsenceRecord]) -> anyhow::Resul
     })
 }
 
+fn validate_cross_rules(records: &RecordSet) -> anyhow::Result<()> {
+    #[derive(Default)]
+    struct DayView {
+        has_work: bool,
+        full_day_absence_count: usize,
+        half_day_absence_count: usize,
+    }
+
+    impl DayView {
+        fn add_work(&mut self) {
+            self.has_work = true
+        }
+        fn add_absence(&mut self, portion: &AbsencePortion) {
+            match portion {
+                FullDay => self.full_day_absence_count += 1,
+                HalfDay => self.half_day_absence_count += 1,
+            }
+        }
+    }
+
+    let days: BTreeMap<NaiveDate, DayView> =
+        records.iter().fold(BTreeMap::new(), |mut days, record| {
+            match record {
+                Record::Work(work_record) => days.entry(work_record.date()).or_default().add_work(),
+                Record::Absence(absence_record) => days
+                    .entry(*absence_record.date())
+                    .or_default()
+                    .add_absence(absence_record.portion()),
+            }
+            days
+        });
+
+    days.iter().try_for_each(|(date, day_view)| match day_view {
+        DayView { has_work, full_day_absence_count, .. }
+            if *has_work && *full_day_absence_count > 0 =>
+        {
+            anyhow::bail!("full-day absence cannot coexist with work records for {date}")
+        }
+        DayView { has_work, half_day_absence_count, .. }
+            if *has_work && *half_day_absence_count > 1 =>
+        {
+            anyhow::bail!("two half-day absences cannot coexist with work records for {date}")
+        }
+        _ => Ok(()),
+    })?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-
     use super::super::*;
     use crate::{
         domain::{
@@ -196,5 +245,68 @@ mod tests {
         let record_set = &RecordSet::try_from_records(records).unwrap();
         assert_eq!(record_set.len(), 5);
         validate_records(record_set).unwrap();
+    }
+
+    #[test]
+    fn accepts_half_day_absence_with_work_on_same_day() {
+        let records = vec![
+            work_record(0, 13, 5, 13, WorkCommand::Start { context: Default::default() }),
+            work_record(
+                1,
+                13,
+                5,
+                14,
+                WorkCommand::End { title: "".to_string(), description: None },
+            ),
+            absence_record(2, 13, AbsenceKind::Sick, AbsencePortion::HalfDay),
+        ];
+
+        let record_set = &RecordSet::try_from_records(records).expect("should construct recordset");
+        validate_records(record_set).expect("should validate cross rules")
+    }
+
+    #[test]
+    fn rejects_full_day_absence_with_work_on_same_day() {
+        let records = vec![
+            work_record(0, 13, 5, 45, WorkCommand::Start { context: Default::default() }),
+            work_record(
+                1,
+                13,
+                5,
+                46,
+                WorkCommand::End { title: "".to_string(), description: None },
+            ),
+            absence_record(3, 13, AbsenceKind::Holiday, AbsencePortion::FullDay),
+        ];
+
+        let record_set = &RecordSet::try_from_records(records).expect("should construct recordset");
+        let err = validate_records(record_set).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "full-day absence cannot coexist with work records for 2026-01-13"
+        )
+    }
+
+    #[test]
+    fn rejects_two_half_day_absence_with_work_on_same_day() {
+        let records = vec![
+            work_record(0, 13, 5, 45, WorkCommand::Start { context: Default::default() }),
+            work_record(
+                1,
+                13,
+                5,
+                46,
+                WorkCommand::End { title: "".to_string(), description: None },
+            ),
+            absence_record(3, 13, AbsenceKind::Holiday, AbsencePortion::HalfDay),
+            absence_record(4, 13, AbsenceKind::Holiday, AbsencePortion::HalfDay),
+        ];
+
+        let record_set = &RecordSet::try_from_records(records).expect("should construct recordset");
+        let err = validate_records(record_set).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "two half-day absences cannot coexist with work records for 2026-01-13"
+        )
     }
 }
