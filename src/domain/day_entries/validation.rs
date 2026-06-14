@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter};
 
-use crate::domain::{RecordId, WorkCommand, WorkContext, WorkRecord, day_entries::DayState};
+use crate::domain::{RecordId, WorkCommand, WorkContext, WorkRecord, work_transition::DayState};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct DayRecordInfo {

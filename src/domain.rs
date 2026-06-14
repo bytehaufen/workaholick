@@ -8,6 +8,7 @@ mod serde_datetime;
 mod summary;
 mod timeline_validation;
 mod work;
+mod work_transition;
 
 pub(crate) use absence::{AbsenceKind, AbsencePortion, AbsenceRecord, AbsenceRecordInput};
 pub(crate) use day_entries::{

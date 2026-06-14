@@ -1,9 +1,7 @@
-mod day_state;
 mod index;
 mod validation;
 
-pub(crate) use day_state::DayState;
-pub(crate) use index::index_records_by_date;
+pub(crate) use index::validate_work_timeline;
 pub(crate) use validation::{
     CommandLabel, DayRecordValidationError, DayRecordValidationIssue, TransitionReason,
     transition_day_state,
@@ -14,7 +12,7 @@ mod tests {
     use super::super::{WorkCommand, WorkContext, WorkRecord};
     use super::*;
     use crate::test_support::*;
-    use index::index_records_by_date;
+    use index::validate_work_timeline;
     use validation::{DayRecordInfo, validate_day_records};
 
     use chrono::{Local, TimeZone};
@@ -71,7 +69,7 @@ mod tests {
         #[test]
         fn returns_empty_map_for_empty_input() {
             let input: Vec<&WorkRecord> = Vec::new();
-            let by_date = index_records_by_date(&input).unwrap();
+            let by_date = validate_work_timeline(&input).unwrap();
             assert!(by_date.is_empty());
         }
 
@@ -104,7 +102,7 @@ mod tests {
             );
 
             let entries: Vec<&WorkRecord> = vec![&entry1, &entry2, &entry3, &entry4, &entry5];
-            let by_date = index_records_by_date(&entries).unwrap();
+            let by_date = validate_work_timeline(&entries).unwrap();
 
             assert_eq!(by_date.len(), 2);
             assert!(by_date.contains_key(&entry1.timestamp().date_naive()));
@@ -137,6 +135,8 @@ mod tests {
     }
 
     mod validate_day_entries_tests {
+        use crate::domain::work_transition::DayState;
+
         use super::*;
 
         #[test]

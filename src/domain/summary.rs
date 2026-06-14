@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Local, NaiveDate, TimeDelta};
 
 use crate::domain::{
-    DayRecordValidationError, Period, Record, WorkContext,
-    day_entries::{DayState, transition_day_state},
+    DayRecordValidationError, Period, Record, WorkContext, day_entries::transition_day_state,
+    work_transition::DayState,
 };
 
 #[derive(Debug, Clone, PartialEq)]

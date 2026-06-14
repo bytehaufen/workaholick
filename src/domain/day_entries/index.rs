@@ -2,20 +2,15 @@ use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
 
-use crate::domain::{WorkRecord, day_entries::DayState};
+use crate::domain::{WorkRecord, work_transition::DayState};
 
 use super::validation::{DayRecordInfo, DayRecordValidationError};
 
-pub(crate) fn index_records_by_date(
+pub(crate) fn validate_work_timeline(
     records: &[&WorkRecord],
 ) -> Result<BTreeMap<NaiveDate, DayRecordInfo>, DayRecordValidationError> {
-    index_records_by_date_with_initial_state(records, DayState::Idle)
-}
+    let initial_state = DayState::Idle;
 
-fn index_records_by_date_with_initial_state(
-    records: &[&WorkRecord],
-    initial_state: DayState,
-) -> Result<BTreeMap<NaiveDate, DayRecordInfo>, DayRecordValidationError> {
     let mut records_by_date: BTreeMap<NaiveDate, Vec<&WorkRecord>> =
         records.iter().fold(BTreeMap::new(), |mut acc, record| {
             acc.entry(record.date()).or_default().push(record);
