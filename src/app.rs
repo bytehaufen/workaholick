@@ -152,7 +152,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
 
     fn apply_validated_change(&mut self, change: RecordChange) -> anyhow::Result<ChangeOutcome> {
         let mut candidate = self.store.records().clone();
-        candidate.apply_change(&change)?;
+        let _ = candidate.apply_change(&change)?;
         validate_records(&candidate)?;
 
         self.store.commit(change)
@@ -455,7 +455,7 @@ mod tests {
         let store = FakeStore::default();
         let mut app = App::new_with_clock(Config::default(), store, clock).unwrap();
 
-        app.start_work(WorkContext::Office).unwrap();
+        let _ = app.start_work(WorkContext::Office).unwrap();
 
         let day_overview = app.day(fixed_now.date_naive());
         assert_eq!(day_overview.work_records.len(), 1);

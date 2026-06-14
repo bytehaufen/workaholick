@@ -227,7 +227,7 @@ impl OpenItem {
         window: SummaryWindow,
     ) {
         if let Some((start, end)) = clipped_range(segment_start, segment_end, window) {
-            self.clipped_start.get_or_insert(start);
+            let _ = self.clipped_start.get_or_insert(start);
             self.duration_minutes += (end - start).num_minutes().max(0);
         }
     }

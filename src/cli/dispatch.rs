@@ -58,7 +58,7 @@ fn run_inner<S: RecordRepository>(
             let initial = render_for_edit(&record)?;
             let edited = editor.edit(&initial, FileType::Ron)?;
             let patch = parse_edited(&edited)?;
-            app.update_record(id, patch)?;
+            let _ = app.update_record(id, patch)?;
             println!("✅ Record updated:\n{record:#?}");
 
             Ok(())

@@ -302,7 +302,7 @@ mod tests {
     impl Editor for CapturingEditor {
         fn edit(&self, initial: &str, file_type: FileType) -> Result<String> {
             assert!(matches!(file_type, FileType::Toml));
-            self.seen.replace(Some(initial.to_string()));
+            let _ = self.seen.replace(Some(initial.to_string()));
             Ok(initial.to_string())
         }
     }
@@ -312,7 +312,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("custom-config.toml");
 
-        super::init_at(&path).unwrap();
+        let _ = super::init_at(&path).unwrap();
         let loaded = super::load_from(&path).unwrap();
         let shown = super::show_from(&path).unwrap();
 

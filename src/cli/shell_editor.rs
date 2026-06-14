@@ -65,7 +65,7 @@ mod tests {
     }
     impl FakeEnv {
         fn with(mut self, key: &str, value: Option<&str>) -> Self {
-            self.vars.insert(key.to_string(), value.map(str::to_string));
+            let _ = self.vars.insert(key.to_string(), value.map(str::to_string));
             self
         }
     }
@@ -81,7 +81,7 @@ mod tests {
     }
     impl Fs for FakeFs {
         fn write_string(&self, path: &Path, content: &str) -> Result<()> {
-            self.files.borrow_mut().insert(path.to_path_buf(), content.to_string());
+            let _ = self.files.borrow_mut().insert(path.to_path_buf(), content.to_string());
             Ok(())
         }
 

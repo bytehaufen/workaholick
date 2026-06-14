@@ -32,7 +32,7 @@ fn index_records_by_date_with_initial_state(
             let day_record = DayRecordInfo::try_new(records, &last_state)?;
 
             let next_state = day_record.end_state;
-            day_records.insert(*date, day_record);
+            let _ = day_records.insert(*date, day_record);
 
             Ok((day_records, next_state))
         },

@@ -38,9 +38,9 @@ pub fn run_app() -> Result<()> {
             }
             ConfigCommand::Init => {
                 if let Some(path) = config_override {
-                    config::init_at(path)?;
+                    let _ = config::init_at(path)?;
                 } else {
-                    config::init()?;
+                    let _ = config::init()?;
                 }
                 return Ok(());
             }

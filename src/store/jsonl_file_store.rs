@@ -279,7 +279,7 @@ mod tests {
 
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
-            store
+            let _ = store
                 .commit(RecordChange::Insert {
                     id: store.next_id(),
                     input: work_input(
@@ -288,7 +288,7 @@ mod tests {
                     ),
                 })
                 .unwrap();
-            store
+            let _ = store
                 .commit(RecordChange::Insert {
                     id: store.next_id(),
                     input: work_input(
@@ -313,7 +313,7 @@ mod tests {
 
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
-            store
+            let _ = store
                 .commit(RecordChange::Insert {
                     id: store.next_id(),
                     input: work_input(
@@ -325,7 +325,7 @@ mod tests {
                     ),
                 })
                 .unwrap();
-            store
+            let _ = store
                 .commit(RecordChange::Insert {
                     id: store.next_id(),
                     input: work_input(
@@ -337,7 +337,7 @@ mod tests {
                     ),
                 })
                 .unwrap();
-            store
+            let _ = store
                 .commit(RecordChange::Insert {
                     id: store.next_id(),
                     input: work_input(
@@ -372,7 +372,7 @@ mod tests {
 
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
-            store
+            let _ = store
                 .commit(RecordChange::Insert {
                     id: store.next_id(),
                     input: work_input(
@@ -381,7 +381,7 @@ mod tests {
                     ),
                 })
                 .unwrap();
-            store
+            let _ = store
                 .commit(RecordChange::Insert {
                     id: store.next_id(),
                     input: work_input(
@@ -393,7 +393,7 @@ mod tests {
                     ),
                 })
                 .unwrap();
-            store
+            let _ = store
                 .commit(RecordChange::Insert {
                     id: store.next_id(),
                     input: work_input(
@@ -409,7 +409,7 @@ mod tests {
 
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
-            store
+            let _ = store
                 .commit(RecordChange::Update {
                     id: 1.into(),
                     input: work_input(
@@ -434,7 +434,7 @@ mod tests {
         let file_path = dir.path().join("data.jsonl");
         let mut store = JsonlFileStore::new(&file_path).unwrap();
 
-        store
+        let _ = store
             .commit(RecordChange::Insert {
                 id: store.next_id(),
                 input: work_input(
@@ -466,7 +466,7 @@ mod tests {
 
         {
             let mut store = JsonlFileStore::new(&file_path).unwrap();
-            store
+            let _ = store
                 .commit(RecordChange::Insert {
                     id: store.next_id(),
                     input: work_input(
@@ -475,7 +475,7 @@ mod tests {
                     ),
                 })
                 .unwrap();
-            store
+            let _ = store
                 .commit(RecordChange::Insert {
                     id: store.next_id(),
                     input: work_input(
@@ -487,7 +487,7 @@ mod tests {
         }
 
         let mut store = JsonlFileStore::new(&file_path).unwrap();
-        store
+        let _ = store
             .commit(RecordChange::Insert {
                 id: store.next_id(),
                 input: work_input(
@@ -570,7 +570,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("data.jsonl");
 
-        File::create(&file_path).unwrap();
+        let _ = File::create(&file_path).unwrap();
         let mut perms = std::fs::metadata(&file_path).unwrap().permissions();
         perms.set_mode(0o000);
         std::fs::set_permissions(&file_path, perms).unwrap();
@@ -799,7 +799,7 @@ mod tests {
             panic!("expected inserted outcome")
         };
 
-        store.commit(RecordChange::Delete { id }).unwrap();
+        let _ = store.commit(RecordChange::Delete { id }).unwrap();
         assert_eq!(store.records().len(), 0);
         assert!(store.records().is_empty());
     }

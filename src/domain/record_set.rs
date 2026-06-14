@@ -91,7 +91,9 @@ impl RecordSet {
     }
 
     fn insert_sorted(&mut self, id: RecordId, record: Record) {
-        self.0.insert_sorted_by(id, record, |_i1, e1, _i2, e2| e1.sort_key().cmp(&e2.sort_key()));
+        let _ = self
+            .0
+            .insert_sorted_by(id, record, |_i1, e1, _i2, e2| e1.sort_key().cmp(&e2.sort_key()));
     }
 
     pub(crate) fn next_id(&self) -> RecordId {
