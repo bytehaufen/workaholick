@@ -11,7 +11,6 @@ use crate::domain::{
 use super::day_entries;
 
 pub(crate) fn validate_records(records: &RecordSet) -> anyhow::Result<()> {
-    // Validate work records
     let work_records: Vec<&WorkRecord> =
         records
             .iter()
@@ -19,6 +18,7 @@ pub(crate) fn validate_records(records: &RecordSet) -> anyhow::Result<()> {
                 if let Record::Work(work_record) = record { Some(work_record) } else { None }
             })
             .collect();
+
     let absence_records: Vec<&AbsenceRecord> = records
         .iter()
         .filter_map(|record| {
@@ -131,6 +131,16 @@ mod tests {
         },
         test_support::{absence_record, work_record},
     };
+
+    impl RecordSet {
+        pub fn len(&self) -> usize {
+            self.iter().collect::<Vec<_>>().len()
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.iter().collect::<Vec<_>>().is_empty()
+        }
+    }
 
     #[test]
     fn validates_work_records() {

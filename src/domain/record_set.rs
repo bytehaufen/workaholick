@@ -78,16 +78,9 @@ impl RecordSet {
     pub fn get(&self, id: &RecordId) -> Option<&Record> {
         self.0.get(id)
     }
+
     pub fn iter(&self) -> impl Iterator<Item = &Record> {
         self.0.values()
-    }
-    #[allow(unused)]
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-    #[allow(unused)]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
     }
 
     fn insert_sorted(&mut self, id: RecordId, record: Record) {

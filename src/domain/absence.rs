@@ -90,11 +90,6 @@ impl AbsenceRecord {
     pub fn note(&self) -> &Option<String> {
         &self.note
     }
-
-    #[allow(unused)]
-    pub fn sort_key(&self) -> (NaiveDate, RecordId) {
-        (self.date, self.id)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -115,17 +110,6 @@ impl AbsenceRecordInput {
         AbsenceRecordInput { date, kind, portion, note }
     }
 
-    #[allow(unused)]
-    pub fn date(&self) -> &NaiveDate {
-        &self.date
-    }
-
-    #[allow(unused)]
-    pub fn portion(&self) -> &AbsencePortion {
-        &self.portion
-    }
-
-    #[allow(unused)]
     pub fn from_absence_record(record: &AbsenceRecord) -> Self {
         Self {
             date: *record.date(),

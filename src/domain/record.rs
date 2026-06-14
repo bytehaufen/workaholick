@@ -4,7 +4,7 @@ use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    AbsenceKind, AbsencePortion, WorkCommand, WorkRecordInput,
+    WorkCommand, WorkRecordInput,
     absence::{AbsenceRecord, AbsenceRecordInput},
     work::WorkRecord,
 };
@@ -98,26 +98,8 @@ impl RecordInput {
         }
     }
 
-    #[allow(unused)]
-    pub fn date(&self) -> NaiveDate {
-        match self {
-            RecordInput::Work(work_record_input) => work_record_input.date(),
-            RecordInput::Absence(absence_record_input) => *absence_record_input.date(),
-        }
-    }
-
     pub fn new_work(timestamp: DateTime<Local>, command: WorkCommand) -> Self {
         Self::Work(WorkRecordInput::new(timestamp, command))
-    }
-
-    #[allow(unused)]
-    pub fn new_absence(
-        date: NaiveDate,
-        kind: AbsenceKind,
-        portion: AbsencePortion,
-        note: Option<String>,
-    ) -> Self {
-        Self::Absence(AbsenceRecordInput::new(date, kind, portion, note))
     }
 }
 
@@ -282,7 +264,8 @@ mod tests {
             timestamp,
             WorkCommand::Start { context: WorkContext::Home },
         ));
-        assert_eq!(input.date(), timestamp.date_naive());
+        let record = Record::from_input(0.into(), input);
+        assert_eq!(record.date(), timestamp.date_naive());
     }
 
     #[test]
@@ -294,7 +277,8 @@ mod tests {
             AbsencePortion::FullDay,
             None,
         ));
-        assert_eq!(input.date(), date);
+        let record = Record::from_input(0.into(), input);
+        assert_eq!(record.date(), date);
     }
 
     #[test]

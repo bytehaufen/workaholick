@@ -102,15 +102,6 @@ impl WorkRecordInput {
         WorkRecordInput { timestamp, command }
     }
 
-    #[allow(unused)]
-    pub fn timestamp(&self) -> DateTime<Local> {
-        self.timestamp
-    }
-
-    pub fn date(&self) -> NaiveDate {
-        self.timestamp.date_naive()
-    }
-
     pub fn from_work_record(record: &WorkRecord) -> Self {
         Self { timestamp: *record.timestamp(), command: record.command.clone() }
     }

@@ -14,7 +14,6 @@ pub use plain_formatter::PlainFormatter;
 pub use port::Formatter;
 
 #[cfg(feature = "markdown")]
-#[allow(unused_imports)]
 pub use markdown_formatter::MarkdownFormatter;
 
 use crate::domain::{ReportGroupBy, SummaryReport, SummaryWindow, WorkCommand, WorkItemReport};
