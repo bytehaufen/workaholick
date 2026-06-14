@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
 
+use crate::domain::work_transition::DayRecordInfo;
 use crate::domain::{WorkRecord, work_transition::DayState};
 
-use super::validation::{DayRecordInfo, DayRecordValidationError};
+use crate::domain::DayRecordValidationError;
 
 pub(crate) fn validate_work_timeline(
     records: &[&WorkRecord],

@@ -1,8 +1,8 @@
 use chrono::{DateTime, Local, NaiveDate};
 
 use crate::domain::{
-    DayRecordValidationError, Record, WorkCommand, day_entries::transition_day_state,
-    summary::SummaryWindow, work_transition::DayState,
+    DayRecordValidationError, Record, WorkCommand, summary::SummaryWindow, transition_day_state,
+    work_transition::DayState,
 };
 
 #[derive(

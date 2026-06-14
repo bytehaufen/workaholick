@@ -1,19 +1,7 @@
-mod index;
-mod validation;
-
-pub(crate) use index::validate_work_timeline;
-pub(crate) use validation::{
-    CommandLabel, DayRecordValidationError, DayRecordValidationIssue, TransitionReason,
-    transition_day_state,
-};
-
 #[cfg(test)]
 mod tests {
     use super::super::{WorkCommand, WorkContext, WorkRecord};
-    use super::*;
     use crate::test_support::*;
-    use index::validate_work_timeline;
-    use validation::{DayRecordInfo, validate_day_records};
 
     use chrono::{Local, TimeZone};
 
@@ -37,6 +25,8 @@ mod tests {
     }
 
     mod day_entries {
+        use crate::domain::work_transition::DayRecordInfo;
+
         use super::*;
 
         #[test]
@@ -64,6 +54,8 @@ mod tests {
     }
 
     mod index_entries_by_date_tests {
+        use crate::domain::work_timeline_validation::validate_work_timeline;
+
         use super::*;
 
         #[test]
@@ -135,7 +127,7 @@ mod tests {
     }
 
     mod validate_day_entries_tests {
-        use crate::domain::work_transition::DayState;
+        use crate::domain::work_transition::{DayState, validate_day_records};
 
         use super::*;
 

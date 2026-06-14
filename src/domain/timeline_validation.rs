@@ -6,9 +6,8 @@ use crate::domain::{
     AbsencePortion::{self, FullDay, HalfDay},
     AbsenceRecord, Record, WorkRecord,
     record_set::RecordSet,
+    work_timeline_validation::validate_work_timeline,
 };
-
-use super::day_entries;
 
 pub(crate) fn validate_records(records: &RecordSet) -> anyhow::Result<()> {
     let work_records: Vec<&WorkRecord> =
@@ -36,7 +35,7 @@ pub(crate) fn validate_records(records: &RecordSet) -> anyhow::Result<()> {
 fn validate_work_records(work_records: &[&WorkRecord]) -> anyhow::Result<()> {
     // TODO: Extract later
     // TODO: Rename `index_records_by_date` as it validates and indexes, also remove the result
-    let _ = day_entries::validate_work_timeline(work_records)?;
+    let _ = validate_work_timeline(work_records)?;
 
     Ok(())
 }
