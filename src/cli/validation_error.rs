@@ -23,37 +23,38 @@ fn find_validation_error(err: &Error) -> Option<&DayRecordValidationError> {
 
 fn render_colored_validation_error(issue: DayRecordValidationIssue) -> String {
     match issue {
-        DayRecordValidationIssue::EmptyEntries | DayRecordValidationIssue::MixedDates => {
+        DayRecordValidationIssue::EmptyRecords | DayRecordValidationIssue::MixedDates => {
             format!("Day entries validation failed: {issue}")
         }
-        DayRecordValidationIssue::InvalidTransition { entry_id, attempted, reason } => match reason
-        {
-            TransitionReason::WhileIdle => format!(
-                "Day entries validation failed: Entry {entry_id} - cannot {} while {}",
-                colorize_attempted(attempted),
-                "idle".yellow()
-            ),
-            TransitionReason::AlreadyActive(active_kind) => format!(
-                "Day entries validation failed: Entry {entry_id} - cannot {} while already active ({})",
-                colorize_attempted(attempted),
-                active_kind.to_string().yellow()
-            ),
-            TransitionReason::NotBreaking => format!(
-                "Day entries validation failed: Entry {entry_id} - cannot {} when {}",
-                colorize_attempted(attempted),
-                "not breaking".yellow()
-            ),
-            TransitionReason::WhileBreaking => format!(
-                "Day entries validation failed: Entry {entry_id} - cannot {} while {}",
-                colorize_attempted(attempted),
-                "breaking".yellow()
-            ),
-            TransitionReason::AlreadyBreaking => format!(
-                "Day entries validation failed: Entry {entry_id} - cannot {} while already {}",
-                colorize_attempted(attempted),
-                "breaking".yellow()
-            ),
-        },
+        DayRecordValidationIssue::InvalidTransition { record_id, attempted, reason } => {
+            match reason {
+                TransitionReason::WhileIdle => format!(
+                    "Day entries validation failed: Entry {record_id} - cannot {} while {}",
+                    colorize_attempted(attempted),
+                    "idle".yellow()
+                ),
+                TransitionReason::AlreadyActive(active_kind) => format!(
+                    "Day entries validation failed: Entry {record_id} - cannot {} while already active ({})",
+                    colorize_attempted(attempted),
+                    active_kind.to_string().yellow()
+                ),
+                TransitionReason::NotBreaking => format!(
+                    "Day entries validation failed: Entry {record_id} - cannot {} when {}",
+                    colorize_attempted(attempted),
+                    "not breaking".yellow()
+                ),
+                TransitionReason::WhileBreaking => format!(
+                    "Day entries validation failed: Entry {record_id} - cannot {} while {}",
+                    colorize_attempted(attempted),
+                    "breaking".yellow()
+                ),
+                TransitionReason::AlreadyBreaking => format!(
+                    "Day entries validation failed: Entry {record_id} - cannot {} while already {}",
+                    colorize_attempted(attempted),
+                    "breaking".yellow()
+                ),
+            }
+        }
     }
 }
 
@@ -105,7 +106,7 @@ mod tests {
 
     #[test]
     fn keeps_structural_errors_plain() {
-        let text = render_colored_validation_error(DayRecordValidationIssue::EmptyEntries);
+        let text = render_colored_validation_error(DayRecordValidationIssue::EmptyRecords);
 
         assert_eq!(text, "Day entries validation failed: entries must not be empty");
     }
@@ -114,7 +115,7 @@ mod tests {
     fn colorizes_transition_errors() {
         let text = with_color_override(true, || {
             render_colored_validation_error(DayRecordValidationIssue::InvalidTransition {
-                entry_id: RecordId::from(42),
+                record_id: RecordId::from(42),
                 attempted: CommandLabel::Start(WorkContext::Office),
                 reason: TransitionReason::AlreadyActive(WorkContext::Office),
             })

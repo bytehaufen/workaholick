@@ -39,11 +39,11 @@ fn validate_work_day(
     prev_state: DayState,
 ) -> Result<DayState, DayRecordValidationError> {
     if records.is_empty() {
-        return Err(DayRecordValidationError::new(DayRecordValidationIssue::EmptyEntries));
+        return Err(DayRecordValidationError::new(DayRecordValidationIssue::EmptyRecords));
     }
     let first_date = records[0].date();
 
-    if !records.iter().all(|entry| entry.date() == first_date) {
+    if !records.iter().all(|record| record.date() == first_date) {
         return Err(DayRecordValidationError::new(DayRecordValidationIssue::MixedDates));
     }
 
@@ -59,7 +59,7 @@ mod tests {
 
     use chrono::{Local, TimeZone};
 
-    fn entry(id: u64, ts: chrono::DateTime<Local>, cmd: WorkCommand) -> WorkRecord {
+    fn record(id: u64, ts: chrono::DateTime<Local>, cmd: WorkCommand) -> WorkRecord {
         WorkRecord::new(id.into(), ts, cmd)
     }
 
@@ -73,11 +73,14 @@ mod tests {
 
     #[test]
     fn try_from_mixed_dates_returns_error() {
-        let entry1 = entry(1, ts(4, 16, 8), WorkCommand::default());
-        let entry2 =
-            entry(2, Local.with_ymd_and_hms(4025, 1, 4, 16, 9, 0).unwrap(), WorkCommand::default());
+        let record1 = record(1, ts(4, 16, 8), WorkCommand::default());
+        let record2 = record(
+            2,
+            Local.with_ymd_and_hms(4025, 1, 4, 16, 9, 0).unwrap(),
+            WorkCommand::default(),
+        );
 
-        let err = validate_work_day(&[&entry1, &entry2], Default::default()).unwrap_err();
+        let err = validate_work_day(&[&record1, &record2], Default::default()).unwrap_err();
         assert_eq!(
             err.to_string(),
             "Day entries validation failed: entries must all be of the same date"

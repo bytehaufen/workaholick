@@ -46,8 +46,8 @@ fn run_inner<S: RecordRepository>(
             Ok(())
         }
         CliCommand::Delete { id } => {
-            let entry = app.delete_record(id.into())?;
-            println!("🗑️ Record deleted:\n{entry:#?}");
+            let record = app.delete_record(id.into())?;
+            println!("🗑️ Record deleted:\n{record:#?}");
             Ok(())
         }
         CliCommand::Edit { id } => {

@@ -154,9 +154,9 @@ impl WorkItemReport {
         let mut by_title = self.rows.iter().fold(
             std::collections::HashMap::<String, (usize, i64)>::new(),
             |mut grouped, row| {
-                let entry = grouped.entry(row.title.clone()).or_insert((0, 0));
-                entry.0 += 1;
-                entry.1 += row.duration_minutes;
+                let record = grouped.entry(row.title.clone()).or_insert((0, 0));
+                record.0 += 1;
+                record.1 += row.duration_minutes;
                 grouped
             },
         );
@@ -181,10 +181,10 @@ impl WorkItemReport {
         let mut by_title_description = self.rows.iter().fold(
             std::collections::HashMap::<(String, Option<String>), (usize, i64)>::new(),
             |mut grouped, row| {
-                let entry =
+                let record =
                     grouped.entry((row.title.clone(), row.description.clone())).or_insert((0, 0));
-                entry.0 += 1;
-                entry.1 += row.duration_minutes;
+                record.0 += 1;
+                record.1 += row.duration_minutes;
                 grouped
             },
         );
@@ -286,48 +286,48 @@ pub fn report(
     let state = records
         .iter()
         .filter_map(Record::as_work)
-        .filter(|entry| *entry.timestamp() < window.end())
-        .try_fold(init_state, |mut state, entry| -> Result<State, DayRecordValidationError> {
-            let next_state = transition_day_state(state.state, *entry.id(), entry.command())?;
+        .filter(|record| *record.timestamp() < window.end())
+        .try_fold(init_state, |mut state, record| -> Result<State, DayRecordValidationError> {
+            let next_state = transition_day_state(state.state, *record.id(), record.command())?;
 
-            match (&state.state, entry.command(), next_state) {
+            match (&state.state, record.command(), next_state) {
                 (DayState::Idle, WorkCommand::Start { .. }, DayState::Active(_)) => {
-                    state.active_segment_start = Some(*entry.timestamp());
+                    state.active_segment_start = Some(*record.timestamp());
                 }
                 (DayState::Active(_), WorkCommand::BreakStart, _) => {
                     state.open_item.add_segment(
                         state.active_segment_start,
-                        *entry.timestamp(),
+                        *record.timestamp(),
                         window,
                     );
                     state.active_segment_start = None;
                 }
                 (DayState::Breaking(_), WorkCommand::BreakEnd { .. }, _) => {
-                    state.active_segment_start = Some(*entry.timestamp());
+                    state.active_segment_start = Some(*record.timestamp());
                 }
                 (DayState::Active(_), WorkCommand::Log { title, description }, _) => {
                     state.open_item.add_segment(
                         state.active_segment_start,
-                        *entry.timestamp(),
+                        *record.timestamp(),
                         window,
                     );
                     if let Some(row) = state.open_item.finish(
-                        *entry.timestamp(),
+                        *record.timestamp(),
                         title.clone(),
                         description.clone(),
                     ) {
                         state.rows.push(row);
                     }
-                    state.active_segment_start = Some(*entry.timestamp());
+                    state.active_segment_start = Some(*record.timestamp());
                 }
                 (DayState::Active(_), WorkCommand::End { title, description }, _) => {
                     state.open_item.add_segment(
                         state.active_segment_start,
-                        *entry.timestamp(),
+                        *record.timestamp(),
                         window,
                     );
                     if let Some(row) = state.open_item.finish(
-                        *entry.timestamp(),
+                        *record.timestamp(),
                         title.clone(),
                         description.clone(),
                     ) {
