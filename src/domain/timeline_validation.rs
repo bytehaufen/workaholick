@@ -35,7 +35,7 @@ pub(crate) fn validate_records(records: &RecordSet) -> anyhow::Result<()> {
 fn validate_work_records(work_records: &[&WorkRecord]) -> anyhow::Result<()> {
     // TODO: Extract later
     // TODO: Rename `index_records_by_date` as it validates and indexes, also remove the result
-    let _ = validate_work_timeline(work_records)?;
+    validate_work_timeline(work_records)?;
 
     Ok(())
 }

@@ -10,33 +10,6 @@ pub enum DayState {
     Breaking(WorkContext),
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub(crate) struct DayRecordInfo {
-    pub(super) ids: Vec<RecordId>,
-    pub(super) end_state: DayState,
-}
-
-impl DayRecordInfo {
-    pub(super) fn try_new(
-        records: &Vec<&WorkRecord>,
-        prev_state: &DayState,
-    ) -> Result<Self, DayRecordValidationError> {
-        if records.is_empty() {
-            return Err(DayRecordValidationError::new(DayRecordValidationIssue::EmptyEntries));
-        }
-        let first_date = records[0].date();
-
-        if !records.iter().all(|entry| entry.date() == first_date) {
-            return Err(DayRecordValidationError::new(DayRecordValidationIssue::MixedDates));
-        }
-
-        let end_state = validate_day_records(records, prev_state)?;
-
-        let ids = records.iter().map(|entry| *entry.id()).collect();
-        Ok(Self { end_state, ids })
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum CommandLabel {
     Start(WorkContext),

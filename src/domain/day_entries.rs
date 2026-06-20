@@ -3,7 +3,7 @@ mod tests {
     use super::super::{WorkCommand, WorkContext, WorkRecord};
     use crate::test_support::*;
 
-    use chrono::{Local, TimeZone};
+    use chrono::Local;
 
     fn entry(id: u64, ts: chrono::DateTime<Local>, cmd: WorkCommand) -> WorkRecord {
         WorkRecord::new(id.into(), ts, cmd)
@@ -22,108 +22,6 @@ mod tests {
 
     fn refs(entries: &[WorkRecord]) -> Vec<&WorkRecord> {
         entries.iter().collect()
-    }
-
-    mod day_entries {
-        use crate::domain::work_transition::DayRecordInfo;
-
-        use super::*;
-
-        #[test]
-        fn try_from_empty_returns_error() {
-            let err = DayRecordInfo::try_new(&Vec::new(), &Default::default()).unwrap_err();
-            assert_eq!(err.to_string(), "Day entries validation failed: entries must not be empty");
-        }
-
-        #[test]
-        fn try_from_mixed_dates_returns_error() {
-            let entry1 = entry(1, ts(4, 16, 8), WorkCommand::default());
-            let entry2 = entry(
-                2,
-                Local.with_ymd_and_hms(4025, 1, 4, 16, 9, 0).unwrap(),
-                WorkCommand::default(),
-            );
-
-            let err =
-                DayRecordInfo::try_new(&vec![&entry1, &entry2], &Default::default()).unwrap_err();
-            assert_eq!(
-                err.to_string(),
-                "Day entries validation failed: entries must all be of the same date"
-            );
-        }
-    }
-
-    mod index_entries_by_date_tests {
-        use crate::domain::work_timeline_validation::validate_work_timeline;
-
-        use super::*;
-
-        #[test]
-        fn returns_empty_map_for_empty_input() {
-            let input: Vec<&WorkRecord> = Vec::new();
-            let by_date = validate_work_timeline(&input).unwrap();
-            assert!(by_date.is_empty());
-        }
-
-        #[test]
-        fn partitions_entries_into_multiple_days() {
-            let entry1 = entry(
-                1,
-                Local.with_ymd_and_hms(2026, 1, 4, 8, 0, 0).unwrap(),
-                WorkCommand::Start { context: WorkContext::Office },
-            );
-            let entry2 = entry(
-                2,
-                Local.with_ymd_and_hms(2026, 1, 4, 9, 0, 0).unwrap(),
-                WorkCommand::BreakStart,
-            );
-            let entry3 = entry(
-                3,
-                Local.with_ymd_and_hms(2026, 1, 4, 9, 30, 0).unwrap(),
-                WorkCommand::BreakEnd { description: None },
-            );
-            let entry4 = entry(
-                4,
-                Local.with_ymd_and_hms(2026, 1, 4, 10, 0, 0).unwrap(),
-                WorkCommand::End { title: "".into(), description: None },
-            );
-            let entry5 = entry(
-                5,
-                Local.with_ymd_and_hms(2026, 1, 5, 10, 0, 0).unwrap(),
-                WorkCommand::Start { context: WorkContext::Office },
-            );
-
-            let entries: Vec<&WorkRecord> = vec![&entry1, &entry2, &entry3, &entry4, &entry5];
-            let by_date = validate_work_timeline(&entries).unwrap();
-
-            assert_eq!(by_date.len(), 2);
-            assert!(by_date.contains_key(&entry1.timestamp().date_naive()));
-            assert!(by_date.contains_key(&entry3.timestamp().date_naive()));
-
-            let day1 = by_date.get(&entry1.timestamp().date_naive()).unwrap();
-            let day1_timestamps: Vec<_> = day1
-                .ids
-                .iter()
-                .map(|id| *entries.iter().find(|entry| entry.id() == id).unwrap().timestamp())
-                .collect();
-            assert_eq!(
-                day1_timestamps,
-                vec![
-                    *entry1.timestamp(),
-                    *entry2.timestamp(),
-                    *entry3.timestamp(),
-                    *entry4.timestamp()
-                ]
-            );
-
-            let day2 = by_date.get(&entry5.timestamp().date_naive()).unwrap();
-            let day2_timestamps: Vec<_> = day2
-                .ids
-                .iter()
-                .map(|id| *entries.iter().find(|entry| entry.id() == id).unwrap().timestamp())
-                .collect();
-            assert_eq!(day2_timestamps, vec![*entry5.timestamp()]);
-        }
     }
 
     mod validate_day_entries_tests {

@@ -2,37 +2,85 @@ use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
 
-use crate::domain::work_transition::DayRecordInfo;
+use crate::domain::work_transition::validate_day_records;
 use crate::domain::{WorkRecord, work_transition::DayState};
 
-use crate::domain::DayRecordValidationError;
+use crate::domain::{DayRecordValidationError, DayRecordValidationIssue};
 
 pub(crate) fn validate_work_timeline(
     records: &[&WorkRecord],
-) -> Result<BTreeMap<NaiveDate, DayRecordInfo>, DayRecordValidationError> {
+) -> Result<(), DayRecordValidationError> {
     let initial_state = DayState::Idle;
 
-    let mut records_by_date: BTreeMap<NaiveDate, Vec<&WorkRecord>> =
-        records.iter().fold(BTreeMap::new(), |mut acc, record| {
-            acc.entry(record.date()).or_default().push(record);
-            acc
-        });
+    let mut records_by_date = group_records_by_date(records);
 
     records_by_date
         .values_mut()
         .for_each(|records| records.sort_by_key(|record| record.sort_key()));
 
-    let (day_records, _) = records_by_date.iter().try_fold(
-        (BTreeMap::new(), initial_state),
-        |(mut day_records, last_state), (date, records)| {
-            let day_record = DayRecordInfo::try_new(records, &last_state)?;
+    let _ = records_by_date
+        .values()
+        .try_fold(initial_state, |prev_state, records| validate_work_day(records, prev_state))?;
 
-            let next_state = day_record.end_state;
-            let _ = day_records.insert(*date, day_record);
+    Ok(())
+}
 
-            Ok((day_records, next_state))
-        },
-    )?;
+fn group_records_by_date<'a>(
+    records: &[&'a WorkRecord],
+) -> BTreeMap<NaiveDate, Vec<&'a WorkRecord>> {
+    records.iter().fold(BTreeMap::new(), |mut acc, record| {
+        acc.entry(record.date()).or_default().push(record);
+        acc
+    })
+}
 
-    Ok(day_records)
+fn validate_work_day(
+    records: &[&WorkRecord],
+    prev_state: DayState,
+) -> Result<DayState, DayRecordValidationError> {
+    if records.is_empty() {
+        return Err(DayRecordValidationError::new(DayRecordValidationIssue::EmptyEntries));
+    }
+    let first_date = records[0].date();
+
+    if !records.iter().all(|entry| entry.date() == first_date) {
+        return Err(DayRecordValidationError::new(DayRecordValidationIssue::MixedDates));
+    }
+
+    let end_state = validate_day_records(records, &prev_state)?;
+
+    Ok(end_state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{WorkCommand, WorkRecord};
+    use crate::test_support::*;
+
+    use chrono::{Local, TimeZone};
+
+    fn entry(id: u64, ts: chrono::DateTime<Local>, cmd: WorkCommand) -> WorkRecord {
+        WorkRecord::new(id.into(), ts, cmd)
+    }
+
+    use crate::domain::work_timeline_validation::validate_work_day;
+
+    #[test]
+    fn try_from_empty_returns_error() {
+        let err = validate_work_day(&Vec::new(), Default::default()).unwrap_err();
+        assert_eq!(err.to_string(), "Day entries validation failed: entries must not be empty");
+    }
+
+    #[test]
+    fn try_from_mixed_dates_returns_error() {
+        let entry1 = entry(1, ts(4, 16, 8), WorkCommand::default());
+        let entry2 =
+            entry(2, Local.with_ymd_and_hms(4025, 1, 4, 16, 9, 0).unwrap(), WorkCommand::default());
+
+        let err = validate_work_day(&[&entry1, &entry2], Default::default()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Day entries validation failed: entries must all be of the same date"
+        );
+    }
 }
