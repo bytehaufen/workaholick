@@ -1,5 +1,4 @@
 mod absence;
-mod day_entries;
 mod period;
 mod record;
 mod record_set;
