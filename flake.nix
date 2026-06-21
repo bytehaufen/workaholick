@@ -79,6 +79,9 @@
 
         preCommit = pre-commit-hooks.lib.${system}.run {
           src = ./.;
+          settings.rust.check.cargoDeps = pkgs.rustPlatform.importCargoLock {
+            lockFile = ./Cargo.lock;
+          };
           excludes = [
             "\\.lock$"
             "\\.json$"
