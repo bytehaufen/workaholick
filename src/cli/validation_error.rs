@@ -23,9 +23,6 @@ fn find_validation_error(err: &Error) -> Option<&DayRecordValidationError> {
 
 fn render_colored_validation_error(issue: DayRecordValidationIssue) -> String {
     match issue {
-        DayRecordValidationIssue::EmptyRecords | DayRecordValidationIssue::MixedDates => {
-            format!("Day entries validation failed: {issue}")
-        }
         DayRecordValidationIssue::InvalidTransition { record_id, attempted, reason } => {
             match reason {
                 TransitionReason::WhileIdle => format!(
@@ -102,13 +99,6 @@ mod tests {
         let result = test();
         control::unset_override();
         result
-    }
-
-    #[test]
-    fn keeps_structural_errors_plain() {
-        let text = render_colored_validation_error(DayRecordValidationIssue::EmptyRecords);
-
-        assert_eq!(text, "Day entries validation failed: entries must not be empty");
     }
 
     #[test]
