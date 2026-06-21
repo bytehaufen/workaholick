@@ -2,7 +2,7 @@ use chrono::{DateTime, Local, NaiveDate};
 
 use crate::domain::{
     DayRecordValidationError, Record, WorkCommand, summary::SummaryWindow, transition_day_state,
-    work_transition::DayState,
+    work_state::DayState,
 };
 
 #[derive(

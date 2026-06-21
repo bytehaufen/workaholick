@@ -4,7 +4,7 @@ use chrono::{DateTime, Local, NaiveDate, TimeDelta};
 
 use crate::domain::{
     DayRecordValidationError, Period, Record, WorkContext, transition_day_state,
-    work_transition::DayState,
+    work_state::DayState,
 };
 
 #[derive(Debug, Clone, PartialEq)]

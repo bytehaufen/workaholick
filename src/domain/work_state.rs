@@ -203,7 +203,7 @@ mod tests {
     }
 
     mod validate_day_records_tests {
-        use crate::domain::work_transition::{DayState, validate_day_records};
+        use crate::domain::work_state::{DayState, validate_day_records};
 
         use super::*;
 

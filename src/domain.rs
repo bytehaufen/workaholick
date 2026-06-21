@@ -7,8 +7,7 @@ mod serde_datetime;
 mod summary;
 mod timeline_validation;
 mod work;
-mod work_timeline_validation;
-mod work_transition;
+mod work_state;
 
 pub(crate) use absence::{AbsenceKind, AbsencePortion, AbsenceRecord, AbsenceRecordInput};
 pub(crate) use period::Period;
@@ -20,7 +19,7 @@ pub(crate) use summary::{
 };
 pub(crate) use timeline_validation::validate_records;
 pub(crate) use work::{WorkCommand, WorkContext, WorkRecord, WorkRecordInput};
-pub(crate) use work_transition::{
+pub(crate) use work_state::{
     CommandLabel, DayRecordValidationError, DayRecordValidationIssue, TransitionReason,
     transition_day_state,
 };

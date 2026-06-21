@@ -1,13 +1,10 @@
-use std::collections::BTreeMap;
+mod absence;
+mod cross;
+mod error;
+mod work;
 
-use chrono::NaiveDate;
-
-use crate::domain::{
-    AbsencePortion::{self, FullDay, HalfDay},
-    AbsenceRecord, Record, WorkRecord,
-    record_set::RecordSet,
-    work_timeline_validation::validate_work_timeline,
-};
+use crate::domain::{AbsenceRecord, Record, WorkRecord, record_set::RecordSet};
+use {absence::validate_absence_records, cross::validate_cross_rules, work::validate_work_records};
 
 pub(crate) fn validate_records(records: &RecordSet) -> anyhow::Result<()> {
     let work_records: Vec<&WorkRecord> =
@@ -28,95 +25,6 @@ pub(crate) fn validate_records(records: &RecordSet) -> anyhow::Result<()> {
     validate_work_records(&work_records)?;
     validate_absence_records(&absence_records)?;
     validate_cross_rules(records)?;
-
-    Ok(())
-}
-
-fn validate_work_records(work_records: &[&WorkRecord]) -> anyhow::Result<()> {
-    // TODO: Extract later
-    // TODO: Rename `index_records_by_date` as it validates and indexes, also remove the result
-    validate_work_timeline(work_records)?;
-
-    Ok(())
-}
-
-fn validate_absence_records(absence_records: &[&AbsenceRecord]) -> anyhow::Result<()> {
-    #[derive(Default)]
-    struct DayAbsences {
-        full: u32,
-        half: u32,
-    }
-
-    let absences_by_day: BTreeMap<NaiveDate, DayAbsences> =
-        absence_records.iter().fold(BTreeMap::new(), |mut by_day, absence_record| {
-            match absence_record.portion() {
-                FullDay => by_day.entry(*absence_record.date()).or_default().full += 1,
-                HalfDay => by_day.entry(*absence_record.date()).or_default().half += 1,
-            };
-
-            by_day
-        });
-
-    absences_by_day.iter().try_for_each(|(date, day_absences)| match day_absences {
-        DayAbsences { full, half } if *full > 0 && *half > 0 => {
-            anyhow::bail!("full-day absence cannot be combined with half-day absences for {date}")
-        }
-        DayAbsences { full, .. } if *full > 1 => {
-            anyhow::bail!("more than one full-day absence for {date}")
-        }
-        DayAbsences { half, .. } if *half > 2 => {
-            anyhow::bail!("more than two half-day absences for {date}")
-        }
-
-        _ => Ok(()),
-    })
-}
-
-fn validate_cross_rules(records: &RecordSet) -> anyhow::Result<()> {
-    #[derive(Default)]
-    struct DayView {
-        has_work: bool,
-        full_day_absence_count: usize,
-        half_day_absence_count: usize,
-    }
-
-    impl DayView {
-        fn add_work(&mut self) {
-            self.has_work = true
-        }
-        fn add_absence(&mut self, portion: &AbsencePortion) {
-            match portion {
-                FullDay => self.full_day_absence_count += 1,
-                HalfDay => self.half_day_absence_count += 1,
-            }
-        }
-    }
-
-    let days: BTreeMap<NaiveDate, DayView> =
-        records.iter().fold(BTreeMap::new(), |mut days, record| {
-            match record {
-                Record::Work(work_record) => days.entry(work_record.date()).or_default().add_work(),
-                Record::Absence(absence_record) => days
-                    .entry(*absence_record.date())
-                    .or_default()
-                    .add_absence(absence_record.portion()),
-            }
-            days
-        });
-
-    days.iter().try_for_each(|(date, day_view)| match day_view {
-        DayView { has_work, full_day_absence_count, .. }
-            if *has_work && *full_day_absence_count > 0 =>
-        {
-            anyhow::bail!("full-day absence cannot coexist with work records for {date}")
-        }
-        DayView { has_work, half_day_absence_count, .. }
-            if *has_work && *half_day_absence_count > 1 =>
-        {
-            anyhow::bail!("two half-day absences cannot coexist with work records for {date}")
-        }
-        _ => Ok(()),
-    })?;
 
     Ok(())
 }

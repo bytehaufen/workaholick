@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
 
-use crate::domain::work_transition::validate_day_records;
-use crate::domain::{WorkRecord, work_transition::DayState};
+use crate::domain::work_state::validate_day_records;
+use crate::domain::{WorkRecord, work_state::DayState};
 
 use crate::domain::{DayRecordValidationError, DayRecordValidationIssue};
 
-pub(crate) fn validate_work_timeline(
+pub(crate) fn validate_work_records(
     records: &[&WorkRecord],
 ) -> Result<(), DayRecordValidationError> {
     let initial_state = DayState::Idle;
@@ -54,7 +54,8 @@ fn validate_work_day(
 
 #[cfg(test)]
 mod tests {
-    use super::super::{WorkCommand, WorkRecord};
+    use super::*;
+    use crate::domain::{WorkCommand, WorkRecord};
     use crate::test_support::*;
 
     use chrono::{Local, TimeZone};
@@ -62,8 +63,6 @@ mod tests {
     fn record(id: u64, ts: chrono::DateTime<Local>, cmd: WorkCommand) -> WorkRecord {
         WorkRecord::new(id.into(), ts, cmd)
     }
-
-    use crate::domain::work_timeline_validation::validate_work_day;
 
     #[test]
     fn try_from_empty_returns_error() {
