@@ -3,6 +3,9 @@ mod cross;
 mod error;
 mod work;
 
+// Re-export
+pub(crate) use error::{CommandLabel, TimelineValidationError, WorkValidationIssue};
+
 use crate::domain::{AbsenceRecord, Record, WorkRecord, record_set::RecordSet};
 use {absence::validate_absence_records, cross::validate_cross_rules, work::validate_work_records};
 
@@ -72,10 +75,7 @@ mod tests {
         let records = RecordSet::try_from_records(vec![rec1]).unwrap();
         let err = validate_records(&records).unwrap_err();
 
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 1 - cannot start break while idle"
-        );
+        assert_eq!(err.to_string(), "cannot start break while idle for 2026-01-30");
     }
 
     #[test]
@@ -143,10 +143,7 @@ mod tests {
         let err = validate_records(&RecordSet::try_from_records(records).unwrap())
             .unwrap_err()
             .to_string();
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 2 - cannot start home while already active (home)"
-        );
+        assert_eq!(err.to_string(), "cannot start home while already active (home) for 2026-01-11");
     }
 
     #[test]

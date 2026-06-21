@@ -2,13 +2,14 @@ use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
 
+use crate::domain::timeline_validation::TimelineValidationError;
 use crate::domain::{WorkRecord, work_state::DayState};
 
-use crate::domain::{DayRecordValidationError, transition_day_state};
+use crate::domain::transition_day_state;
 
 pub(crate) fn validate_work_records(
     records: &[&WorkRecord],
-) -> Result<(), DayRecordValidationError> {
+) -> Result<(), TimelineValidationError> {
     let initial_state = DayState::Idle;
 
     let mut records_by_date = group_records_by_date(records);
@@ -36,9 +37,9 @@ fn group_records_by_date<'a>(
 fn validate_work_day(
     records: &[&WorkRecord],
     prev_state: DayState,
-) -> Result<DayState, DayRecordValidationError> {
+) -> Result<DayState, TimelineValidationError> {
     records.iter().try_fold(prev_state, |state, record| {
-        transition_day_state(state, *record.id(), record.command())
+        transition_day_state(state, record.date(), record.command())
     })
 }
 
@@ -113,10 +114,7 @@ mod tests {
         let records = refs(&records);
 
         let err = validate_work_day(&records, Default::default()).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 2 - cannot start home while already active (home)"
-        )
+        assert_eq!(err.to_string(), "cannot start home while already active (home) for 2026-01-10")
     }
 
     #[test]
@@ -126,10 +124,7 @@ mod tests {
         let records = refs(&records);
 
         let err = validate_work_day(&records, Default::default()).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 1 - cannot end while idle"
-        );
+        assert_eq!(err.to_string(), "cannot end while idle for 2026-01-10");
     }
 
     #[test]
@@ -139,10 +134,7 @@ mod tests {
         let records = refs(&records);
 
         let err = validate_work_day(&records, Default::default()).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 1 - cannot log while idle"
-        )
+        assert_eq!(err.to_string(), "cannot log while idle for 2026-01-10")
     }
 
     #[test]
@@ -152,10 +144,7 @@ mod tests {
         let records = refs(&records);
 
         let err = validate_work_day(&records, Default::default()).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 1 - cannot start break while idle"
-        );
+        assert_eq!(err.to_string(), "cannot start break while idle for 2026-01-10");
     }
 
     #[test]
@@ -168,10 +157,7 @@ mod tests {
         let records = refs(&records);
 
         let err = validate_work_day(&records, Default::default()).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 2 - cannot end break when not breaking"
-        );
+        assert_eq!(err.to_string(), "cannot end break when not breaking for 2026-01-10");
     }
 
     #[test]
@@ -185,10 +171,7 @@ mod tests {
         let records = refs(&records);
 
         let err = validate_work_day(&records, Default::default()).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 3 - cannot end while breaking"
-        );
+        assert_eq!(err.to_string(), "cannot end while breaking for 2026-01-10");
     }
 
     #[test]
@@ -202,10 +185,7 @@ mod tests {
         let records = refs(&records);
 
         let err = validate_work_day(&records, Default::default()).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 3 - cannot log while breaking"
-        );
+        assert_eq!(err.to_string(), "cannot log while breaking for 2026-01-10");
     }
 
     #[test]
@@ -219,10 +199,7 @@ mod tests {
         let records = refs(&records);
 
         let err = validate_work_day(&records, Default::default()).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 3 - cannot start break while already breaking"
-        );
+        assert_eq!(err.to_string(), "cannot start break while already breaking for 2026-01-10");
     }
 
     #[test]

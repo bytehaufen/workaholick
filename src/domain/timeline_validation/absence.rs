@@ -2,9 +2,13 @@ use std::collections::BTreeMap;
 
 use crate::domain::AbsencePortion::{FullDay, HalfDay};
 use crate::domain::AbsenceRecord;
+use crate::domain::timeline_validation::error::AbsenceValidationIssue;
+use crate::domain::timeline_validation::error::TimelineValidationError;
 use chrono::NaiveDate;
 
-pub(super) fn validate_absence_records(absence_records: &[&AbsenceRecord]) -> anyhow::Result<()> {
+pub(super) fn validate_absence_records(
+    absence_records: &[&AbsenceRecord],
+) -> Result<(), TimelineValidationError> {
     #[derive(Default)]
     struct DayAbsences {
         full: u32,
@@ -23,14 +27,15 @@ pub(super) fn validate_absence_records(absence_records: &[&AbsenceRecord]) -> an
 
     absences_by_day.iter().try_for_each(|(date, day_absences)| match day_absences {
         DayAbsences { full, half } if *full > 0 && *half > 0 => {
-            anyhow::bail!("full-day absence cannot be combined with half-day absences for {date}")
+            Err(TimelineValidationError::absence(*date, AbsenceValidationIssue::FullDayWithHalfDay))
         }
         DayAbsences { full, .. } if *full > 1 => {
-            anyhow::bail!("more than one full-day absence for {date}")
+            Err(TimelineValidationError::absence(*date, AbsenceValidationIssue::MultipleFullDays))
         }
-        DayAbsences { half, .. } if *half > 2 => {
-            anyhow::bail!("more than two half-day absences for {date}")
-        }
+        DayAbsences { half, .. } if *half > 2 => Err(TimelineValidationError::absence(
+            *date,
+            AbsenceValidationIssue::MoreThanTwoHalfDays,
+        )),
 
         _ => Ok(()),
     })

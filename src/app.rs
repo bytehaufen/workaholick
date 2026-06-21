@@ -985,10 +985,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 1 - cannot log while idle"
-        );
+        assert_eq!(err.to_string(), "cannot log while idle for 2026-01-08");
     }
 
     #[test]
@@ -1008,10 +1005,7 @@ mod tests {
 
         let err = app.log_work("refactoring round  42".into(), None).unwrap_err();
 
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 3 - cannot log while breaking"
-        );
+        assert_eq!(err.to_string(), "cannot log while breaking for 2026-01-11");
         assert_eq!(app.store.records().iter().count(), 2);
     }
 
@@ -1035,10 +1029,7 @@ mod tests {
 
         let err = app.update_record(2.into(), update).unwrap_err();
 
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 2 - cannot start home while already active (home)"
-        );
+        assert_eq!(err.to_string(), "cannot start home while already active (home) for 2026-01-11");
 
         let expected = app.store.records().get(&2.into()).unwrap().as_work().unwrap().command();
         assert!(matches!(expected, WorkCommand::BreakStart));
@@ -1061,10 +1052,7 @@ mod tests {
 
         let err = app.delete_record(1.into()).unwrap_err();
 
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 2 - cannot start break while idle"
-        );
+        assert_eq!(err.to_string(), "cannot start break while idle for 2026-01-11");
 
         let expected = app.store.records().get(&1.into()).unwrap().as_work().unwrap().command();
         assert!(matches!(expected, WorkCommand::Start { context: WorkContext::Home }));

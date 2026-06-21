@@ -17,9 +17,6 @@ pub(crate) use report::{ReportGroupBy, WorkItemReport, report};
 pub(crate) use summary::{
     SummaryDay, SummaryKind, SummaryReport, SummaryScope, SummaryWeek, SummaryWindow, summary,
 };
-pub(crate) use timeline_validation::validate_records;
+pub(crate) use timeline_validation::{TimelineValidationError, validate_records};
 pub(crate) use work::{WorkCommand, WorkContext, WorkRecord, WorkRecordInput};
-pub(crate) use work_state::{
-    CommandLabel, DayRecordValidationError, DayRecordValidationIssue, TransitionReason,
-    transition_day_state,
-};
+pub(crate) use work_state::{TransitionReason, transition_day_state};

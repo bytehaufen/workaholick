@@ -1,7 +1,7 @@
 use chrono::{DateTime, Local, NaiveDate};
 
 use crate::domain::{
-    DayRecordValidationError, Record, WorkCommand, summary::SummaryWindow, transition_day_state,
+    Record, TimelineValidationError, WorkCommand, summary::SummaryWindow, transition_day_state,
     work_state::DayState,
 };
 
@@ -274,7 +274,7 @@ fn clipped_range(
 pub fn report(
     records: &[Record],
     window: SummaryWindow,
-) -> Result<WorkItemReport, DayRecordValidationError> {
+) -> Result<WorkItemReport, TimelineValidationError> {
     let init_state = State {
         state: DayState::Idle,
         active_segment_start: None,
@@ -287,8 +287,8 @@ pub fn report(
         .iter()
         .filter_map(Record::as_work)
         .filter(|record| *record.timestamp() < window.end())
-        .try_fold(init_state, |mut state, record| -> Result<State, DayRecordValidationError> {
-            let next_state = transition_day_state(state.state, *record.id(), record.command())?;
+        .try_fold(init_state, |mut state, record| -> Result<State, TimelineValidationError> {
+            let next_state = transition_day_state(state.state, record.date(), record.command())?;
 
             match (&state.state, record.command(), next_state) {
                 (DayState::Idle, WorkCommand::Start { .. }, DayState::Active(_)) => {

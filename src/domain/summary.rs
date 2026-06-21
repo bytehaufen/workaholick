@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Local, NaiveDate, TimeDelta};
 
 use crate::domain::{
-    DayRecordValidationError, Period, Record, WorkContext, transition_day_state,
+    Period, Record, TimelineValidationError, WorkContext, transition_day_state,
     work_state::DayState,
 };
 
@@ -324,7 +324,7 @@ fn finalize_open_bucket(
 pub fn summary(
     records: &[Record],
     window: SummaryWindow,
-) -> Result<Summary, DayRecordValidationError> {
+) -> Result<Summary, TimelineValidationError> {
     struct State {
         state: DayState,
         last_timestamp: Option<DateTime<Local>>,
@@ -342,9 +342,9 @@ pub fn summary(
         .iter()
         .filter_map(Record::as_work)
         .filter(|record| *record.timestamp() < window.end)
-        .try_fold(init_state, |fold_state, record| -> Result<State, DayRecordValidationError> {
+        .try_fold(init_state, |fold_state, record| -> Result<State, TimelineValidationError> {
             let State { state, last_timestamp, mut summary } = fold_state;
-            let next_state = transition_day_state(state, *record.id(), record.command())?;
+            let next_state = transition_day_state(state, record.date(), record.command())?;
 
             match (state, next_state) {
                 (DayState::Idle, DayState::Active(_)) => Ok(State {
@@ -586,9 +586,6 @@ mod test {
         )
         .unwrap_err();
 
-        assert_eq!(
-            err.to_string(),
-            "Day entries validation failed: Entry 2 - cannot end break when not breaking"
-        );
+        assert_eq!(err.to_string(), "cannot end break when not breaking for 2026-01-28");
     }
 }

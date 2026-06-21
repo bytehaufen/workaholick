@@ -4,10 +4,11 @@ use chrono::NaiveDate;
 
 use crate::domain::{
     AbsencePortion::{self, FullDay, HalfDay},
-    Record, RecordSet,
+    Record, RecordSet, TimelineValidationError,
+    timeline_validation::error::CrossValidationIssue,
 };
 
-pub(super) fn validate_cross_rules(records: &RecordSet) -> anyhow::Result<()> {
+pub(super) fn validate_cross_rules(records: &RecordSet) -> Result<(), TimelineValidationError> {
     #[derive(Default)]
     struct DayView {
         has_work: bool,
@@ -43,15 +44,16 @@ pub(super) fn validate_cross_rules(records: &RecordSet) -> anyhow::Result<()> {
         DayView { has_work, full_day_absence_count, .. }
             if *has_work && *full_day_absence_count > 0 =>
         {
-            anyhow::bail!("full-day absence cannot coexist with work records for {date}")
+            Err(TimelineValidationError::cross(*date, CrossValidationIssue::FullDayAbsenceWithWork))
         }
         DayView { has_work, half_day_absence_count, .. }
             if *has_work && *half_day_absence_count > 1 =>
         {
-            anyhow::bail!("two half-day absences cannot coexist with work records for {date}")
+            Err(TimelineValidationError::cross(
+                *date,
+                CrossValidationIssue::TwoHalfDayAbsenceWithWork,
+            ))
         }
         _ => Ok(()),
-    })?;
-
-    Ok(())
+    })
 }

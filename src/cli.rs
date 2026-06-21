@@ -17,6 +17,7 @@ pub(crate) use args::parse;
 pub(crate) use dispatch::run;
 #[cfg(feature = "markdown")]
 pub(crate) use shell_editor::ShellEditor;
+
 pub use validation_error::render_error;
 
 pub fn print_completions(shell: CompletionShell) {
