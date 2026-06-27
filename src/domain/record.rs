@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{cmp::Ordering, fmt::Display};
 
 use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
@@ -103,10 +103,54 @@ impl RecordInput {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordSortKey {
     Work(DateTime<Local>, RecordId),
     Absence(NaiveDate, RecordId),
+}
+
+impl RecordSortKey {
+    fn date(&self) -> NaiveDate {
+        match self {
+            RecordSortKey::Work(date_time, _) => date_time.date_naive(),
+            RecordSortKey::Absence(naive_date, _) => *naive_date,
+        }
+    }
+
+    fn variant_rank(&self) -> u8 {
+        match self {
+            RecordSortKey::Absence(..) => 0,
+            RecordSortKey::Work(..) => 1,
+        }
+    }
+
+    fn id(&self) -> &RecordId {
+        match self {
+            RecordSortKey::Work(_, record_id) => record_id,
+            RecordSortKey::Absence(_, record_id) => record_id,
+        }
+    }
+}
+
+impl Ord for RecordSortKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.date()
+            .cmp(&other.date())
+            .then(self.variant_rank().cmp(&other.variant_rank()))
+            .then_with(|| match (self, other) {
+                (RecordSortKey::Work(date_time_1, _), RecordSortKey::Work(date_time_2, _)) => {
+                    date_time_1.cmp(date_time_2)
+                }
+                _ => Ordering::Equal,
+            })
+            .then(self.id().cmp(other.id()))
+    }
+}
+
+impl PartialOrd for RecordSortKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[cfg(test)]

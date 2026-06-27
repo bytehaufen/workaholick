@@ -100,3 +100,58 @@ fn same_record_type(record: &Record, input: &RecordInput) -> bool {
         (Record::Work(_), RecordInput::Work(_)) | (Record::Absence(_), RecordInput::Absence(_))
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        domain::{AbsenceKind, AbsencePortion, WorkCommand, WorkContext},
+        test_support::{absence_record, work_record},
+    };
+
+    #[test]
+    fn try_from_sorts_by_sortkey() {
+        let records = vec![
+            work_record(42, 27, 5, 19, WorkCommand::Start { context: WorkContext::Home }),
+            absence_record(37, 26, AbsenceKind::Holiday, AbsencePortion::FullDay),
+            absence_record(127, 29, AbsenceKind::Vacation, AbsencePortion::HalfDay),
+            absence_record(27, 28, AbsenceKind::Sick, AbsencePortion::HalfDay),
+            work_record(74, 28, 5, 19, WorkCommand::Start { context: WorkContext::Home }),
+            work_record(
+                1,
+                28,
+                5,
+                20,
+                WorkCommand::End { title: "halfday".into(), description: None },
+            ),
+            absence_record(26, 30, AbsenceKind::Sick, AbsencePortion::HalfDay),
+            work_record(
+                41,
+                27,
+                5,
+                20,
+                WorkCommand::End { title: "fullday".into(), description: None },
+            ),
+            absence_record(5, 29, AbsenceKind::Sick, AbsencePortion::HalfDay),
+            work_record(75, 30, 5, 19, WorkCommand::Start { context: WorkContext::Home }),
+            absence_record(9, 31, AbsenceKind::Holiday, AbsencePortion::FullDay),
+            work_record(
+                4,
+                30,
+                5,
+                20,
+                WorkCommand::End { title: "halfday3".into(), description: None },
+            ),
+        ];
+
+        let record_ids: Vec<RecordId> =
+            RecordSet::try_from_records(records).unwrap().0.keys().copied().collect();
+
+        let expected: Vec<RecordId> = vec![37, 42, 41, 27, 74, 1, 5, 127, 26, 75, 4, 9]
+            .into_iter()
+            .map(RecordId::from)
+            .collect();
+
+        assert_eq!(record_ids, expected);
+    }
+}
