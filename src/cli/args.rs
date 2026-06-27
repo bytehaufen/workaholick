@@ -12,6 +12,7 @@ use crate::domain::{
     WorkContext,
 };
 
+// FIXME: Update when domain implemented
 const HEADER: Style = clap_cargo::style::HEADER;
 fn examples_help() -> String {
     format!(
@@ -216,6 +217,7 @@ impl AbsenceDetailsArgs {
 pub struct ScopeArgs {
     /// Preset period to summarize
     #[arg(value_enum, conflicts_with_all = ["from", "to"])]
+    #[arg( value_parser = period_parser())]
     pub period: Option<Period>,
 
     /// Relative period offset (zero or negative), e.g. `-1` for the previous period
@@ -300,6 +302,10 @@ fn work_context_parser() -> impl TypedValueParser<Value = WorkContext> {
 
 fn absence_kind_parser() -> impl TypedValueParser<Value = AbsenceKind> {
     PossibleValuesParser::new(AbsenceKind::VARIANTS.iter().copied()).try_map(|s| s.parse())
+}
+
+fn period_parser() -> impl TypedValueParser<Value = Period> {
+    PossibleValuesParser::new(Period::VARIANTS.iter().copied()).try_map(|s| s.parse())
 }
 
 #[cfg(test)]
