@@ -524,8 +524,8 @@ mod tests {
         write_records(&file_path, &records);
 
         let store = JsonlFileStore::new(&file_path).unwrap();
-        let ids: Vec<_> = store.records().iter().map(|record| record.id().value()).collect();
-        assert_eq!(ids, vec![2, 1]);
+        let ids: Vec<_> = store.records().iter().map(|record| *record.id()).collect();
+        assert_eq!(ids, vec![RecordId::from(2), RecordId::from(1)]);
     }
 
     #[test]
@@ -660,7 +660,7 @@ mod tests {
 
         let store = JsonlFileStore::new(&file_path).unwrap();
         assert_eq!(store.records_by_id.len(), 1);
-        assert_eq!(store.records_by_id.get(&0.into()).unwrap().id().value(), 0);
+        assert_eq!(store.records_by_id.get(&0.into()).unwrap().id(), &RecordId::from(0));
     }
 
     #[test]
@@ -770,8 +770,8 @@ mod tests {
         );
 
         let store = JsonlFileStore::new(&store_file_path).unwrap();
-        let ids: Vec<_> = store.records().iter().map(|record| record.id().value()).collect();
-        assert_eq!(ids, vec![3, 2, 0, 1]);
+        let ids: Vec<_> = store.records().iter().map(|record| *record.id()).collect();
+        assert_eq!(ids, [3, 2, 0, 1].into_iter().map(RecordId::from).collect::<Vec<_>>());
     }
 
     #[test]

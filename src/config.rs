@@ -91,7 +91,6 @@ pub struct CliConfig {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputFormatter {
-    Plain,
     #[default]
     Markdown,
 }

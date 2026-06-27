@@ -1,6 +1,5 @@
 #[cfg(feature = "markdown")]
 mod markdown_formatter;
-mod plain_formatter;
 mod port;
 
 use std::collections::HashSet;
@@ -10,7 +9,6 @@ use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
 
 use crate::{DayOverview, config::OutputFormatter, domain::SummaryKind};
 
-pub use plain_formatter::PlainFormatter;
 pub use port::Formatter;
 
 #[cfg(feature = "markdown")]
@@ -24,11 +22,6 @@ pub fn print_day(
     day_overview: &DayOverview,
 ) -> Result<()> {
     match formatter {
-        OutputFormatter::Plain => {
-            let rendered = PlainFormatter::format_day(date, day_overview);
-            PlainFormatter::print(&rendered);
-            Ok(())
-        }
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
             {
@@ -49,11 +42,6 @@ pub fn print_day(
 
 pub fn print_summary(formatter: OutputFormatter, report: &SummaryReport) -> Result<()> {
     match formatter {
-        OutputFormatter::Plain => {
-            let rendered = PlainFormatter::format_summary(report);
-            PlainFormatter::print(&rendered);
-            Ok(())
-        }
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
             {
@@ -79,11 +67,6 @@ pub fn print_report(
     summary: Option<&SummaryReport>,
 ) -> Result<()> {
     match formatter {
-        OutputFormatter::Plain => {
-            let rendered = PlainFormatter::format_report(report, group_by, summary);
-            PlainFormatter::print(&rendered);
-            Ok(())
-        }
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
             {

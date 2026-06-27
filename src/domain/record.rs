@@ -26,10 +26,6 @@ impl From<u64> for RecordId {
 }
 
 impl RecordId {
-    pub fn value(&self) -> u64 {
-        self.0
-    }
-
     pub fn incremented(&self) -> Self {
         Self::from(self.0 + 1)
     }
