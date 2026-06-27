@@ -65,7 +65,7 @@ fn run_inner<S: RecordRepository>(
         }
         CliCommand::Day { date } => {
             let Some(date) = date.or_else(|| app.last_record_date()) else {
-                anyhow::bail!("There are no entries.");
+                anyhow::bail!("There are no records.");
             };
 
             let day_overview = app.day(date);

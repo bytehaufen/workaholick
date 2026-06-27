@@ -190,9 +190,9 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
 
     pub fn report(&self, scope: SummaryScope) -> anyhow::Result<WorkItemReport> {
         let window = self.summary_window(scope)?;
-        let entries = self.store.records().iter().cloned().collect::<Vec<_>>();
+        let records = self.store.records().iter().cloned().collect::<Vec<_>>();
 
-        Ok(report(&entries, window)?)
+        Ok(report(&records, window)?)
     }
 
     fn summary_window(&self, scope: SummaryScope) -> anyhow::Result<SummaryWindow> {
@@ -862,7 +862,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_for_range_uses_entries_before_scope_for_carry_in_state() {
+    fn summary_for_range_uses_records_before_scope_for_carry_in_state() {
         let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
@@ -932,7 +932,7 @@ mod tests {
     }
 
     #[test]
-    fn report_uses_entries_before_scope_for_carry_in_state() {
+    fn report_uses_records_before_scope_for_carry_in_state() {
         let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![

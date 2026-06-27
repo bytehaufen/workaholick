@@ -563,7 +563,7 @@ mod test {
     }
 
     #[test]
-    fn summary_counts_full_window_for_open_session_without_in_range_entries() {
+    fn summary_counts_full_window_for_open_session_without_in_range_records() {
         let kind = SummaryKind::Work(WorkContext::Home);
 
         let summary = summarize(

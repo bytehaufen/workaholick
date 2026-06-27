@@ -253,7 +253,7 @@ mod tests {
     #[test]
     fn markdown_format_day_includes_header_and_row() {
         let date = NaiveDate::from_ymd_opt(2026, 3, 21).unwrap();
-        let entries = DayOverview {
+        let records = DayOverview {
             work_records: vec![crate::domain::WorkRecord::new(
                 7.into(),
                 Local.with_ymd_and_hms(2026, 3, 21, 5, 15, 12).unwrap(),
@@ -262,7 +262,7 @@ mod tests {
             absence_records: vec![],
         };
 
-        let rendered = MarkdownFormatter::format_day(date, &entries);
+        let rendered = MarkdownFormatter::format_day(date, &records);
 
         assert_eq!(
             &rendered,
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn markdown_format_day_escapes_pipes_and_new_line() {
         let date = NaiveDate::from_ymd_opt(2026, 3, 21).unwrap();
-        let entries = DayOverview {
+        let records = DayOverview {
             work_records: vec![
                 crate::domain::WorkRecord::new(
                     7.into(),
@@ -308,7 +308,7 @@ mod tests {
             )],
         };
 
-        let rendered = MarkdownFormatter::format_day(date, &entries);
+        let rendered = MarkdownFormatter::format_day(date, &records);
 
         assert_eq!(
             &rendered,
