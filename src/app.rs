@@ -130,11 +130,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
     }
 
     pub fn summary(&self, scope: SummaryScope) -> anyhow::Result<SummaryReport> {
-        self.build_summary(scope, false)
-    }
-
-    pub fn report_summary(&self, scope: SummaryScope) -> anyhow::Result<SummaryReport> {
-        self.build_summary(scope, true)
+        self.build_summary(scope)
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -159,15 +155,14 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
     }
 
     ///////////// FIXME: old stuff -> need to transform / update / whatever
-    fn build_summary(&self, scope: SummaryScope, work_only: bool) -> anyhow::Result<SummaryReport> {
+    fn build_summary(&self, scope: SummaryScope) -> anyhow::Result<SummaryReport> {
         let window = self.summary_window(scope.clone())?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
         let summary = summary(&records, window)?;
-        let summary = if work_only { summary.only_work() } else { summary };
 
         match scope {
             SummaryScope::Period { period: Period::Week, .. } => {
-                let weekly_days = weekly_summary_days(&records, window, work_only)?;
+                let weekly_days = weekly_summary_days(&records, window)?;
                 Ok(SummaryReport::with_weekly_balance(
                     window,
                     summary,
@@ -180,7 +175,6 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
                     &records,
                     window,
                     self.config.weekly_target_minutes(),
-                    work_only,
                 )?;
                 Ok(SummaryReport::with_weekly_breakdown(window, summary, weekly_balances))
             }
@@ -315,7 +309,6 @@ fn weekly_balance_breakdown(
     records: &[Record],
     window: SummaryWindow,
     weekly_target_minutes: i64,
-    work_only: bool,
 ) -> anyhow::Result<Vec<SummaryWeek>> {
     let first_week_start = start_of_week(window.start().date_naive());
 
@@ -337,15 +330,15 @@ fn weekly_balance_breakdown(
 
         let week_summary = summary(records, week_window)?;
 
-        let worked_minutes = if work_only {
-            week_summary.work_active_minutes()
-        } else {
-            week_summary.total_active_minutes()
-        };
+        let worked_minutes = week_summary.work_active_minutes();
+        let break_minutes = week_summary.break_minutes();
+        let absence_minutes = week_summary.absence_minutes();
 
         Ok(SummaryWeek::new(
             week_start,
             worked_minutes,
+            break_minutes,
+            absence_minutes,
             (week_window.start() == full_week_start && week_window.end() == full_week_end)
                 .then_some(weekly_target_minutes),
         ))
@@ -356,7 +349,6 @@ fn weekly_balance_breakdown(
 fn weekly_summary_days(
     records: &[Record],
     window: SummaryWindow,
-    work_only: bool,
 ) -> anyhow::Result<Vec<SummaryDay>> {
     let first_date = window.start().date_naive();
     let last_date = window.end().date_naive();
@@ -370,12 +362,11 @@ fn weekly_summary_days(
             if day_end > day_start {
                 let day_window = SummaryWindow::new(day_start, day_end);
                 let day_summary = summary(records, day_window)?;
-                let worked_minutes = if work_only {
-                    day_summary.work_active_minutes()
-                } else {
-                    day_summary.total_active_minutes()
-                };
-                Ok(Some(SummaryDay::new(date, worked_minutes)))
+                let worked_minutes = day_summary.work_active_minutes();
+                let break_minutes = day_summary.break_minutes();
+                let absence_minutes = day_summary.absence_minutes();
+
+                Ok(Some(SummaryDay::new(date, worked_minutes, break_minutes, absence_minutes)))
             } else {
                 Ok(None)
             }
@@ -736,7 +727,7 @@ mod tests {
         assert_eq!(report.worked_minutes(), (1 + 2 + 3 + 4 + 5) * 60);
         assert_eq!(report.balance_minutes(), Some(0));
         assert_eq!(
-            report.weekly_days().iter().map(|day| day.active_minutes()).collect::<Vec<_>>(),
+            report.weekly_days().iter().map(|day| day.worked_minutes()).collect::<Vec<_>>(),
             vec![60, 60 << 1, 3 * 60, 60 << 2, 5 * 60, 0, 0]
         );
         assert!(report.weekly_balances().is_empty());

@@ -83,9 +83,8 @@ fn run_inner<S: RecordRepository>(
         CliCommand::Report(report_args) => {
             let scope = report_args.scope();
             let report = app.report(scope.clone())?;
-            let summary = if report_args.summary { Some(app.report_summary(scope)?) } else { None };
 
-            format::print_report(formatter, &report, report_args.group_by, summary.as_ref())
+            format::print_report(formatter, &report, report_args.group_by)
         }
     }
 }

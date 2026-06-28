@@ -64,13 +64,12 @@ pub fn print_report(
     formatter: OutputFormatter,
     report: &WorkItemReport,
     group_by: Option<ReportGroupBy>,
-    summary: Option<&SummaryReport>,
 ) -> Result<()> {
     match formatter {
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
             {
-                let rendered = MarkdownFormatter::format_report(report, group_by, summary);
+                let rendered = MarkdownFormatter::format_report(report, group_by);
                 MarkdownFormatter::print(&rendered);
                 Ok(())
             }
@@ -125,6 +124,7 @@ fn escape_inline_text(text: &str) -> String {
 pub(super) fn format_summary_kind(kind: SummaryKind) -> String {
     match kind {
         SummaryKind::Work(work_context) => format!("work ({work_context})"),
+        SummaryKind::Absence(absence_kind) => format!("absence ({absence_kind})"),
     }
 }
 
@@ -179,12 +179,16 @@ pub(super) struct SummaryDisplayRow {
 pub(super) struct SummaryDayDisplay {
     pub day: String,
     pub active: String,
+    pub break_time: String,
+    pub absence: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SummaryWeekDisplay {
     pub week: String,
     pub worked: String,
+    pub break_time: String,
+    pub absence: String,
     pub target: String,
     pub balance: String,
 }
@@ -215,7 +219,9 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
         .iter()
         .map(|day| SummaryDayDisplay {
             day: format_summary_day(day.date()),
-            active: format_summary_duration(day.active_minutes()),
+            active: format_summary_duration(day.worked_minutes()),
+            break_time: format_summary_duration(day.break_minutes()),
+            absence: format_summary_duration(day.absence_minutes()),
         })
         .collect();
     let weekly_balances = report
@@ -224,6 +230,8 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
         .map(|week| SummaryWeekDisplay {
             week: format_summary_week(week.start()),
             worked: format_summary_duration(week.worked_minutes()),
+            break_time: format_summary_duration(week.break_minutes()),
+            absence: format_summary_duration(week.absence_minutes()),
             target: week
                 .target_minutes()
                 .map(format_summary_duration)
@@ -239,6 +247,10 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
     } else {
         let total_worked_minutes =
             report.weekly_balances().iter().map(|week| week.worked_minutes()).sum();
+        let total_break_minutes =
+            report.weekly_balances().iter().map(|week| week.break_minutes()).sum();
+        let total_absence_minutes =
+            report.weekly_balances().iter().map(|week| week.absence_minutes()).sum();
         let total_target_minutes: i64 =
             report.weekly_balances().iter().filter_map(|week| week.target_minutes()).sum();
         let total_balance_minutes: i64 =
@@ -247,6 +259,8 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
         Some(SummaryWeekDisplay {
             week: "TOTAL".to_string(),
             worked: format_summary_duration(total_worked_minutes),
+            break_time: format_summary_duration(total_break_minutes),
+            absence: format_summary_duration(total_absence_minutes),
             target: format_summary_duration(total_target_minutes),
             balance: format_signed_summary_duration(total_balance_minutes),
         })
@@ -675,9 +689,9 @@ mod tests {
             summary(&records, window).unwrap(),
             40 * 60,
             vec![
-                SummaryDay::new(ts(12, 0, 0).date_naive(), 8 * 60),
-                SummaryDay::new(ts(13, 0, 0).date_naive(), 6 * 60),
-                SummaryDay::new(ts(14, 0, 0).date_naive(), 0),
+                SummaryDay::new(ts(12, 0, 0).date_naive(), 8 * 60, 0, 0),
+                SummaryDay::new(ts(13, 0, 0).date_naive(), 6 * 60, 0, 0),
+                SummaryDay::new(ts(14, 0, 0).date_naive(), 0, 0, 0),
             ],
         );
 
@@ -713,9 +727,24 @@ mod tests {
         assert_eq!(
             display.weekly_days,
             vec![
-                SummaryDayDisplay { day: "Mon 2026-01-12".into(), active: "8h".into() },
-                SummaryDayDisplay { day: "Tue 2026-01-13".into(), active: "6h".into() },
-                SummaryDayDisplay { day: "Wed 2026-01-14".into(), active: "0m".into() },
+                SummaryDayDisplay {
+                    day: "Mon 2026-01-12".into(),
+                    active: "8h".into(),
+                    break_time: "0m".into(),
+                    absence: "0m".into(),
+                },
+                SummaryDayDisplay {
+                    day: "Tue 2026-01-13".into(),
+                    active: "6h".into(),
+                    break_time: "0m".into(),
+                    absence: "0m".into(),
+                },
+                SummaryDayDisplay {
+                    day: "Wed 2026-01-14".into(),
+                    active: "0m".into(),
+                    break_time: "0m".into(),
+                    absence: "0m".into(),
+                },
             ]
         );
         assert!(display.weekly_balances.is_empty());
@@ -734,9 +763,11 @@ mod tests {
                 SummaryWeek::new(
                     Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
                     8 * 60,
+                    0,
+                    0,
                     None,
                 ),
-                SummaryWeek::new(ts(5, 0, 0).date_naive(), 40 * 60, Some(40 * 60)),
+                SummaryWeek::new(ts(5, 0, 0).date_naive(), 40 * 60, 0, 0, Some(40 * 60)),
             ],
         );
 
@@ -748,12 +779,16 @@ mod tests {
                 SummaryWeekDisplay {
                     week: "2026-W01".into(),
                     worked: "8h".into(),
+                    break_time: "0m".into(),
+                    absence: "0m".into(),
                     target: "n/a".into(),
                     balance: "n/a".into(),
                 },
                 SummaryWeekDisplay {
                     week: "2026-W02".into(),
                     worked: "40h".into(),
+                    break_time: "0m".into(),
+                    absence: "0m".into(),
                     target: "40h".into(),
                     balance: "0m".into(),
                 },
@@ -764,6 +799,8 @@ mod tests {
             Some(SummaryWeekDisplay {
                 week: "TOTAL".into(),
                 worked: "48h".into(),
+                break_time: "0m".into(),
+                absence: "0m".into(),
                 target: "40h".into(),
                 balance: "0m".into(),
             })

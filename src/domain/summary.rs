@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Local, NaiveDate, TimeDelta};
 
 use crate::domain::{
-    Period, Record, TimelineValidationError, WorkContext, transition_day_state,
+    AbsenceKind, Period, Record, TimelineValidationError, WorkContext, transition_day_state,
     work_state::DayState,
 };
 
@@ -16,12 +16,18 @@ pub enum SummaryScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SummaryKind {
     Work(WorkContext),
-    // FIXME: Add Absence
+    Absence(AbsenceKind),
 }
 
 impl From<WorkContext> for SummaryKind {
     fn from(value: WorkContext) -> Self {
         Self::Work(value)
+    }
+}
+
+impl From<AbsenceKind> for SummaryKind {
+    fn from(value: AbsenceKind) -> Self {
+        Self::Absence(value)
     }
 }
 
@@ -35,16 +41,6 @@ impl Summary {
         self.0.iter().map(|(kind, bucket)| (*kind, bucket))
     }
 
-    pub(crate) fn only_work(&self) -> Self {
-        Self(
-            self.0
-                .iter()
-                .filter(|(kind, _)| matches!(kind, SummaryKind::Work(..)))
-                .map(|(kind, bucket)| (*kind, bucket.clone()))
-                .collect(),
-        )
-    }
-
     pub(crate) fn total_active_minutes(&self) -> i64 {
         self.0.values().map(|bucket| bucket.active_time().num_minutes().max(0)).sum()
     }
@@ -53,6 +49,18 @@ impl Summary {
         self.0
             .iter()
             .filter(|(kind, _)| matches!(kind, SummaryKind::Work(..)))
+            .map(|(_, bucket)| bucket.active_time().num_minutes().max(0))
+            .sum()
+    }
+
+    pub(crate) fn break_minutes(&self) -> i64 {
+        self.0.values().map(|bucket| bucket.break_time().num_minutes().max(0)).sum()
+    }
+
+    pub(crate) fn absence_minutes(&self) -> i64 {
+        self.0
+            .iter()
+            .filter(|(kind, _)| matches!(kind, SummaryKind::Absence(..)))
             .map(|(_, bucket)| bucket.active_time().num_minutes().max(0))
             .sum()
     }
@@ -73,36 +81,77 @@ impl Summary {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SummaryMetrics {
+    worked_minutes: i64,
+    break_minutes: i64,
+    absence_minutes: i64,
+}
+
+impl SummaryMetrics {
+    /// Work - Absence + Absence minutes
+    fn credited_minutes(&self) -> i64 {
+        self.worked_minutes - self.break_minutes + self.absence_minutes
+    }
+
+    fn balance_minutes(&self, target_minutes: i64) -> i64 {
+        self.credited_minutes() - target_minutes
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SummaryDay {
     date: NaiveDate,
-    active_minutes: i64,
+    metrics: SummaryMetrics,
 }
 
 impl SummaryDay {
-    pub(crate) fn new(date: NaiveDate, active_minutes: i64) -> Self {
-        Self { date, active_minutes }
+    pub(crate) fn new(
+        date: NaiveDate,
+        worked_minutes: i64,
+        break_minutes: i64,
+        absence_minutes: i64,
+    ) -> Self {
+        Self { date, metrics: SummaryMetrics { worked_minutes, break_minutes, absence_minutes } }
     }
 
     pub(crate) fn date(&self) -> NaiveDate {
         self.date
     }
 
-    pub(crate) fn active_minutes(&self) -> i64 {
-        self.active_minutes
+    pub(crate) fn worked_minutes(&self) -> i64 {
+        self.metrics.worked_minutes
+    }
+
+    pub(crate) fn break_minutes(&self) -> i64 {
+        self.metrics.break_minutes
+    }
+
+    pub(crate) fn absence_minutes(&self) -> i64 {
+        self.metrics.absence_minutes
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SummaryWeek {
     start: NaiveDate,
-    worked_minutes: i64,
+    metrics: SummaryMetrics,
     target_minutes: Option<i64>,
 }
 
 impl SummaryWeek {
-    pub(crate) fn new(start: NaiveDate, worked_minutes: i64, target_minutes: Option<i64>) -> Self {
-        Self { start, worked_minutes, target_minutes }
+    pub(crate) fn new(
+        start: NaiveDate,
+        worked_minutes: i64,
+        break_minutes: i64,
+        absence_minutes: i64,
+        target_minutes: Option<i64>,
+    ) -> Self {
+        Self {
+            start,
+            metrics: SummaryMetrics { worked_minutes, break_minutes, absence_minutes },
+            target_minutes,
+        }
     }
 
     pub(crate) fn start(&self) -> NaiveDate {
@@ -110,7 +159,15 @@ impl SummaryWeek {
     }
 
     pub(crate) fn worked_minutes(&self) -> i64 {
-        self.worked_minutes
+        self.metrics.worked_minutes
+    }
+
+    pub(crate) fn break_minutes(&self) -> i64 {
+        self.metrics.break_minutes
+    }
+
+    pub(crate) fn absence_minutes(&self) -> i64 {
+        self.metrics.absence_minutes
     }
 
     pub(crate) fn target_minutes(&self) -> Option<i64> {
@@ -118,7 +175,7 @@ impl SummaryWeek {
     }
 
     pub(crate) fn balance_minutes(&self) -> Option<i64> {
-        self.target_minutes.map(|target| self.worked_minutes - target)
+        self.target_minutes.map(|mins| self.metrics.balance_minutes(mins))
     }
 }
 
@@ -126,6 +183,7 @@ impl SummaryWeek {
 pub struct SummaryReport {
     window: SummaryWindow,
     summary: Summary,
+    totals: SummaryMetrics,
     weekly_target_minutes: Option<i64>,
     weekly_days: Vec<SummaryDay>,
     weekly_balances: Vec<SummaryWeek>,
@@ -136,6 +194,7 @@ impl SummaryReport {
         Self {
             window,
             summary,
+            totals: Default::default(),
             weekly_target_minutes: None,
             weekly_days: Vec::new(),
             weekly_balances: Vec::new(),
@@ -151,6 +210,7 @@ impl SummaryReport {
         Self {
             window,
             summary,
+            totals: Default::default(),
             weekly_target_minutes: Some(weekly_target_minutes),
             weekly_days,
             weekly_balances: Vec::new(),
@@ -165,6 +225,7 @@ impl SummaryReport {
         Self {
             window,
             summary,
+            totals: Default::default(),
             weekly_target_minutes: None,
             weekly_days: Vec::new(),
             weekly_balances,
@@ -272,10 +333,10 @@ fn add_dates(bucket: &mut TimeBucket, start: DateTime<Local>, end: DateTime<Loca
     let first_date = start.date_naive();
     let last_date = (end - TimeDelta::seconds(1)).date_naive();
 
-    bucket.dates.extend(
-        std::iter::successors(Some(first_date), |date| date.succ_opt())
-            .take_while(|&date| date <= last_date),
-    );
+    let dates_iter = std::iter::successors(Some(first_date), |date| date.succ_opt())
+        .take_while(|&date| date <= last_date);
+
+    bucket.dates.extend(dates_iter);
 }
 
 fn add_time(
@@ -337,7 +398,6 @@ pub fn summary(
     let init_state =
         State { state: DayState::Idle, last_timestamp: None, summary: SummaryMap::new() };
 
-    // FIXME: Need to respect Absence
     let result = records
         .iter()
         .filter_map(Record::as_work)

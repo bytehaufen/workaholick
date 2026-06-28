@@ -280,10 +280,6 @@ pub struct ReportArgs {
     /// Group the report rows
     #[arg(long, value_enum)]
     pub group_by: Option<ReportGroupBy>,
-
-    /// Append the aggregate summary for the same scope
-    #[arg(long)]
-    pub summary: bool,
 }
 
 impl ReportArgs {
@@ -352,21 +348,13 @@ mod tests {
 
         assert_eq!(args.scope(), SummaryScope::Period { period: Period::Week, offset: 0 });
         assert_eq!(args.group_by, None);
-        assert!(!args.summary);
     }
 
     #[test]
     fn report_scope_parses_grouping_and_summary_flag() {
-        let cli = Cli::try_parse_from([
-            "workaholick",
-            "report",
-            "week",
-            "-1",
-            "--group-by",
-            "title",
-            "--summary",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["workaholick", "report", "week", "-1", "--group-by", "title"])
+                .unwrap();
 
         let CliCommand::Report(args) = cli.command else {
             panic!("expected report command");
@@ -374,7 +362,6 @@ mod tests {
 
         assert_eq!(args.scope(), SummaryScope::Period { period: Period::Week, offset: -1 });
         assert_eq!(args.group_by, Some(ReportGroupBy::Title));
-        assert!(args.summary);
     }
 
     #[test]

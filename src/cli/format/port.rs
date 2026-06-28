@@ -12,9 +12,5 @@ pub trait Formatter {
 
     fn format_summary(report: &SummaryReport) -> String;
 
-    fn format_report(
-        report: &WorkItemReport,
-        group_by: Option<ReportGroupBy>,
-        summary: Option<&SummaryReport>,
-    ) -> String;
+    fn format_report(report: &WorkItemReport, group_by: Option<ReportGroupBy>) -> String;
 }

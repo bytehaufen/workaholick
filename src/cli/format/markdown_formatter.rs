@@ -100,33 +100,41 @@ impl Formatter for MarkdownFormatter {
                 ));
             });
 
-            output.push('\n');
+            if has_weekly_days || has_weekly_balances || has_metrics {
+                output.push('\n');
+            }
         }
 
         if has_weekly_days {
-            output.push_str("| Day | Worked |\n");
-            output.push_str("| :-- | --: |\n");
+            output.push_str("| Day | Worked | Break | Absence |\n");
+            output.push_str("| :-- | --: | --: | --: |\n");
 
             summary.weekly_days.iter().for_each(|row| {
                 output.push_str(&format!(
-                    "| {} | {} |\n",
+                    "| {} | {} | {} | {} |\n",
                     escape_markdown_table_cell(&row.day),
-                    row.active
+                    row.active,
+                    row.break_time,
+                    row.absence,
                 ));
             });
 
-            output.push('\n');
+            if has_weekly_balances || has_metrics {
+                output.push('\n');
+            }
         }
 
         if has_weekly_balances {
-            output.push_str("| Week | Worked | Target | Balance |\n");
-            output.push_str("| :-- | --: | --: | --: |\n");
+            output.push_str("| Week | Worked | Break | Absence | Target | Balance |\n");
+            output.push_str("| :-- | --: | --: | --: | --: | --: |\n");
 
             summary.weekly_balances.iter().for_each(|row| {
                 output.push_str(&format!(
-                    "| {} | {} | {} | {} |\n",
+                    "| {} | {} | {} | {} | {} | {} |\n",
                     escape_markdown_table_cell(&row.week),
                     row.worked,
+                    row.break_time,
+                    row.absence,
                     row.target,
                     row.balance,
                 ));
@@ -134,15 +142,19 @@ impl Formatter for MarkdownFormatter {
 
             if let Some(total) = &summary.weekly_balances_total {
                 output.push_str(&format!(
-                    "| {} | {} | {} | {} |\n",
+                    "| {} | {} | {} | {} | {} | {} |\n",
                     escape_markdown_table_cell(&total.week),
                     total.worked,
+                    total.break_time,
+                    total.absence,
                     total.target,
                     total.balance,
                 ));
             }
 
-            output.push('\n');
+            if has_metrics {
+                output.push('\n');
+            }
         }
 
         if let (Some(target), Some(balance)) = (&summary.target, &summary.balance) {
@@ -155,11 +167,7 @@ impl Formatter for MarkdownFormatter {
         output
     }
 
-    fn format_report(
-        report: &WorkItemReport,
-        group_by: Option<ReportGroupBy>,
-        summary: Option<&SummaryReport>,
-    ) -> String {
+    fn format_report(report: &WorkItemReport, group_by: Option<ReportGroupBy>) -> String {
         let report = prepare_report(report, group_by);
         let mut output = String::new();
         output.push_str(&format!("# {}\n\n", report.title));
@@ -223,12 +231,6 @@ impl Formatter for MarkdownFormatter {
                 ));
             });
         }
-
-        if let Some(summary) = summary {
-            output.push('\n');
-            output.push_str(&Self::format_summary(summary));
-        }
-
         output
     }
 }
@@ -354,11 +356,11 @@ mod tests {
 | work (office) | 1 | 3h 30m | 30m |
 | TOTAL |  | 5h 45m | 30m |
 
-| Day | Worked |
-| :-- | --: |
-| Mon 2026-01-12 | 8h |
-| Tue 2026-01-13 | 6h |
-| Wed 2026-01-14 | 0m |
+| Day | Worked | Break | Absence |
+| :-- | --: | --: | --: |
+| Mon 2026-01-12 | 8h | 0m | 0m |
+| Tue 2026-01-13 | 6h | 0m | 0m |
+| Wed 2026-01-14 | 0m | 0m | 0m |
 
 | Metric | Value |
 | :-- | --: |
@@ -400,11 +402,15 @@ _No tracked time._
                 SummaryWeek::new(
                     Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
                     8 * 60,
+                    0,
+                    0,
                     None,
                 ),
                 SummaryWeek::new(
                     Local.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap().date_naive(),
                     40 * 60,
+                    0,
+                    0,
                     Some(40 * 60),
                 ),
             ],
@@ -418,19 +424,18 @@ _No tracked time._
 
 _No tracked time._
 
-| Week | Worked | Target | Balance |
-| :-- | --: | --: | --: |
-| 2026-W01 | 8h | n/a | n/a |
-| 2026-W02 | 40h | 40h | 0m |
-| TOTAL | 48h | 40h | 0m |
-
+| Week | Worked | Break | Absence | Target | Balance |
+| :-- | --: | --: | --: | --: | --: |
+| 2026-W01 | 8h | 0m | 0m | n/a | n/a |
+| 2026-W02 | 40h | 0m | 0m | 40h | 0m |
+| TOTAL | 48h | 0m | 0m | 40h | 0m |
 "#
         );
     }
 
     #[test]
     fn markdown_format_report_renders_detailed_rows() {
-        let rendered = MarkdownFormatter::format_report(&detailed_report(), None, None);
+        let rendered = MarkdownFormatter::format_report(&detailed_report(), None);
 
         assert_eq!(
             &rendered,
@@ -445,17 +450,9 @@ _No tracked time._
     }
 
     #[test]
-    fn markdown_format_report_renders_grouped_rows_and_summary() {
-        let window = SummaryWindow::new(
-            Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
-            Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
-        );
-        let summary = SummaryReport::new(window, summary(&[], window).unwrap());
-        let rendered = MarkdownFormatter::format_report(
-            &detailed_report(),
-            Some(ReportGroupBy::Title),
-            Some(&summary),
-        );
+    fn markdown_format_report_renders_grouped_rows() {
+        let rendered =
+            MarkdownFormatter::format_report(&detailed_report(), Some(ReportGroupBy::Title));
 
         assert_eq!(
             &rendered,
@@ -465,10 +462,6 @@ _No tracked time._
 | :-- | --: | --: |
 | handoff | 1 | 2h |
 | wrap | 1 | 2h |
-
-# Summary 2026-01-10
-
-_No tracked time._
 "#
         );
     }
@@ -478,7 +471,6 @@ _No tracked time._
         let rendered = MarkdownFormatter::format_report(
             &detailed_report(),
             Some(ReportGroupBy::TitleDescription),
-            None,
         );
 
         assert_eq!(
@@ -503,7 +495,6 @@ _No tracked time._
                 ),
                 vec![],
             ),
-            None,
             None,
         );
 
@@ -530,13 +521,19 @@ _No completed work items._
                 SummaryDay::new(
                     Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap().date_naive(),
                     8 * 60,
+                    0,
+                    0,
                 ),
                 SummaryDay::new(
                     Local.with_ymd_and_hms(2026, 1, 13, 0, 0, 0).unwrap().date_naive(),
                     6 * 60,
+                    0,
+                    0,
                 ),
                 SummaryDay::new(
                     Local.with_ymd_and_hms(2026, 1, 14, 0, 0, 0).unwrap().date_naive(),
+                    0,
+                    0,
                     0,
                 ),
             ],
