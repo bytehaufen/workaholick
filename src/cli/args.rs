@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use strum::VariantNames;
 
 use crate::domain::{
-    AbsenceKind, AbsencePortion, AbsenceRecordInput, DateScope, Period, ReportGroupBy, WorkContext,
+    AbsenceKind, AbsencePortion, AbsenceRecordInput, ActivityGroupBy, DateScope, Period,
+    WorkContext,
 };
 
 // FIXME: Update when domain implemented
@@ -22,8 +23,8 @@ fn examples_help() -> String {
   workaholick absence vacation --date 2026-05-01
   workaholick absence sick --date 2026-05-01 --portion half-day --note \"doctor\"
   workaholick day
-  workaholick summary week -1
-  workaholick report --from 2026-04-01 --to 2026-04-06 --group-by title
+  workaholick timesheet week -1
+  workaholick activity --from 2026-04-01 --to 2026-04-06 --group-by title
 "
     )
 }
@@ -101,11 +102,11 @@ pub enum CliCommand {
 
     /// Summarize tracked time and breaks for a period or date range
     #[command(visible_alias = "sum")]
-    Summary(SummaryArgs),
+    Timesheet(TimesheetArgs),
 
-    /// Show completed work items for a period or date range
+    /// Show completed items for a period or date range
     #[command(visible_alias = "rep")]
-    Report(ReportArgs),
+    Activity(ActivityArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -210,7 +211,7 @@ impl AbsenceDetailsArgs {
     }
 }
 
-/// Scope selection shared by summary and report commands
+/// Scope selection shared by time sheet and activity commands
 #[derive(Args, Debug, Clone)]
 #[command(group(ArgGroup::new("scope").args(["period", "from"]).required(false)))]
 pub struct ScopeArgs {
@@ -246,7 +247,7 @@ impl ScopeArgs {
             }
             (None, None, Some(from), Some(to)) => DateScope::Range { from, to },
             (None, None, None, None) => DateScope::Period { period: Period::Week, offset: 0 },
-            _ => unreachable!("clap validation should prevent invalid summary arguments"),
+            _ => unreachable!("clap validation should prevent invalid timesheet arguments"),
         }
     }
 }
@@ -257,31 +258,31 @@ fn parse_period_offset(value: &str) -> Result<i64, String> {
     if offset > 0 { Err("period offset must be zero or negative".to_string()) } else { Ok(offset) }
 }
 
-/// Arguments for the `summary` command
+/// Arguments for the `timesheet` command
 #[derive(Args, Debug, Clone)]
-pub struct SummaryArgs {
+pub struct TimesheetArgs {
     #[command(flatten)]
     pub scope_args: ScopeArgs,
 }
 
-impl SummaryArgs {
+impl TimesheetArgs {
     pub fn scope(&self) -> DateScope {
         self.scope_args.scope()
     }
 }
 
-/// Arguments for the `report` command
+/// Arguments for the `activity` command
 #[derive(Args, Debug, Clone)]
-pub struct ReportArgs {
+pub struct ActivityArgs {
     #[command(flatten)]
     pub scope_args: ScopeArgs,
 
-    /// Group the report rows
+    /// Group the activity rows
     #[arg(long, value_enum)]
-    pub group_by: Option<ReportGroupBy>,
+    pub group_by: Option<ActivityGroupBy>,
 }
 
-impl ReportArgs {
+impl ActivityArgs {
     pub fn scope(&self) -> DateScope {
         self.scope_args.scope()
     }
@@ -309,40 +310,40 @@ mod tests {
     use clap::Parser;
 
     #[test]
-    fn summary_scope_defaults_to_current_week() {
-        let cli = Cli::try_parse_from(["workaholick", "summary"]).unwrap();
+    fn timesheet_scope_defaults_to_current_week() {
+        let cli = Cli::try_parse_from(["workaholick", "timesheet"]).unwrap();
 
-        let CliCommand::Summary(args) = cli.command else {
-            panic!("expected summary command");
+        let CliCommand::Timesheet(args) = cli.command else {
+            panic!("expected timesheet command");
         };
 
         assert_eq!(args.scope(), DateScope::Period { period: Period::Week, offset: 0 });
     }
 
     #[test]
-    fn summary_scope_parses_negative_period_offset() {
-        let cli = Cli::try_parse_from(["workaholick", "summary", "week", "-1"]).unwrap();
+    fn timesheet_scope_parses_negative_period_offset() {
+        let cli = Cli::try_parse_from(["workaholick", "timesheet", "week", "-1"]).unwrap();
 
-        let CliCommand::Summary(args) = cli.command else {
-            panic!("expected summary command");
+        let CliCommand::Timesheet(args) = cli.command else {
+            panic!("expected timesheet command");
         };
 
         assert_eq!(args.scope(), DateScope::Period { period: Period::Week, offset: -1 });
     }
 
     #[test]
-    fn summary_scope_rejects_positive_period_offset() {
-        let err = Cli::try_parse_from(["workaholick", "summary", "month", "1"]).unwrap_err();
+    fn timesheet_scope_rejects_positive_period_offset() {
+        let err = Cli::try_parse_from(["workaholick", "timesheet", "month", "1"]).unwrap_err();
 
         assert!(err.to_string().contains("period offset must be zero or negative"));
     }
 
     #[test]
-    fn report_scope_defaults_to_current_week() {
-        let cli = Cli::try_parse_from(["workaholick", "report"]).unwrap();
+    fn activity_scope_defaults_to_current_week() {
+        let cli = Cli::try_parse_from(["workaholick", "activity"]).unwrap();
 
-        let CliCommand::Report(args) = cli.command else {
-            panic!("expected report command");
+        let CliCommand::Activity(args) = cli.command else {
+            panic!("expected activity command");
         };
 
         assert_eq!(args.scope(), DateScope::Period { period: Period::Week, offset: 0 });
@@ -350,29 +351,30 @@ mod tests {
     }
 
     #[test]
-    fn report_scope_parses_grouping_and_summary_flag() {
+    fn activity_scope_parses_grouping() {
         let cli =
-            Cli::try_parse_from(["workaholick", "report", "week", "-1", "--group-by", "title"])
+            Cli::try_parse_from(["workaholick", "activity", "week", "-1", "--group-by", "title"])
                 .unwrap();
 
-        let CliCommand::Report(args) = cli.command else {
-            panic!("expected report command");
+        let CliCommand::Activity(args) = cli.command else {
+            panic!("expected activity command");
         };
 
         assert_eq!(args.scope(), DateScope::Period { period: Period::Week, offset: -1 });
-        assert_eq!(args.group_by, Some(ReportGroupBy::Title));
+        assert_eq!(args.group_by, Some(ActivityGroupBy::Title));
     }
 
     #[test]
-    fn report_scope_parses_title_description_grouping() {
-        let cli = Cli::try_parse_from(["workaholick", "report", "--group-by", "title-description"])
-            .unwrap();
+    fn activity_scope_parses_title_description_grouping() {
+        let cli =
+            Cli::try_parse_from(["workaholick", "activity", "--group-by", "title-description"])
+                .unwrap();
 
-        let CliCommand::Report(args) = cli.command else {
-            panic!("expected report command");
+        let CliCommand::Activity(args) = cli.command else {
+            panic!("expected activity command");
         };
 
-        assert_eq!(args.group_by, Some(ReportGroupBy::TitleDescription));
+        assert_eq!(args.group_by, Some(ActivityGroupBy::TitleDescription));
     }
 
     #[test]

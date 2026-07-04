@@ -129,7 +129,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
             .max()
     }
 
-    pub fn summary(&self, scope: DateScope) -> anyhow::Result<SummaryReport> {
+    pub fn timesheet(&self, scope: DateScope) -> anyhow::Result<SummaryReport> {
         self.build_summary(scope)
     }
 
@@ -182,7 +182,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         }
     }
 
-    pub fn report(&self, scope: DateScope) -> anyhow::Result<WorkItemReport> {
+    pub fn activity(&self, scope: DateScope) -> anyhow::Result<WorkItemReport> {
         let window = self.summary_window(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
 
@@ -638,7 +638,7 @@ mod tests {
         )
         .unwrap();
 
-        let err = app.summary(DateScope::Range { from: date(12), to: date(10) }).unwrap_err();
+        let err = app.timesheet(DateScope::Range { from: date(12), to: date(10) }).unwrap_err();
 
         assert_eq!(err.to_string(), "Summary start date must be on or before end date.");
     }
@@ -660,7 +660,7 @@ mod tests {
         )
         .unwrap();
 
-        let err = app.summary(DateScope::Range { from: date(16), to: date(17) }).unwrap_err();
+        let err = app.timesheet(DateScope::Range { from: date(16), to: date(17) }).unwrap_err();
 
         assert_eq!(err.to_string(), "Summary range is empty.");
     }
@@ -718,7 +718,7 @@ mod tests {
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 
-        let report = app.summary(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
+        let report = app.timesheet(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
         assert_eq!(report.weekly_target_minutes(), Some(1 + 2 + 3 + 4 + 5).map(|v| v * 60));
         assert_eq!(report.worked_minutes(), (1 + 2 + 3 + 4 + 5) * 60);
@@ -745,7 +745,7 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.summary(DateScope::Range { from: date(12), to: date(12) }).unwrap();
+        let report = app.timesheet(DateScope::Range { from: date(12), to: date(12) }).unwrap();
 
         assert_eq!(report.weekly_target_minutes(), None);
         assert_eq!(report.worked_minutes(), 4 * 60);
@@ -783,7 +783,7 @@ mod tests {
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 
-        let report = app.summary(DateScope::Period { period: Period::Month, offset: 0 }).unwrap();
+        let report = app.timesheet(DateScope::Period { period: Period::Month, offset: 0 }).unwrap();
 
         assert_eq!(
             report
@@ -836,7 +836,7 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.summary(DateScope::Range { from: date(10), to: date(10) }).unwrap();
+        let report = app.timesheet(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(
             report.summary().active_time(TimeCategory::Work(context)),
@@ -869,7 +869,7 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.summary(DateScope::Range { from: date(10), to: date(10) }).unwrap();
+        let report = app.timesheet(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(
             report.summary().active_time(TimeCategory::Work(context)),
@@ -909,7 +909,7 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.report(DateScope::Range { from: date(10), to: date(10) }).unwrap();
+        let report = app.activity(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(report.rows().len(), 2);
         assert_eq!(report.rows()[0].title(), "handoff");
@@ -945,7 +945,7 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.report(DateScope::Range { from: date(10), to: date(10) }).unwrap();
+        let report = app.activity(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(report.rows().len(), 1);
         assert_eq!(report.rows()[0].start(), ts(10, 0, 0));

@@ -76,15 +76,15 @@ fn run_inner<S: RecordRepository>(
 
             format::print_day(formatter, date, &day_overview)
         }
-        CliCommand::Summary(summary_args) => {
-            let report = app.summary(summary_args.scope())?;
-            format::print_summary(formatter, &report)
+        CliCommand::Timesheet(timesheet_args) => {
+            let report = app.timesheet(timesheet_args.scope())?;
+            format::print_timesheet(formatter, &report)
         }
-        CliCommand::Report(report_args) => {
-            let scope = report_args.scope();
-            let report = app.report(scope.clone())?;
+        CliCommand::Activity(activity_args) => {
+            let scope = activity_args.scope();
+            let report = app.activity(scope.clone())?;
 
-            format::print_report(formatter, &report, report_args.group_by)
+            format::print_activity(formatter, &report, activity_args.group_by)
         }
     }
 }

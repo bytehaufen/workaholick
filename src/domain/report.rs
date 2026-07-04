@@ -19,7 +19,7 @@ use crate::domain::{
 )]
 #[strum(serialize_all = "kebab-case")]
 #[serde(rename_all = "snake_case")]
-pub enum ReportGroupBy {
+pub enum ActivityGroupBy {
     Title,
     TitleDescription,
 }

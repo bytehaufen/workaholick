@@ -14,7 +14,7 @@ pub use port::Formatter;
 #[cfg(feature = "markdown")]
 pub use markdown_formatter::MarkdownFormatter;
 
-use crate::domain::{ReportGroupBy, SummaryReport, TimeWindow, WorkCommand, WorkItemReport};
+use crate::domain::{ActivityGroupBy, SummaryReport, TimeWindow, WorkCommand, WorkItemReport};
 
 pub fn print_day(
     formatter: OutputFormatter,
@@ -40,7 +40,7 @@ pub fn print_day(
     }
 }
 
-pub fn print_summary(formatter: OutputFormatter, report: &SummaryReport) -> Result<()> {
+pub fn print_timesheet(formatter: OutputFormatter, report: &SummaryReport) -> Result<()> {
     match formatter {
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
@@ -60,10 +60,10 @@ pub fn print_summary(formatter: OutputFormatter, report: &SummaryReport) -> Resu
     }
 }
 
-pub fn print_report(
+pub fn print_activity(
     formatter: OutputFormatter,
     report: &WorkItemReport,
-    group_by: Option<ReportGroupBy>,
+    group_by: Option<ActivityGroupBy>,
 ) -> Result<()> {
     match formatter {
         OutputFormatter::Markdown => {
@@ -285,10 +285,10 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
 
 pub(super) fn prepare_report(
     report: &WorkItemReport,
-    group_by: Option<ReportGroupBy>,
+    group_by: Option<ActivityGroupBy>,
 ) -> ReportDisplay {
     match group_by {
-        Some(ReportGroupBy::Title) => ReportDisplay {
+        Some(ActivityGroupBy::Title) => ReportDisplay {
             title: format_report_title(report.window(), group_by),
             rows: Vec::new(),
             groups: report
@@ -304,7 +304,7 @@ pub(super) fn prepare_report(
             show_description: false,
             show_group_description: false,
         },
-        Some(ReportGroupBy::TitleDescription) => ReportDisplay {
+        Some(ActivityGroupBy::TitleDescription) => ReportDisplay {
             title: format_report_title(report.window(), group_by),
             rows: Vec::new(),
             groups: report
@@ -349,12 +349,12 @@ pub(super) fn format_summary_title(window: TimeWindow) -> String {
     format!("Summary {}", format_summary_window(window))
 }
 
-pub(super) fn format_report_title(window: TimeWindow, group_by: Option<ReportGroupBy>) -> String {
+pub(super) fn format_report_title(window: TimeWindow, group_by: Option<ActivityGroupBy>) -> String {
     match group_by {
-        Some(ReportGroupBy::Title) => {
+        Some(ActivityGroupBy::Title) => {
             format!("Report {} (grouped by title)", format_summary_window(window))
         }
-        Some(ReportGroupBy::TitleDescription) => {
+        Some(ActivityGroupBy::TitleDescription) => {
             format!("Report {} (grouped by title + description)", format_summary_window(window))
         }
         None => format!("Report {}", format_summary_window(window)),
@@ -606,7 +606,7 @@ mod tests {
             ],
         );
 
-        let display = prepare_report(&report, Some(ReportGroupBy::Title));
+        let display = prepare_report(&report, Some(ActivityGroupBy::Title));
 
         assert_eq!(display.title, "Report 2026-01-10 (grouped by title)");
         assert!(display.rows.is_empty());
@@ -646,7 +646,7 @@ mod tests {
             ],
         );
 
-        let display = prepare_report(&report, Some(ReportGroupBy::TitleDescription));
+        let display = prepare_report(&report, Some(ActivityGroupBy::TitleDescription));
 
         assert_eq!(display.title, "Report 2026-01-10 (grouped by title + description)");
         assert!(display.rows.is_empty());

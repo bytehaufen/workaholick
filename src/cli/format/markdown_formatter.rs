@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use termimad::Alignment;
 
 use crate::DayOverview;
-use crate::domain::{ReportGroupBy, SummaryReport, WorkItemReport};
+use crate::domain::{ActivityGroupBy, SummaryReport, WorkItemReport};
 
 use super::Formatter;
 use super::{format_work_command, prepare_report, prepare_summary};
@@ -167,7 +167,7 @@ impl Formatter for MarkdownFormatter {
         output
     }
 
-    fn format_report(report: &WorkItemReport, group_by: Option<ReportGroupBy>) -> String {
+    fn format_report(report: &WorkItemReport, group_by: Option<ActivityGroupBy>) -> String {
         let report = prepare_report(report, group_by);
         let mut output = String::new();
         output.push_str(&format!("# {}\n\n", report.title));
@@ -452,7 +452,7 @@ _No tracked time._
     #[test]
     fn markdown_format_report_renders_grouped_rows() {
         let rendered =
-            MarkdownFormatter::format_report(&detailed_report(), Some(ReportGroupBy::Title));
+            MarkdownFormatter::format_report(&detailed_report(), Some(ActivityGroupBy::Title));
 
         assert_eq!(
             &rendered,
@@ -470,7 +470,7 @@ _No tracked time._
     fn markdown_format_report_renders_grouped_rows_by_title_description() {
         let rendered = MarkdownFormatter::format_report(
             &detailed_report(),
-            Some(ReportGroupBy::TitleDescription),
+            Some(ActivityGroupBy::TitleDescription),
         );
 
         assert_eq!(

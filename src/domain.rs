@@ -13,7 +13,7 @@ pub(crate) use absence::{AbsenceKind, AbsencePortion, AbsenceRecord, AbsenceReco
 pub(crate) use period::Period;
 pub(crate) use record::{Record, RecordId, RecordInput};
 pub(crate) use record_set::{ChangeOutcome, RecordChange, RecordSet};
-pub(crate) use report::{ReportGroupBy, WorkItemReport, report};
+pub(crate) use report::{ActivityGroupBy, WorkItemReport, report};
 pub(crate) use summary::{
     DateScope, DayBreakdown, SummaryReport, TimeCategory, TimeWindow, WeekBreakdown,
     calculate_time_breakdown,
