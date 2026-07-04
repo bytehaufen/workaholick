@@ -156,7 +156,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
 
     ///////////// FIXME: old stuff -> need to transform / update / whatever
     fn build_summary(&self, scope: SummaryScope) -> anyhow::Result<SummaryReport> {
-        let window = self.summary_window(scope.clone())?;
+        let window = self.summary_window(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
         let summary = summary(&records, window)?;
 
@@ -183,25 +183,25 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
     }
 
     pub fn report(&self, scope: SummaryScope) -> anyhow::Result<WorkItemReport> {
-        let window = self.summary_window(scope)?;
+        let window = self.summary_window(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
 
         Ok(report(&records, window)?)
     }
 
-    fn summary_window(&self, scope: SummaryScope) -> anyhow::Result<SummaryWindow> {
+    fn summary_window(&self, scope: &SummaryScope) -> anyhow::Result<SummaryWindow> {
         let now = self.clock.now();
         let today = self.clock.today();
 
         let window = match scope {
             SummaryScope::Period { period, offset } => {
-                period_summary_window(period, offset, today, now)?
+                period_summary_window(*period, *offset, today, now)?
             }
             SummaryScope::Range { from, to } => {
                 anyhow::ensure!(from <= to, "Summary start date must be on or before end date.");
-                let end = next_day(to);
+                let end = next_day(*to);
 
-                date_window(from, end, now)
+                date_window(*from, end, now)
             }
         };
 
@@ -523,7 +523,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(SummaryScope::Range { from: date(10), to: date(12) }).unwrap();
+            app.summary_window(&SummaryScope::Range { from: date(10), to: date(12) }).unwrap();
 
         assert_eq!(window.start(), ts(10, 0, 0));
         assert_eq!(window.end(), ts(13, 0, 0,));
@@ -540,7 +540,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(SummaryScope::Range { from: date(10), to: date(15) }).unwrap();
+            app.summary_window(&SummaryScope::Range { from: date(10), to: date(15) }).unwrap();
 
         assert_eq!(window.start(), ts(10, 0, 0));
         assert_eq!(window.end(), now);
@@ -557,7 +557,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(SummaryScope::Period { period: Period::Week, offset: 0 }).unwrap();
+            app.summary_window(&SummaryScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
         assert_eq!(window.start(), ts(12, 0, 0));
         assert_eq!(window.end(), now);
@@ -574,7 +574,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(SummaryScope::Period { period: Period::Week, offset: -1 }).unwrap();
+            app.summary_window(&SummaryScope::Period { period: Period::Week, offset: -1 }).unwrap();
 
         assert_eq!(window.start(), ts(5, 0, 0));
         assert_eq!(window.end(), ts(12, 0, 0));
@@ -590,8 +590,9 @@ mod tests {
         )
         .unwrap();
 
-        let window =
-            app.summary_window(SummaryScope::Period { period: Period::Month, offset: -1 }).unwrap();
+        let window = app
+            .summary_window(&SummaryScope::Period { period: Period::Month, offset: -1 })
+            .unwrap();
 
         assert_eq!(window.start(), Local.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap());
         assert_eq!(window.end(), Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap());
@@ -608,7 +609,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(SummaryScope::Period { period: Period::Year, offset: -1 }).unwrap();
+            app.summary_window(&SummaryScope::Period { period: Period::Year, offset: -1 }).unwrap();
 
         assert_eq!(window.start(), Local.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap());
         assert_eq!(window.end(), Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap());
@@ -625,7 +626,7 @@ mod tests {
         .unwrap();
 
         let err = app
-            .summary_window(SummaryScope::Period { period: Period::Week, offset: 1 })
+            .summary_window(&SummaryScope::Period { period: Period::Week, offset: 1 })
             .unwrap_err();
 
         assert_eq!(err.to_string(), "Summary period offset must be zero or negative.");
