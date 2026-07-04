@@ -2,9 +2,9 @@ use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate, TimeZone};
 
 use crate::config::Config;
 use crate::domain::{
-    AbsenceRecord, AbsenceRecordInput, ChangeOutcome, Period, Record, RecordChange, RecordId,
-    RecordInput, SummaryDay, SummaryReport, SummaryScope, SummaryWeek, SummaryWindow, WorkCommand,
-    WorkContext, WorkItemReport, WorkRecord, report, summary, validate_records,
+    AbsenceRecord, AbsenceRecordInput, ChangeOutcome, DateScope, DayBreakdown, Period, Record,
+    RecordChange, RecordId, RecordInput, SummaryReport, TimeWindow, WeekBreakdown, WorkCommand,
+    WorkContext, WorkItemReport, WorkRecord, calculate_time_breakdown, report, validate_records,
 };
 use crate::store::RecordRepository;
 
@@ -129,7 +129,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
             .max()
     }
 
-    pub fn summary(&self, scope: SummaryScope) -> anyhow::Result<SummaryReport> {
+    pub fn summary(&self, scope: DateScope) -> anyhow::Result<SummaryReport> {
         self.build_summary(scope)
     }
 
@@ -155,13 +155,13 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
     }
 
     ///////////// FIXME: old stuff -> need to transform / update / whatever
-    fn build_summary(&self, scope: SummaryScope) -> anyhow::Result<SummaryReport> {
+    fn build_summary(&self, scope: DateScope) -> anyhow::Result<SummaryReport> {
         let window = self.summary_window(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
-        let summary = summary(&records, window)?;
+        let summary = calculate_time_breakdown(&records, window)?;
 
         match scope {
-            SummaryScope::Period { period: Period::Week, .. } => {
+            DateScope::Period { period: Period::Week, .. } => {
                 let weekly_days = weekly_summary_days(&records, window)?;
                 Ok(SummaryReport::with_weekly_balance(
                     window,
@@ -170,7 +170,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
                     weekly_days,
                 ))
             }
-            SummaryScope::Period { period: Period::Month | Period::Year, .. } => {
+            DateScope::Period { period: Period::Month | Period::Year, .. } => {
                 let weekly_balances = weekly_balance_breakdown(
                     &records,
                     window,
@@ -182,22 +182,22 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         }
     }
 
-    pub fn report(&self, scope: SummaryScope) -> anyhow::Result<WorkItemReport> {
+    pub fn report(&self, scope: DateScope) -> anyhow::Result<WorkItemReport> {
         let window = self.summary_window(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
 
         Ok(report(&records, window)?)
     }
 
-    fn summary_window(&self, scope: &SummaryScope) -> anyhow::Result<SummaryWindow> {
+    fn summary_window(&self, scope: &DateScope) -> anyhow::Result<TimeWindow> {
         let now = self.clock.now();
         let today = self.clock.today();
 
         let window = match scope {
-            SummaryScope::Period { period, offset } => {
+            DateScope::Period { period, offset } => {
                 period_summary_window(*period, *offset, today, now)?
             }
-            SummaryScope::Range { from, to } => {
+            DateScope::Range { from, to } => {
                 anyhow::ensure!(from <= to, "Summary start date must be on or before end date.");
                 let end = next_day(*to);
 
@@ -258,7 +258,7 @@ fn period_summary_window(
     offset: i64,
     today: NaiveDate,
     now: DateTime<Local>,
-) -> anyhow::Result<SummaryWindow> {
+) -> anyhow::Result<TimeWindow> {
     anyhow::ensure!(offset <= 0, "Summary period offset must be zero or negative.");
 
     let window = match period {
@@ -301,15 +301,15 @@ fn period_summary_window(
     Ok(window)
 }
 
-fn date_window(start: NaiveDate, end: NaiveDate, now: DateTime<Local>) -> SummaryWindow {
-    SummaryWindow::new(start_of_day(start), start_of_day(end).min(now))
+fn date_window(start: NaiveDate, end: NaiveDate, now: DateTime<Local>) -> TimeWindow {
+    TimeWindow::new(start_of_day(start), start_of_day(end).min(now))
 }
 
 fn weekly_balance_breakdown(
     records: &[Record],
-    window: SummaryWindow,
+    window: TimeWindow,
     weekly_target_minutes: i64,
-) -> anyhow::Result<Vec<SummaryWeek>> {
+) -> anyhow::Result<Vec<WeekBreakdown>> {
     let first_week_start = start_of_week(window.start().date_naive());
 
     std::iter::successors(Some(first_week_start), |week_start| {
@@ -323,18 +323,16 @@ fn weekly_balance_breakdown(
         let full_week_start = start_of_day(week_start);
         let full_week_end = start_of_day(week_end);
 
-        let week_window = SummaryWindow::new(
-            full_week_start.max(window.start()),
-            full_week_end.min(window.end()),
-        );
+        let week_window =
+            TimeWindow::new(full_week_start.max(window.start()), full_week_end.min(window.end()));
 
-        let week_summary = summary(records, week_window)?;
+        let week_summary = calculate_time_breakdown(records, week_window)?;
 
         let worked_minutes = week_summary.work_active_minutes();
         let break_minutes = week_summary.break_minutes();
         let absence_minutes = week_summary.absence_minutes();
 
-        Ok(SummaryWeek::new(
+        Ok(WeekBreakdown::new(
             week_start,
             worked_minutes,
             break_minutes,
@@ -348,25 +346,25 @@ fn weekly_balance_breakdown(
 
 fn weekly_summary_days(
     records: &[Record],
-    window: SummaryWindow,
-) -> anyhow::Result<Vec<SummaryDay>> {
+    window: TimeWindow,
+) -> anyhow::Result<Vec<DayBreakdown>> {
     let first_date = window.start().date_naive();
     let last_date = window.end().date_naive();
 
     let days_summary = std::iter::successors(Some(first_date), |date| Some(next_day(*date)))
         .take_while(|date| *date <= last_date)
-        .map(|date| -> anyhow::Result<Option<SummaryDay>> {
+        .map(|date| -> anyhow::Result<Option<DayBreakdown>> {
             let day_start = start_of_day(date).max(window.start());
             let day_end = start_of_day(next_day(date)).min(window.end());
 
             if day_end > day_start {
-                let day_window = SummaryWindow::new(day_start, day_end);
-                let day_summary = summary(records, day_window)?;
+                let day_window = TimeWindow::new(day_start, day_end);
+                let day_summary = calculate_time_breakdown(records, day_window)?;
                 let worked_minutes = day_summary.work_active_minutes();
                 let break_minutes = day_summary.break_minutes();
                 let absence_minutes = day_summary.absence_minutes();
 
-                Ok(Some(SummaryDay::new(date, worked_minutes, break_minutes, absence_minutes)))
+                Ok(Some(DayBreakdown::new(date, worked_minutes, break_minutes, absence_minutes)))
             } else {
                 Ok(None)
             }
@@ -386,7 +384,7 @@ mod tests {
     use super::*;
     use crate::{
         config::ScheduleConfig,
-        domain::{AbsenceKind, AbsencePortion::HalfDay, RecordSet, SummaryKind, WorkContext},
+        domain::{AbsenceKind, AbsencePortion::HalfDay, RecordSet, TimeCategory, WorkContext},
         test_support::*,
     };
 
@@ -523,7 +521,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(&SummaryScope::Range { from: date(10), to: date(12) }).unwrap();
+            app.summary_window(&DateScope::Range { from: date(10), to: date(12) }).unwrap();
 
         assert_eq!(window.start(), ts(10, 0, 0));
         assert_eq!(window.end(), ts(13, 0, 0,));
@@ -540,7 +538,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(&SummaryScope::Range { from: date(10), to: date(15) }).unwrap();
+            app.summary_window(&DateScope::Range { from: date(10), to: date(15) }).unwrap();
 
         assert_eq!(window.start(), ts(10, 0, 0));
         assert_eq!(window.end(), now);
@@ -557,7 +555,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(&SummaryScope::Period { period: Period::Week, offset: 0 }).unwrap();
+            app.summary_window(&DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
         assert_eq!(window.start(), ts(12, 0, 0));
         assert_eq!(window.end(), now);
@@ -574,7 +572,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(&SummaryScope::Period { period: Period::Week, offset: -1 }).unwrap();
+            app.summary_window(&DateScope::Period { period: Period::Week, offset: -1 }).unwrap();
 
         assert_eq!(window.start(), ts(5, 0, 0));
         assert_eq!(window.end(), ts(12, 0, 0));
@@ -590,9 +588,8 @@ mod tests {
         )
         .unwrap();
 
-        let window = app
-            .summary_window(&SummaryScope::Period { period: Period::Month, offset: -1 })
-            .unwrap();
+        let window =
+            app.summary_window(&DateScope::Period { period: Period::Month, offset: -1 }).unwrap();
 
         assert_eq!(window.start(), Local.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap());
         assert_eq!(window.end(), Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap());
@@ -609,7 +606,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(&SummaryScope::Period { period: Period::Year, offset: -1 }).unwrap();
+            app.summary_window(&DateScope::Period { period: Period::Year, offset: -1 }).unwrap();
 
         assert_eq!(window.start(), Local.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap());
         assert_eq!(window.end(), Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap());
@@ -625,9 +622,8 @@ mod tests {
         )
         .unwrap();
 
-        let err = app
-            .summary_window(&SummaryScope::Period { period: Period::Week, offset: 1 })
-            .unwrap_err();
+        let err =
+            app.summary_window(&DateScope::Period { period: Period::Week, offset: 1 }).unwrap_err();
 
         assert_eq!(err.to_string(), "Summary period offset must be zero or negative.");
     }
@@ -642,7 +638,7 @@ mod tests {
         )
         .unwrap();
 
-        let err = app.summary(SummaryScope::Range { from: date(12), to: date(10) }).unwrap_err();
+        let err = app.summary(DateScope::Range { from: date(12), to: date(10) }).unwrap_err();
 
         assert_eq!(err.to_string(), "Summary start date must be on or before end date.");
     }
@@ -664,7 +660,7 @@ mod tests {
         )
         .unwrap();
 
-        let err = app.summary(SummaryScope::Range { from: date(16), to: date(17) }).unwrap_err();
+        let err = app.summary(DateScope::Range { from: date(16), to: date(17) }).unwrap_err();
 
         assert_eq!(err.to_string(), "Summary range is empty.");
     }
@@ -722,7 +718,7 @@ mod tests {
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 
-        let report = app.summary(SummaryScope::Period { period: Period::Week, offset: 0 }).unwrap();
+        let report = app.summary(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
         assert_eq!(report.weekly_target_minutes(), Some(1 + 2 + 3 + 4 + 5).map(|v| v * 60));
         assert_eq!(report.worked_minutes(), (1 + 2 + 3 + 4 + 5) * 60);
@@ -749,7 +745,7 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.summary(SummaryScope::Range { from: date(12), to: date(12) }).unwrap();
+        let report = app.summary(DateScope::Range { from: date(12), to: date(12) }).unwrap();
 
         assert_eq!(report.weekly_target_minutes(), None);
         assert_eq!(report.worked_minutes(), 4 * 60);
@@ -787,8 +783,7 @@ mod tests {
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 
-        let report =
-            app.summary(SummaryScope::Period { period: Period::Month, offset: 0 }).unwrap();
+        let report = app.summary(DateScope::Period { period: Period::Month, offset: 0 }).unwrap();
 
         assert_eq!(
             report
@@ -841,14 +836,14 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.summary(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
+        let report = app.summary(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(
-            report.summary().active_time(SummaryKind::Work(context)),
+            report.summary().active_time(TimeCategory::Work(context)),
             chrono::TimeDelta::hours(16)
         );
         assert_eq!(
-            report.summary().break_time(SummaryKind::Work(context)),
+            report.summary().break_time(TimeCategory::Work(context)),
             chrono::TimeDelta::zero()
         );
     }
@@ -874,14 +869,14 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.summary(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
+        let report = app.summary(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(
-            report.summary().active_time(SummaryKind::Work(context)),
+            report.summary().active_time(TimeCategory::Work(context)),
             chrono::TimeDelta::hours(10)
         );
         assert_eq!(
-            report.summary().break_time(SummaryKind::Work(context)),
+            report.summary().break_time(TimeCategory::Work(context)),
             chrono::TimeDelta::zero()
         );
     }
@@ -914,7 +909,7 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.report(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
+        let report = app.report(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(report.rows().len(), 2);
         assert_eq!(report.rows()[0].title(), "handoff");
@@ -950,7 +945,7 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.report(SummaryScope::Range { from: date(10), to: date(10) }).unwrap();
+        let report = app.report(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(report.rows().len(), 1);
         assert_eq!(report.rows()[0].start(), ts(10, 0, 0));

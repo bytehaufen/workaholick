@@ -15,7 +15,8 @@ pub(crate) use record::{Record, RecordId, RecordInput};
 pub(crate) use record_set::{ChangeOutcome, RecordChange, RecordSet};
 pub(crate) use report::{ReportGroupBy, WorkItemReport, report};
 pub(crate) use summary::{
-    SummaryDay, SummaryKind, SummaryReport, SummaryScope, SummaryWeek, SummaryWindow, summary,
+    DateScope, DayBreakdown, SummaryReport, TimeCategory, TimeWindow, WeekBreakdown,
+    calculate_time_breakdown,
 };
 pub(crate) use timeline_validation::{TimelineValidationError, validate_records};
 pub(crate) use work::{WorkCommand, WorkContext, WorkRecord, WorkRecordInput};

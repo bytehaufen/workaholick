@@ -1,7 +1,7 @@
 use chrono::{DateTime, Local, NaiveDate};
 
 use crate::domain::{
-    Record, TimelineValidationError, WorkCommand, summary::SummaryWindow, transition_day_state,
+    Record, TimelineValidationError, WorkCommand, summary::TimeWindow, transition_day_state,
     work_state::DayState,
 };
 
@@ -133,16 +133,16 @@ impl ReportTitleDescriptionGroup {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkItemReport {
-    window: SummaryWindow,
+    window: TimeWindow,
     rows: Vec<WorkItemRow>,
 }
 
 impl WorkItemReport {
-    pub(crate) fn new(window: SummaryWindow, rows: Vec<WorkItemRow>) -> Self {
+    pub(crate) fn new(window: TimeWindow, rows: Vec<WorkItemRow>) -> Self {
         Self { window, rows }
     }
 
-    pub(crate) fn window(&self) -> SummaryWindow {
+    pub(crate) fn window(&self) -> TimeWindow {
         self.window
     }
 
@@ -223,7 +223,7 @@ impl OpenItem {
         &mut self,
         segment_start: Option<DateTime<Local>>,
         segment_end: DateTime<Local>,
-        window: SummaryWindow,
+        window: TimeWindow,
     ) {
         if let Some((start, end)) = clipped_range(segment_start, segment_end, window) {
             let _ = self.clipped_start.get_or_insert(start);
@@ -263,7 +263,7 @@ struct State {
 fn clipped_range(
     segment_start: Option<DateTime<Local>>,
     segment_end: DateTime<Local>,
-    window: SummaryWindow,
+    window: TimeWindow,
 ) -> Option<(DateTime<Local>, DateTime<Local>)> {
     let start = segment_start.unwrap_or(segment_end).max(window.start());
     let end = segment_end.min(window.end());
@@ -273,7 +273,7 @@ fn clipped_range(
 
 pub fn report(
     records: &[Record],
-    window: SummaryWindow,
+    window: TimeWindow,
 ) -> Result<WorkItemReport, TimelineValidationError> {
     let init_state = State {
         state: DayState::Idle,
@@ -351,8 +351,8 @@ mod tests {
     use crate::domain::{AbsenceKind, AbsencePortion, WorkCommand, WorkContext};
     use crate::test_support::*;
 
-    fn window(start_day: u32, start_hour: u32, end_day: u32, end_hour: u32) -> SummaryWindow {
-        SummaryWindow::new(ts(start_day, start_hour, 0), ts(end_day, end_hour, 0))
+    fn window(start_day: u32, start_hour: u32, end_day: u32, end_hour: u32) -> TimeWindow {
+        TimeWindow::new(ts(start_day, start_hour, 0), ts(end_day, end_hour, 0))
     }
 
     #[test]

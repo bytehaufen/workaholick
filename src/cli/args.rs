@@ -8,8 +8,7 @@ use std::path::PathBuf;
 use strum::VariantNames;
 
 use crate::domain::{
-    AbsenceKind, AbsencePortion, AbsenceRecordInput, Period, ReportGroupBy, SummaryScope,
-    WorkContext,
+    AbsenceKind, AbsencePortion, AbsenceRecordInput, DateScope, Period, ReportGroupBy, WorkContext,
 };
 
 // FIXME: Update when domain implemented
@@ -240,13 +239,13 @@ pub struct ScopeArgs {
 }
 
 impl ScopeArgs {
-    pub fn scope(&self) -> SummaryScope {
+    pub fn scope(&self) -> DateScope {
         match (self.period, self.offset, self.from, self.to) {
             (Some(period), offset, None, None) => {
-                SummaryScope::Period { period, offset: offset.unwrap_or(0) }
+                DateScope::Period { period, offset: offset.unwrap_or(0) }
             }
-            (None, None, Some(from), Some(to)) => SummaryScope::Range { from, to },
-            (None, None, None, None) => SummaryScope::Period { period: Period::Week, offset: 0 },
+            (None, None, Some(from), Some(to)) => DateScope::Range { from, to },
+            (None, None, None, None) => DateScope::Period { period: Period::Week, offset: 0 },
             _ => unreachable!("clap validation should prevent invalid summary arguments"),
         }
     }
@@ -266,7 +265,7 @@ pub struct SummaryArgs {
 }
 
 impl SummaryArgs {
-    pub fn scope(&self) -> SummaryScope {
+    pub fn scope(&self) -> DateScope {
         self.scope_args.scope()
     }
 }
@@ -283,7 +282,7 @@ pub struct ReportArgs {
 }
 
 impl ReportArgs {
-    pub fn scope(&self) -> SummaryScope {
+    pub fn scope(&self) -> DateScope {
         self.scope_args.scope()
     }
 }
@@ -317,7 +316,7 @@ mod tests {
             panic!("expected summary command");
         };
 
-        assert_eq!(args.scope(), SummaryScope::Period { period: Period::Week, offset: 0 });
+        assert_eq!(args.scope(), DateScope::Period { period: Period::Week, offset: 0 });
     }
 
     #[test]
@@ -328,7 +327,7 @@ mod tests {
             panic!("expected summary command");
         };
 
-        assert_eq!(args.scope(), SummaryScope::Period { period: Period::Week, offset: -1 });
+        assert_eq!(args.scope(), DateScope::Period { period: Period::Week, offset: -1 });
     }
 
     #[test]
@@ -346,7 +345,7 @@ mod tests {
             panic!("expected report command");
         };
 
-        assert_eq!(args.scope(), SummaryScope::Period { period: Period::Week, offset: 0 });
+        assert_eq!(args.scope(), DateScope::Period { period: Period::Week, offset: 0 });
         assert_eq!(args.group_by, None);
     }
 
@@ -360,7 +359,7 @@ mod tests {
             panic!("expected report command");
         };
 
-        assert_eq!(args.scope(), SummaryScope::Period { period: Period::Week, offset: -1 });
+        assert_eq!(args.scope(), DateScope::Period { period: Period::Week, offset: -1 });
         assert_eq!(args.group_by, Some(ReportGroupBy::Title));
     }
 

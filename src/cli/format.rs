@@ -7,14 +7,14 @@ use std::collections::HashSet;
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
 
-use crate::{DayOverview, config::OutputFormatter, domain::SummaryKind};
+use crate::{DayOverview, config::OutputFormatter, domain::TimeCategory};
 
 pub use port::Formatter;
 
 #[cfg(feature = "markdown")]
 pub use markdown_formatter::MarkdownFormatter;
 
-use crate::domain::{ReportGroupBy, SummaryReport, SummaryWindow, WorkCommand, WorkItemReport};
+use crate::domain::{ReportGroupBy, SummaryReport, TimeWindow, WorkCommand, WorkItemReport};
 
 pub fn print_day(
     formatter: OutputFormatter,
@@ -87,7 +87,7 @@ pub fn print_report(
 pub(super) fn format_work_command(command: &WorkCommand) -> String {
     match command {
         WorkCommand::Start { context } => {
-            format!("START {}", format_summary_kind(SummaryKind::from(*context)))
+            format!("START {}", format_summary_kind(TimeCategory::from(*context)))
         }
         WorkCommand::End { title, description } => {
             format!(
@@ -121,10 +121,10 @@ fn escape_inline_text(text: &str) -> String {
     text.replace('\\', r"\\").replace('"', r#"\""#)
 }
 
-pub(super) fn format_summary_kind(kind: SummaryKind) -> String {
+pub(super) fn format_summary_kind(kind: TimeCategory) -> String {
     match kind {
-        SummaryKind::Work(work_context) => format!("work ({work_context})"),
-        SummaryKind::Absence(absence_kind) => format!("absence ({absence_kind})"),
+        TimeCategory::Work(work_context) => format!("work ({work_context})"),
+        TimeCategory::Absence(absence_kind) => format!("absence ({absence_kind})"),
     }
 }
 
@@ -345,14 +345,11 @@ pub(super) fn prepare_report(
     }
 }
 
-pub(super) fn format_summary_title(window: SummaryWindow) -> String {
+pub(super) fn format_summary_title(window: TimeWindow) -> String {
     format!("Summary {}", format_summary_window(window))
 }
 
-pub(super) fn format_report_title(
-    window: SummaryWindow,
-    group_by: Option<ReportGroupBy>,
-) -> String {
+pub(super) fn format_report_title(window: TimeWindow, group_by: Option<ReportGroupBy>) -> String {
     match group_by {
         Some(ReportGroupBy::Title) => {
             format!("Report {} (grouped by title)", format_summary_window(window))
@@ -364,7 +361,7 @@ pub(super) fn format_report_title(
     }
 }
 
-pub(super) fn format_summary_window(window: SummaryWindow) -> String {
+pub(super) fn format_summary_window(window: TimeWindow) -> String {
     let start = window.start();
     let end = window.end();
 
@@ -473,8 +470,8 @@ mod tests {
     use super::*;
     use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkCommand, WorkContext,
-        WorkItemReport, summary,
+        DayBreakdown, SummaryReport, TimeWindow, WeekBreakdown, WorkCommand, WorkContext,
+        WorkItemReport, calculate_time_breakdown,
     };
     use crate::test_support::*;
     use chrono::{Local, TimeZone};
@@ -510,14 +507,14 @@ mod tests {
 
     #[test]
     fn format_summary_window_uses_inclusive_dates_for_full_day_ranges() {
-        let window = SummaryWindow::new(ts(10, 0, 0), ts(13, 0, 0));
+        let window = TimeWindow::new(ts(10, 0, 0), ts(13, 0, 0));
 
         assert_eq!(format_summary_window(window), "2026-01-10 .. 2026-01-12");
     }
 
     #[test]
     fn format_summary_window_keeps_partial_boundaries_exact() {
-        let window = SummaryWindow::new(ts(10, 0, 0), ts(12, 14, 15));
+        let window = TimeWindow::new(ts(10, 0, 0), ts(12, 14, 15));
 
         assert_eq!(format_summary_window(window), "2026-01-10 .. 2026-01-12 14:15");
     }
@@ -535,7 +532,7 @@ mod tests {
     #[test]
     fn prepare_report_renders_detailed_rows() {
         let report = WorkItemReport::new(
-            SummaryWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
+            TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
             vec![
                 WorkItemRow::new(
                     ts(10, 10, 0).date_naive(),
@@ -588,7 +585,7 @@ mod tests {
     #[test]
     fn prepare_report_groups_rows_by_title() {
         let report = WorkItemReport::new(
-            SummaryWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
+            TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
             vec![
                 WorkItemRow::new(
                     ts(10, 10, 0).date_naive(),
@@ -628,7 +625,7 @@ mod tests {
     #[test]
     fn prepare_report_groups_rows_by_title_description() {
         let report = WorkItemReport::new(
-            SummaryWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
+            TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
             vec![
                 WorkItemRow::new(
                     ts(10, 10, 0).date_naive(),
@@ -675,7 +672,7 @@ mod tests {
 
     #[test]
     fn prepare_summary_sorts_rows_and_builds_total() {
-        let window = SummaryWindow::new(ts(12, 0, 0), ts(15, 0, 0));
+        let window = TimeWindow::new(ts(12, 0, 0), ts(15, 0, 0));
         let records = vec![
             work_record(1, 12, 0, 0, WorkCommand::Start { context: WorkContext::Home }),
             work_record(2, 12, 2, 15, WorkCommand::End { title: "done".into(), description: None }),
@@ -686,12 +683,12 @@ mod tests {
         ];
         let report = SummaryReport::with_weekly_balance(
             window,
-            summary(&records, window).unwrap(),
+            calculate_time_breakdown(&records, window).unwrap(),
             40 * 60,
             vec![
-                SummaryDay::new(ts(12, 0, 0).date_naive(), 8 * 60, 0, 0),
-                SummaryDay::new(ts(13, 0, 0).date_naive(), 6 * 60, 0, 0),
-                SummaryDay::new(ts(14, 0, 0).date_naive(), 0, 0, 0),
+                DayBreakdown::new(ts(12, 0, 0).date_naive(), 8 * 60, 0, 0),
+                DayBreakdown::new(ts(13, 0, 0).date_naive(), 6 * 60, 0, 0),
+                DayBreakdown::new(ts(14, 0, 0).date_naive(), 0, 0, 0),
             ],
         );
 
@@ -755,19 +752,19 @@ mod tests {
 
     #[test]
     fn prepare_summary_includes_weekly_balance_breakdown() {
-        let window = SummaryWindow::new(ts(1, 0, 0), ts(16, 0, 0));
+        let window = TimeWindow::new(ts(1, 0, 0), ts(16, 0, 0));
         let report = SummaryReport::with_weekly_breakdown(
             window,
-            summary(&[], window).unwrap(),
+            calculate_time_breakdown(&[], window).unwrap(),
             vec![
-                SummaryWeek::new(
+                WeekBreakdown::new(
                     Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
                     8 * 60,
                     0,
                     0,
                     None,
                 ),
-                SummaryWeek::new(ts(5, 0, 0).date_naive(), 40 * 60, 0, 0, Some(40 * 60)),
+                WeekBreakdown::new(ts(5, 0, 0).date_naive(), 40 * 60, 0, 0, Some(40 * 60)),
             ],
         );
 

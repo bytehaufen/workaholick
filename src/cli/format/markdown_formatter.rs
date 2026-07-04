@@ -245,8 +245,8 @@ mod tests {
 
     use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        Record, SummaryDay, SummaryReport, SummaryWeek, SummaryWindow, WorkCommand, WorkContext,
-        WorkItemReport, summary,
+        DayBreakdown, Record, SummaryReport, TimeWindow, WeekBreakdown, WorkCommand, WorkContext,
+        WorkItemReport, calculate_time_breakdown,
     };
     use crate::test_support::work_record;
 
@@ -372,11 +372,11 @@ mod tests {
 
     #[test]
     fn markdown_format_summary_prints_empty_state() {
-        let window = SummaryWindow::new(
+        let window = TimeWindow::new(
             Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
         );
-        let report = SummaryReport::new(window, summary(&[], window).unwrap());
+        let report = SummaryReport::new(window, calculate_time_breakdown(&[], window).unwrap());
 
         let rendered = MarkdownFormatter::format_summary(&report);
 
@@ -391,22 +391,22 @@ _No tracked time._
 
     #[test]
     fn markdown_format_summary_renders_weekly_balance_breakdown() {
-        let window = SummaryWindow::new(
+        let window = TimeWindow::new(
             Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 16, 0, 0, 0).unwrap(),
         );
         let report = SummaryReport::with_weekly_breakdown(
             window,
-            summary(&[], window).unwrap(),
+            calculate_time_breakdown(&[], window).unwrap(),
             vec![
-                SummaryWeek::new(
+                WeekBreakdown::new(
                     Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
                     8 * 60,
                     0,
                     0,
                     None,
                 ),
-                SummaryWeek::new(
+                WeekBreakdown::new(
                     Local.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap().date_naive(),
                     40 * 60,
                     0,
@@ -489,7 +489,7 @@ _No tracked time._
     fn markdown_format_report_prints_work_specific_empty_state() {
         let rendered = MarkdownFormatter::format_report(
             &WorkItemReport::new(
-                SummaryWindow::new(
+                TimeWindow::new(
                     Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
                     Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
                 ),
@@ -508,29 +508,29 @@ _No completed work items._
     }
 
     fn summary_report(records: Vec<Record>) -> SummaryReport {
-        let window = SummaryWindow::new(
+        let window = TimeWindow::new(
             Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap(),
         );
 
         SummaryReport::with_weekly_balance(
             window,
-            summary(&records, window).unwrap(),
+            calculate_time_breakdown(&records, window).unwrap(),
             40 * 60,
             vec![
-                SummaryDay::new(
+                DayBreakdown::new(
                     Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap().date_naive(),
                     8 * 60,
                     0,
                     0,
                 ),
-                SummaryDay::new(
+                DayBreakdown::new(
                     Local.with_ymd_and_hms(2026, 1, 13, 0, 0, 0).unwrap().date_naive(),
                     6 * 60,
                     0,
                     0,
                 ),
-                SummaryDay::new(
+                DayBreakdown::new(
                     Local.with_ymd_and_hms(2026, 1, 14, 0, 0, 0).unwrap().date_naive(),
                     0,
                     0,
@@ -542,7 +542,7 @@ _No completed work items._
 
     fn detailed_report() -> WorkItemReport {
         WorkItemReport::new(
-            SummaryWindow::new(
+            TimeWindow::new(
                 Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
                 Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
             ),
