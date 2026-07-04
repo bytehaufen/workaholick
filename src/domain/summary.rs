@@ -3,15 +3,9 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Local, NaiveDate, TimeDelta};
 
 use crate::domain::{
-    AbsenceKind, Period, Record, TimelineValidationError, WorkContext, transition_day_state,
+    AbsenceKind, Record, TimeWindow, TimelineValidationError, WorkContext, transition_day_state,
     work_state::DayState,
 };
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum DateScope {
-    Period { period: Period, offset: i64 },
-    Range { from: NaiveDate, to: NaiveDate },
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TimeCategory {
@@ -257,30 +251,6 @@ impl SummaryReport {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TimeWindow {
-    start: DateTime<Local>,
-    end: DateTime<Local>,
-}
-
-impl TimeWindow {
-    pub(crate) fn new(start: DateTime<Local>, end: DateTime<Local>) -> Self {
-        Self { start, end }
-    }
-
-    pub(crate) fn start(self) -> DateTime<Local> {
-        self.start
-    }
-
-    pub(crate) fn end(self) -> DateTime<Local> {
-        self.end
-    }
-
-    pub(crate) fn is_empty(self) -> bool {
-        self.start >= self.end
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TimeBucket {
     active: TimeDelta,
@@ -319,8 +289,8 @@ fn clipped_range(
     timestamp: DateTime<Local>,
     window: TimeWindow,
 ) -> Option<(DateTime<Local>, DateTime<Local>)> {
-    let start = last_timestamp.unwrap_or(timestamp).max(window.start);
-    let end = timestamp.min(window.end);
+    let start = last_timestamp.unwrap_or(timestamp).max(window.start());
+    let end = timestamp.min(window.end());
 
     (end > start).then_some((start, end))
 }
@@ -363,7 +333,7 @@ fn finalize_open_bucket(
             TimeCategory::from(kind),
             TimeBucket::active_mut,
             last_timestamp,
-            window.end,
+            window.end(),
             window,
         ),
 
@@ -372,7 +342,7 @@ fn finalize_open_bucket(
             TimeCategory::from(kind),
             TimeBucket::break_time_mut,
             last_timestamp,
-            window.end,
+            window.end(),
             window,
         ),
     }
@@ -397,7 +367,7 @@ pub fn calculate_time_breakdown(
     let result = records
         .iter()
         .filter_map(Record::as_work)
-        .filter(|record| *record.timestamp() < window.end)
+        .filter(|record| *record.timestamp() < window.end())
         .try_fold(init_state, |fold_state, record| -> Result<State, TimelineValidationError> {
             let State { state, last_timestamp, mut summary } = fold_state;
             let next_state = transition_day_state(state, record.date(), record.command())?;

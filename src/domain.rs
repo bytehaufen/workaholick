@@ -3,6 +3,7 @@ mod period;
 mod record;
 mod record_set;
 pub(crate) mod report;
+mod reporting;
 mod serde_datetime;
 mod summary;
 mod timeline_validation;
@@ -14,9 +15,9 @@ pub(crate) use period::Period;
 pub(crate) use record::{Record, RecordId, RecordInput};
 pub(crate) use record_set::{ChangeOutcome, RecordChange, RecordSet};
 pub(crate) use report::{ActivityGroupBy, WorkItemReport, report};
+pub(crate) use reporting::{DateScope, TimeWindow};
 pub(crate) use summary::{
-    DateScope, DayBreakdown, SummaryReport, TimeCategory, TimeWindow, WeekBreakdown,
-    calculate_time_breakdown,
+    DayBreakdown, SummaryReport, TimeCategory, WeekBreakdown, calculate_time_breakdown,
 };
 pub(crate) use timeline_validation::{TimelineValidationError, validate_records};
 pub(crate) use work::{WorkCommand, WorkContext, WorkRecord, WorkRecordInput};
