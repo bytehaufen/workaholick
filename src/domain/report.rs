@@ -1,7 +1,7 @@
 use chrono::{DateTime, Local, NaiveDate};
 
 use crate::domain::{
-    Record, TimeWindow, TimelineValidationError, WorkCommand, transition_day_state,
+    Record, TimelineValidationError, WorkCommand, reporting::TimeWindow, transition_day_state,
     work_state::DayState,
 };
 

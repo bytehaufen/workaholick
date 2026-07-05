@@ -1,6 +1,10 @@
+mod builder;
+
+pub(crate) use builder::build_timesheet;
+
 use chrono::NaiveDate;
 
-use crate::domain::{TimeBreakdown, TimeWindow};
+use crate::domain::{TimeBreakdown, reporting::TimeWindow};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct TimeTotals {

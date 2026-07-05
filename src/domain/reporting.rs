@@ -1,5 +1,5 @@
 use crate::domain::Period;
-use chrono::{DateTime, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Days, Local, NaiveDate, TimeZone};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum DateScope {
@@ -29,4 +29,17 @@ impl TimeWindow {
     pub(crate) fn is_empty(self) -> bool {
         self.start >= self.end
     }
+}
+
+pub(crate) fn start_of_week(date: NaiveDate) -> NaiveDate {
+    date.checked_sub_days(Days::new(date.weekday().num_days_from_monday().into()))
+        .expect("week start should be representable")
+}
+
+pub(crate) fn start_of_day(date: NaiveDate) -> DateTime<Local> {
+    Local.with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0).unwrap()
+}
+
+pub(crate) fn next_day(date: NaiveDate) -> NaiveDate {
+    date.succ_opt().expect("timesheet range end should have a successor day")
 }

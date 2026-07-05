@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Local, NaiveDate, TimeDelta};
 
 use crate::domain::{
-    AbsenceKind, Record, TimeWindow, TimelineValidationError, WorkContext, transition_day_state,
-    work_state::DayState,
+    AbsenceKind, Record, TimelineValidationError, WorkContext, reporting::TimeWindow,
+    transition_day_state, work_state::DayState,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -172,7 +172,7 @@ fn finalize_open_bucket(
     }
 }
 
-pub fn calculate_time_breakdown(
+pub(crate) fn calculate_time_breakdown(
     records: &[Record],
     window: TimeWindow,
 ) -> Result<TimeBreakdown, TimelineValidationError> {

@@ -14,7 +14,9 @@ pub use port::Formatter;
 #[cfg(feature = "markdown")]
 pub use markdown_formatter::MarkdownFormatter;
 
-use crate::domain::{ActivityGroupBy, TimeWindow, Timesheet, WorkCommand, WorkItemReport};
+use crate::domain::{
+    ActivityGroupBy, Timesheet, WorkCommand, WorkItemReport, reporting::TimeWindow,
+};
 
 pub fn print_day(
     formatter: OutputFormatter,
@@ -470,7 +472,7 @@ mod tests {
     use super::*;
     use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        DailyTotals, TimeWindow, Timesheet, WeeklyTotals, WorkCommand, WorkContext, WorkItemReport,
+        DailyTotals, Timesheet, WeeklyTotals, WorkCommand, WorkContext, WorkItemReport,
         calculate_time_breakdown,
     };
     use crate::test_support::*;

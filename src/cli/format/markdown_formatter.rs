@@ -245,8 +245,8 @@ mod tests {
 
     use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        DailyTotals, Record, TimeWindow, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
-        WorkItemReport, calculate_time_breakdown,
+        DailyTotals, Record, Timesheet, WeeklyTotals, WorkCommand, WorkContext, WorkItemReport,
+        calculate_time_breakdown, reporting::TimeWindow,
     };
     use crate::test_support::work_record;
 
