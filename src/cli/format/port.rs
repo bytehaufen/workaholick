@@ -2,7 +2,10 @@ use chrono::NaiveDate;
 
 use crate::{
     DayOverview,
-    domain::{ActivityGroupBy, ActivityReport, Timesheet},
+    domain::{
+        Timesheet,
+        activity_report::{ActivityGroupBy, ActivityReport},
+    },
 };
 
 pub trait Formatter {

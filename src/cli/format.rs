@@ -15,7 +15,9 @@ pub use port::Formatter;
 pub use markdown_formatter::MarkdownFormatter;
 
 use crate::domain::{
-    ActivityGroupBy, ActivityReport, Timesheet, WorkCommand, reporting::TimeWindow,
+    Timesheet, WorkCommand,
+    activity_report::{ActivityGroupBy, ActivityReport},
+    reporting::TimeWindow,
 };
 
 pub fn print_day(
@@ -470,9 +472,9 @@ fn is_midnight(boundary: DateTime<Local>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        ActivityReport, DailyTotals, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
+        DailyTotals, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
+        activity_report::{ActivityReport, WorkItemRow},
         calculate_time_breakdown,
     };
     use crate::test_support::*;

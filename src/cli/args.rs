@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use strum::VariantNames;
 
 use crate::domain::{
-    AbsenceKind, AbsencePortion, AbsenceRecordInput, ActivityGroupBy, Period, WorkContext,
-    reporting::DateScope,
+    AbsenceKind, AbsencePortion, AbsenceRecordInput, Period, WorkContext,
+    activity_report::ActivityGroupBy, reporting::DateScope,
 };
 
 // FIXME: Update when domain implemented

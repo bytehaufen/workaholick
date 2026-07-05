@@ -2,7 +2,10 @@ use chrono::NaiveDate;
 use termimad::Alignment;
 
 use crate::DayOverview;
-use crate::domain::{ActivityGroupBy, ActivityReport, Timesheet};
+use crate::domain::{
+    Timesheet,
+    activity_report::{ActivityGroupBy, ActivityReport},
+};
 
 use super::Formatter;
 use super::{format_work_command, prepare_report, prepare_summary};
@@ -243,10 +246,11 @@ fn escape_markdown_table_cell(value: &str) -> String {
 mod tests {
     use chrono::{Local, TimeZone};
 
-    use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        ActivityReport, DailyTotals, Record, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
-        calculate_time_breakdown, reporting::TimeWindow,
+        DailyTotals, Record, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
+        activity_report::{ActivityReport, WorkItemRow},
+        calculate_time_breakdown,
+        reporting::TimeWindow,
     };
     use crate::test_support::work_record;
 
