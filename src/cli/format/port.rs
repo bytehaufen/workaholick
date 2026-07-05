@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 
 use crate::{
     DayOverview,
-    domain::{ActivityGroupBy, Timesheet, WorkItemReport},
+    domain::{ActivityGroupBy, ActivityReport, Timesheet},
 };
 
 pub trait Formatter {
@@ -12,5 +12,5 @@ pub trait Formatter {
 
     fn format_summary(report: &Timesheet) -> String;
 
-    fn format_report(report: &WorkItemReport, group_by: Option<ActivityGroupBy>) -> String;
+    fn format_report(report: &ActivityReport, group_by: Option<ActivityGroupBy>) -> String;
 }

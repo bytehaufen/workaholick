@@ -1,10 +1,10 @@
 use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate};
 
 use crate::config::Config;
+use crate::domain::calculate_activity_report;
 use crate::domain::{
-    AbsenceRecord, AbsenceRecordInput, ChangeOutcome, Period, Record, RecordChange, RecordId,
-    RecordInput, Timesheet, WorkCommand, WorkContext, WorkItemReport, WorkRecord, build_timesheet,
-    report,
+    AbsenceRecord, AbsenceRecordInput, ActivityReport, ChangeOutcome, Period, Record, RecordChange,
+    RecordId, RecordInput, Timesheet, WorkCommand, WorkContext, WorkRecord, build_timesheet,
     reporting::{self, DateScope, TimeWindow},
     validate_records,
 };
@@ -164,11 +164,11 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         build_timesheet(&records, window, &scope, self.config.weekly_target_minutes())
     }
 
-    pub fn activity(&self, scope: DateScope) -> anyhow::Result<WorkItemReport> {
+    pub fn activity(&self, scope: DateScope) -> anyhow::Result<ActivityReport> {
         let window = self.time_window_for(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
 
-        Ok(report(&records, window)?)
+        Ok(calculate_activity_report(&records, window)?)
     }
 
     fn time_window_for(&self, scope: &DateScope) -> anyhow::Result<TimeWindow> {

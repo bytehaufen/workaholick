@@ -15,7 +15,7 @@ pub use port::Formatter;
 pub use markdown_formatter::MarkdownFormatter;
 
 use crate::domain::{
-    ActivityGroupBy, Timesheet, WorkCommand, WorkItemReport, reporting::TimeWindow,
+    ActivityGroupBy, ActivityReport, Timesheet, WorkCommand, reporting::TimeWindow,
 };
 
 pub fn print_day(
@@ -64,7 +64,7 @@ pub fn print_timesheet(formatter: OutputFormatter, report: &Timesheet) -> Result
 
 pub fn print_activity(
     formatter: OutputFormatter,
-    report: &WorkItemReport,
+    report: &ActivityReport,
     group_by: Option<ActivityGroupBy>,
 ) -> Result<()> {
     match formatter {
@@ -286,7 +286,7 @@ pub(super) fn prepare_summary(report: &Timesheet) -> SummaryDisplay {
 }
 
 pub(super) fn prepare_report(
-    report: &WorkItemReport,
+    report: &ActivityReport,
     group_by: Option<ActivityGroupBy>,
 ) -> ReportDisplay {
     match group_by {
@@ -472,7 +472,7 @@ mod tests {
     use super::*;
     use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        DailyTotals, Timesheet, WeeklyTotals, WorkCommand, WorkContext, WorkItemReport,
+        ActivityReport, DailyTotals, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
         calculate_time_breakdown,
     };
     use crate::test_support::*;
@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn prepare_report_renders_detailed_rows() {
-        let report = WorkItemReport::new(
+        let report = ActivityReport::new(
             TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
             vec![
                 WorkItemRow::new(
@@ -586,7 +586,7 @@ mod tests {
 
     #[test]
     fn prepare_report_groups_rows_by_title() {
-        let report = WorkItemReport::new(
+        let report = ActivityReport::new(
             TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
             vec![
                 WorkItemRow::new(
@@ -626,7 +626,7 @@ mod tests {
 
     #[test]
     fn prepare_report_groups_rows_by_title_description() {
-        let report = WorkItemReport::new(
+        let report = ActivityReport::new(
             TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
             vec![
                 WorkItemRow::new(

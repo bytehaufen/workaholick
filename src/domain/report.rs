@@ -132,12 +132,12 @@ impl ReportTitleDescriptionGroup {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct WorkItemReport {
+pub struct ActivityReport {
     window: TimeWindow,
     rows: Vec<WorkItemRow>,
 }
 
-impl WorkItemReport {
+impl ActivityReport {
     pub(crate) fn new(window: TimeWindow, rows: Vec<WorkItemRow>) -> Self {
         Self { window, rows }
     }
@@ -271,10 +271,10 @@ fn clipped_range(
     (end > start).then_some((start, end))
 }
 
-pub fn report(
+pub fn calculate_activity_report(
     records: &[Record],
     window: TimeWindow,
-) -> Result<WorkItemReport, TimelineValidationError> {
+) -> Result<ActivityReport, TimelineValidationError> {
     let init_state = State {
         state: DayState::Idle,
         active_segment_start: None,
@@ -342,7 +342,7 @@ pub fn report(
             Ok(state)
         })?;
 
-    Ok(WorkItemReport::new(window, state.rows))
+    Ok(ActivityReport::new(window, state.rows))
 }
 
 #[cfg(test)]
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn report_splits_log_and_end_into_separate_rows() {
-        let report = report(
+        let report = calculate_activity_report(
             &[
                 work_record(1, 10, 8, 0, WorkCommand::Start { context: WorkContext::Office }),
                 work_record(
@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn report_excludes_breaks_from_row_duration() {
-        let report = report(
+        let report = calculate_activity_report(
             &[
                 work_record(1, 10, 8, 0, WorkCommand::Start { context: WorkContext::Travel }),
                 work_record(2, 10, 10, 0, WorkCommand::BreakStart),
@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn report_ignores_absence_records() {
-        let report = report(
+        let report = calculate_activity_report(
             &[
                 absence_record(1, 10, AbsenceKind::Holiday, AbsencePortion::HalfDay),
                 work_record(2, 10, 8, 0, WorkCommand::Start { context: WorkContext::Office }),
@@ -458,7 +458,7 @@ mod tests {
 
     #[test]
     fn report_clips_rows_to_the_requested_window() {
-        let report = report(
+        let report = calculate_activity_report(
             &[
                 work_record(1, 9, 20, 0, WorkCommand::Start { context: WorkContext::Home }),
                 work_record(
@@ -488,7 +488,7 @@ mod tests {
 
     #[test]
     fn report_ignores_trailing_open_work_without_log_or_end() {
-        let report = report(
+        let report = calculate_activity_report(
             &[work_record(1, 10, 8, 0, WorkCommand::Start { context: WorkContext::Travel })],
             window(10, 0, 11, 0),
         )
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn group_by_title_aggregates_exact_matches_only() {
-        let report = WorkItemReport::new(
+        let report = ActivityReport::new(
             window(10, 0, 11, 0),
             vec![
                 WorkItemRow::new(
@@ -540,7 +540,7 @@ mod tests {
 
     #[test]
     fn group_by_title_description_splits_distinct_descriptions() {
-        let report = WorkItemReport::new(
+        let report = ActivityReport::new(
             window(10, 0, 11, 0),
             vec![
                 WorkItemRow::new(

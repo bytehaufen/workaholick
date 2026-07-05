@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use termimad::Alignment;
 
 use crate::DayOverview;
-use crate::domain::{ActivityGroupBy, Timesheet, WorkItemReport};
+use crate::domain::{ActivityGroupBy, ActivityReport, Timesheet};
 
 use super::Formatter;
 use super::{format_work_command, prepare_report, prepare_summary};
@@ -167,7 +167,7 @@ impl Formatter for MarkdownFormatter {
         output
     }
 
-    fn format_report(report: &WorkItemReport, group_by: Option<ActivityGroupBy>) -> String {
+    fn format_report(report: &ActivityReport, group_by: Option<ActivityGroupBy>) -> String {
         let report = prepare_report(report, group_by);
         let mut output = String::new();
         output.push_str(&format!("# {}\n\n", report.title));
@@ -245,7 +245,7 @@ mod tests {
 
     use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        DailyTotals, Record, Timesheet, WeeklyTotals, WorkCommand, WorkContext, WorkItemReport,
+        ActivityReport, DailyTotals, Record, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
         calculate_time_breakdown, reporting::TimeWindow,
     };
     use crate::test_support::work_record;
@@ -488,7 +488,7 @@ _No tracked time._
     #[test]
     fn markdown_format_report_prints_work_specific_empty_state() {
         let rendered = MarkdownFormatter::format_report(
-            &WorkItemReport::new(
+            &ActivityReport::new(
                 TimeWindow::new(
                     Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
                     Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
@@ -540,8 +540,8 @@ _No completed work items._
         )
     }
 
-    fn detailed_report() -> WorkItemReport {
-        WorkItemReport::new(
+    fn detailed_report() -> ActivityReport {
+        ActivityReport::new(
             TimeWindow::new(
                 Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
                 Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),

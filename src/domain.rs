@@ -15,7 +15,7 @@ pub(crate) use absence::{AbsenceKind, AbsencePortion, AbsenceRecord, AbsenceReco
 pub(crate) use period::Period;
 pub(crate) use record::{Record, RecordId, RecordInput};
 pub(crate) use record_set::{ChangeOutcome, RecordChange, RecordSet};
-pub(crate) use report::{ActivityGroupBy, WorkItemReport, report};
+pub(crate) use report::{ActivityGroupBy, ActivityReport, calculate_activity_report};
 pub(crate) use time_accounting::{TimeBreakdown, TimeCategory, calculate_time_breakdown};
 pub(crate) use timeline_validation::{TimelineValidationError, validate_records};
 pub(crate) use timesheet::{DailyTotals, Timesheet, WeeklyTotals, build_timesheet};
