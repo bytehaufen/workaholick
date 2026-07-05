@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use termimad::Alignment;
 
 use crate::DayOverview;
-use crate::domain::{ActivityGroupBy, SummaryReport, WorkItemReport};
+use crate::domain::{ActivityGroupBy, Timesheet, WorkItemReport};
 
 use super::Formatter;
 use super::{format_work_command, prepare_report, prepare_summary};
@@ -73,7 +73,7 @@ impl Formatter for MarkdownFormatter {
         output
     }
 
-    fn format_summary(report: &SummaryReport) -> String {
+    fn format_summary(report: &Timesheet) -> String {
         let summary = prepare_summary(report);
         let mut output = String::new();
         let has_weekly_days = !summary.weekly_days.is_empty();
@@ -245,7 +245,7 @@ mod tests {
 
     use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        DayBreakdown, Record, SummaryReport, TimeWindow, WeekBreakdown, WorkCommand, WorkContext,
+        DailyTotals, Record, TimeWindow, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
         WorkItemReport, calculate_time_breakdown,
     };
     use crate::test_support::work_record;
@@ -376,7 +376,7 @@ mod tests {
             Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
         );
-        let report = SummaryReport::new(window, calculate_time_breakdown(&[], window).unwrap());
+        let report = Timesheet::new(window, calculate_time_breakdown(&[], window).unwrap());
 
         let rendered = MarkdownFormatter::format_summary(&report);
 
@@ -395,18 +395,18 @@ _No tracked time._
             Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 16, 0, 0, 0).unwrap(),
         );
-        let report = SummaryReport::with_weekly_breakdown(
+        let report = Timesheet::with_weekly_breakdown(
             window,
             calculate_time_breakdown(&[], window).unwrap(),
             vec![
-                WeekBreakdown::new(
+                WeeklyTotals::new(
                     Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
                     8 * 60,
                     0,
                     0,
                     None,
                 ),
-                WeekBreakdown::new(
+                WeeklyTotals::new(
                     Local.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap().date_naive(),
                     40 * 60,
                     0,
@@ -507,30 +507,30 @@ _No completed work items._
         );
     }
 
-    fn summary_report(records: Vec<Record>) -> SummaryReport {
+    fn summary_report(records: Vec<Record>) -> Timesheet {
         let window = TimeWindow::new(
             Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap(),
         );
 
-        SummaryReport::with_weekly_balance(
+        Timesheet::with_weekly_balance(
             window,
             calculate_time_breakdown(&records, window).unwrap(),
             40 * 60,
             vec![
-                DayBreakdown::new(
+                DailyTotals::new(
                     Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap().date_naive(),
                     8 * 60,
                     0,
                     0,
                 ),
-                DayBreakdown::new(
+                DailyTotals::new(
                     Local.with_ymd_and_hms(2026, 1, 13, 0, 0, 0).unwrap().date_naive(),
                     6 * 60,
                     0,
                     0,
                 ),
-                DayBreakdown::new(
+                DailyTotals::new(
                     Local.with_ymd_and_hms(2026, 1, 14, 0, 0, 0).unwrap().date_naive(),
                     0,
                     0,

@@ -76,13 +76,13 @@ impl TimeBreakdown {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct Metrics {
+struct TimeTotals {
     worked_minutes: i64,
     break_minutes: i64,
     absence_minutes: i64,
 }
 
-impl Metrics {
+impl TimeTotals {
     /// Work - Absence + Absence minutes
     fn credited_minutes(&self) -> i64 {
         self.worked_minutes - self.break_minutes + self.absence_minutes
@@ -94,19 +94,19 @@ impl Metrics {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DayBreakdown {
+pub struct DailyTotals {
     date: NaiveDate,
-    metrics: Metrics,
+    time_totals: TimeTotals,
 }
 
-impl DayBreakdown {
+impl DailyTotals {
     pub(crate) fn new(
         date: NaiveDate,
         worked_minutes: i64,
         break_minutes: i64,
         absence_minutes: i64,
     ) -> Self {
-        Self { date, metrics: Metrics { worked_minutes, break_minutes, absence_minutes } }
+        Self { date, time_totals: TimeTotals { worked_minutes, break_minutes, absence_minutes } }
     }
 
     pub(crate) fn date(&self) -> NaiveDate {
@@ -114,26 +114,26 @@ impl DayBreakdown {
     }
 
     pub(crate) fn worked_minutes(&self) -> i64 {
-        self.metrics.worked_minutes
+        self.time_totals.worked_minutes
     }
 
     pub(crate) fn break_minutes(&self) -> i64 {
-        self.metrics.break_minutes
+        self.time_totals.break_minutes
     }
 
     pub(crate) fn absence_minutes(&self) -> i64 {
-        self.metrics.absence_minutes
+        self.time_totals.absence_minutes
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WeekBreakdown {
+pub struct WeeklyTotals {
     start: NaiveDate,
-    metrics: Metrics,
+    time_totals: TimeTotals,
     target_minutes: Option<i64>,
 }
 
-impl WeekBreakdown {
+impl WeeklyTotals {
     pub(crate) fn new(
         start: NaiveDate,
         worked_minutes: i64,
@@ -143,7 +143,7 @@ impl WeekBreakdown {
     ) -> Self {
         Self {
             start,
-            metrics: Metrics { worked_minutes, break_minutes, absence_minutes },
+            time_totals: TimeTotals { worked_minutes, break_minutes, absence_minutes },
             target_minutes,
         }
     }
@@ -153,15 +153,15 @@ impl WeekBreakdown {
     }
 
     pub(crate) fn worked_minutes(&self) -> i64 {
-        self.metrics.worked_minutes
+        self.time_totals.worked_minutes
     }
 
     pub(crate) fn break_minutes(&self) -> i64 {
-        self.metrics.break_minutes
+        self.time_totals.break_minutes
     }
 
     pub(crate) fn absence_minutes(&self) -> i64 {
-        self.metrics.absence_minutes
+        self.time_totals.absence_minutes
     }
 
     pub(crate) fn target_minutes(&self) -> Option<i64> {
@@ -169,56 +169,56 @@ impl WeekBreakdown {
     }
 
     pub(crate) fn balance_minutes(&self) -> Option<i64> {
-        self.target_minutes.map(|mins| self.metrics.balance_minutes(mins))
+        self.target_minutes.map(|mins| self.time_totals.balance_minutes(mins))
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct SummaryReport {
+pub struct Timesheet {
     window: TimeWindow,
-    summary: TimeBreakdown,
+    breakdown: TimeBreakdown,
     weekly_target_minutes: Option<i64>,
-    weekly_days: Vec<DayBreakdown>,
-    weekly_balances: Vec<WeekBreakdown>,
+    daily_totals: Vec<DailyTotals>,
+    weekly_totals: Vec<WeeklyTotals>,
 }
 
-impl SummaryReport {
-    pub(crate) fn new(window: TimeWindow, summary: TimeBreakdown) -> Self {
+impl Timesheet {
+    pub(crate) fn new(window: TimeWindow, breakdown: TimeBreakdown) -> Self {
         Self {
             window,
-            summary,
+            breakdown,
             weekly_target_minutes: None,
-            weekly_days: Vec::new(),
-            weekly_balances: Vec::new(),
+            daily_totals: Vec::new(),
+            weekly_totals: Vec::new(),
         }
     }
 
     pub(crate) fn with_weekly_balance(
         window: TimeWindow,
-        summary: TimeBreakdown,
+        breakdown: TimeBreakdown,
         weekly_target_minutes: i64,
-        weekly_days: Vec<DayBreakdown>,
+        daily_totals: Vec<DailyTotals>,
     ) -> Self {
         Self {
             window,
-            summary,
+            breakdown,
             weekly_target_minutes: Some(weekly_target_minutes),
-            weekly_days,
-            weekly_balances: Vec::new(),
+            daily_totals,
+            weekly_totals: Vec::new(),
         }
     }
 
     pub(crate) fn with_weekly_breakdown(
         window: TimeWindow,
-        summary: TimeBreakdown,
-        weekly_balances: Vec<WeekBreakdown>,
+        breakdown: TimeBreakdown,
+        weekly_totals: Vec<WeeklyTotals>,
     ) -> Self {
         Self {
             window,
-            summary,
+            breakdown,
             weekly_target_minutes: None,
-            weekly_days: Vec::new(),
-            weekly_balances,
+            daily_totals: Vec::new(),
+            weekly_totals,
         }
     }
 
@@ -226,8 +226,8 @@ impl SummaryReport {
         self.window
     }
 
-    pub(crate) fn summary(&self) -> &TimeBreakdown {
-        &self.summary
+    pub(crate) fn breakdown(&self) -> &TimeBreakdown {
+        &self.breakdown
     }
 
     pub(crate) fn weekly_target_minutes(&self) -> Option<i64> {
@@ -235,19 +235,19 @@ impl SummaryReport {
     }
 
     pub(crate) fn worked_minutes(&self) -> i64 {
-        self.summary.total_active_minutes()
+        self.breakdown.total_active_minutes()
     }
 
     pub(crate) fn balance_minutes(&self) -> Option<i64> {
         self.weekly_target_minutes.map(|target| self.worked_minutes() - target)
     }
 
-    pub(crate) fn weekly_days(&self) -> &[DayBreakdown] {
-        &self.weekly_days
+    pub(crate) fn daily_totals(&self) -> &[DailyTotals] {
+        &self.daily_totals
     }
 
-    pub(crate) fn weekly_balances(&self) -> &[WeekBreakdown] {
-        &self.weekly_balances
+    pub(crate) fn weekly_totals(&self) -> &[WeeklyTotals] {
+        &self.weekly_totals
     }
 }
 
@@ -321,7 +321,7 @@ fn add_time(
 }
 
 fn finalize_open_bucket(
-    summary: &mut TimeBreakdownMap,
+    breakdown: &mut TimeBreakdownMap,
     state: DayState,
     last_timestamp: Option<DateTime<Local>>,
     window: TimeWindow,
@@ -329,7 +329,7 @@ fn finalize_open_bucket(
     match state {
         DayState::Idle => {}
         DayState::Active(kind) => add_time(
-            summary,
+            breakdown,
             TimeCategory::from(kind),
             TimeBucket::active_mut,
             last_timestamp,
@@ -338,7 +338,7 @@ fn finalize_open_bucket(
         ),
 
         DayState::Breaking(kind) => add_time(
-            summary,
+            breakdown,
             TimeCategory::from(kind),
             TimeBucket::break_time_mut,
             last_timestamp,
@@ -355,32 +355,32 @@ pub fn calculate_time_breakdown(
     struct State {
         state: DayState,
         last_timestamp: Option<DateTime<Local>>,
-        summary: TimeBreakdownMap,
+        breakdown: TimeBreakdownMap,
     }
     if window.is_empty() {
         return Ok(TimeBreakdown::default());
     }
 
     let init_state =
-        State { state: DayState::Idle, last_timestamp: None, summary: TimeBreakdownMap::new() };
+        State { state: DayState::Idle, last_timestamp: None, breakdown: TimeBreakdownMap::new() };
 
     let result = records
         .iter()
         .filter_map(Record::as_work)
         .filter(|record| *record.timestamp() < window.end())
         .try_fold(init_state, |fold_state, record| -> Result<State, TimelineValidationError> {
-            let State { state, last_timestamp, mut summary } = fold_state;
+            let State { state, last_timestamp, mut breakdown } = fold_state;
             let next_state = transition_day_state(state, record.date(), record.command())?;
 
             match (state, next_state) {
                 (DayState::Idle, DayState::Active(_)) => Ok(State {
                     state: next_state,
                     last_timestamp: Some(*record.timestamp()),
-                    summary,
+                    breakdown,
                 }),
                 (DayState::Active(kind), DayState::Breaking(_)) => {
                     add_time(
-                        &mut summary,
+                        &mut breakdown,
                         TimeCategory::from(kind),
                         TimeBucket::active_mut,
                         last_timestamp,
@@ -390,12 +390,12 @@ pub fn calculate_time_breakdown(
                     Ok(State {
                         state: next_state,
                         last_timestamp: Some(*record.timestamp()),
-                        summary,
+                        breakdown,
                     })
                 }
                 (DayState::Breaking(kind), DayState::Active(_)) => {
                     add_time(
-                        &mut summary,
+                        &mut breakdown,
                         TimeCategory::from(kind),
                         TimeBucket::break_time_mut,
                         last_timestamp,
@@ -405,12 +405,12 @@ pub fn calculate_time_breakdown(
                     Ok(State {
                         state: next_state,
                         last_timestamp: Some(*record.timestamp()),
-                        summary,
+                        breakdown,
                     })
                 }
                 (DayState::Active(kind), DayState::Idle) => {
                     add_time(
-                        &mut summary,
+                        &mut breakdown,
                         TimeCategory::from(kind),
                         TimeBucket::active_mut,
                         last_timestamp,
@@ -420,21 +420,21 @@ pub fn calculate_time_breakdown(
                     Ok(State {
                         state: next_state,
                         last_timestamp: Some(*record.timestamp()),
-                        summary,
+                        breakdown,
                     })
                 }
 
                 (DayState::Active(_), DayState::Active(_)) => {
-                    Ok(State { state, last_timestamp, summary })
+                    Ok(State { state, last_timestamp, breakdown })
                 }
-                _ => unreachable!("summary transitions should use the shared validator"),
+                _ => unreachable!("breakdown transitions should use the shared validator"),
             }
         })?;
 
-    let State { state, last_timestamp, mut summary } = result;
-    finalize_open_bucket(&mut summary, state, last_timestamp, window);
+    let State { state, last_timestamp, mut breakdown } = result;
+    finalize_open_bucket(&mut breakdown, state, last_timestamp, window);
 
-    Ok(TimeBreakdown(summary))
+    Ok(TimeBreakdown(breakdown))
 }
 
 #[cfg(test)]
@@ -473,27 +473,27 @@ mod test {
     }
 
     fn assert_bucket(
-        summary: &TimeBreakdown,
+        breakdown: &TimeBreakdown,
         kind: TimeCategory,
         active: TimeDelta,
         break_time: TimeDelta,
     ) {
-        assert_eq!(summary.active_time(kind), active);
-        assert_eq!(summary.break_time(kind), break_time);
+        assert_eq!(breakdown.active_time(kind), active);
+        assert_eq!(breakdown.break_time(kind), break_time);
     }
 
-    fn assert_bucket_dates(summary: &TimeBreakdown, kind: TimeCategory, dates: &[NaiveDate]) {
-        let actual = summary.bucket(kind).dates;
+    fn assert_bucket_dates(breakdown: &TimeBreakdown, kind: TimeCategory, dates: &[NaiveDate]) {
+        let actual = breakdown.bucket(kind).dates;
         let expected = dates.iter().copied().collect::<HashSet<_>>();
 
         assert_eq!(actual, expected);
     }
 
     #[test]
-    fn summary_accumulates_completed_active_and_break_time() {
+    fn breakdown_accumulates_completed_active_and_break_time() {
         let kind = TimeCategory::Work(WorkContext::Home);
 
-        let summary = summarize(
+        let breakdown = summarize(
             window(28, 0, 28, 18),
             [
                 record(1, 28, 8, WorkCommand::Start { context: WorkContext::Home }),
@@ -509,15 +509,15 @@ mod test {
             ],
         );
 
-        assert_bucket(&summary, kind, hours(8), hours(1));
-        assert_bucket_dates(&summary, kind, &[NaiveDate::from_ymd_opt(2026, 1, 28).unwrap()]);
+        assert_bucket(&breakdown, kind, hours(8), hours(1));
+        assert_bucket_dates(&breakdown, kind, &[NaiveDate::from_ymd_opt(2026, 1, 28).unwrap()]);
     }
 
     #[test]
-    fn summary_clips_open_active_time_at_window_end() {
+    fn breakdown_clips_open_active_time_at_window_end() {
         let kind = TimeCategory::Work(WorkContext::Home);
 
-        let summary = summarize(
+        let breakdown = summarize(
             window(28, 0, 28, 12),
             [
                 record(1, 28, 8, WorkCommand::Start { context: WorkContext::Home }),
@@ -530,14 +530,14 @@ mod test {
             ],
         );
 
-        assert_bucket(&summary, kind, hours(4), TimeDelta::zero());
+        assert_bucket(&breakdown, kind, hours(4), TimeDelta::zero());
     }
 
     #[test]
-    fn summary_clips_open_break_time_at_window_end() {
+    fn breakdown_clips_open_break_time_at_window_end() {
         let kind = TimeCategory::Work(WorkContext::Home);
 
-        let summary = summarize(
+        let breakdown = summarize(
             window(28, 0, 28, 12),
             [
                 record(1, 28, 8, WorkCommand::Start { context: WorkContext::Home }),
@@ -545,14 +545,14 @@ mod test {
             ],
         );
 
-        assert_bucket(&summary, kind, hours(2), hours(2));
+        assert_bucket(&breakdown, kind, hours(2), hours(2));
     }
 
     #[test]
-    fn summary_counts_active_time_from_window_start_for_carry_in_state() {
+    fn breakdown_counts_active_time_from_window_start_for_carry_in_state() {
         let kind = TimeCategory::Work(WorkContext::Home);
 
-        let summary = summarize(
+        let breakdown = summarize(
             window(28, 0, 30, 0),
             [
                 record(1, 27, 10, WorkCommand::Start { context: WorkContext::Home }),
@@ -560,9 +560,9 @@ mod test {
             ],
         );
 
-        assert_bucket(&summary, kind, hours(36), TimeDelta::zero());
+        assert_bucket(&breakdown, kind, hours(36), TimeDelta::zero());
         assert_bucket_dates(
-            &summary,
+            &breakdown,
             kind,
             &[
                 NaiveDate::from_ymd_opt(2026, 1, 28).unwrap(),
@@ -572,10 +572,10 @@ mod test {
     }
 
     #[test]
-    fn summary_counts_break_time_from_window_start_for_carry_in_state() {
+    fn breakdown_counts_break_time_from_window_start_for_carry_in_state() {
         let kind = TimeCategory::Work(WorkContext::Home);
 
-        let summary = summarize(
+        let breakdown = summarize(
             window(28, 0, 29, 0),
             [
                 record(1, 27, 8, WorkCommand::Start { context: WorkContext::Home }),
@@ -585,24 +585,24 @@ mod test {
             ],
         );
 
-        assert_bucket(&summary, kind, hours(2), hours(10));
+        assert_bucket(&breakdown, kind, hours(2), hours(10));
     }
 
     #[test]
-    fn summary_counts_full_window_for_open_session_without_in_range_records() {
+    fn breakdown_counts_full_window_for_open_session_without_in_range_records() {
         let kind = TimeCategory::Work(WorkContext::Home);
 
-        let summary = summarize(
+        let breakdown = summarize(
             window(28, 0, 29, 0),
             [record(1, 27, 8, WorkCommand::Start { context: WorkContext::Home })],
         );
 
-        assert_bucket(&summary, kind, hours(24), TimeDelta::zero());
-        assert_bucket_dates(&summary, kind, &[NaiveDate::from_ymd_opt(2026, 1, 28).unwrap()]);
+        assert_bucket(&breakdown, kind, hours(24), TimeDelta::zero());
+        assert_bucket_dates(&breakdown, kind, &[NaiveDate::from_ymd_opt(2026, 1, 28).unwrap()]);
     }
 
     #[test]
-    fn summary_rejects_invalid_transition() {
+    fn breakdown_rejects_invalid_transition() {
         let err = calculate_time_breakdown(
             &[
                 record(1, 28, 8, WorkCommand::Start { context: WorkContext::Home }),

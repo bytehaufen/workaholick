@@ -2,8 +2,8 @@ use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate, TimeZone};
 
 use crate::config::Config;
 use crate::domain::{
-    AbsenceRecord, AbsenceRecordInput, ChangeOutcome, DateScope, DayBreakdown, Period, Record,
-    RecordChange, RecordId, RecordInput, SummaryReport, TimeWindow, WeekBreakdown, WorkCommand,
+    AbsenceRecord, AbsenceRecordInput, ChangeOutcome, DailyTotals, DateScope, Period, Record,
+    RecordChange, RecordId, RecordInput, TimeWindow, Timesheet, WeeklyTotals, WorkCommand,
     WorkContext, WorkItemReport, WorkRecord, calculate_time_breakdown, report, validate_records,
 };
 use crate::store::RecordRepository;
@@ -129,8 +129,8 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
             .max()
     }
 
-    pub fn timesheet(&self, scope: DateScope) -> anyhow::Result<SummaryReport> {
-        self.build_summary(scope)
+    pub fn timesheet(&self, scope: DateScope) -> anyhow::Result<Timesheet> {
+        self.build_timesheet(scope)
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -155,57 +155,54 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
     }
 
     ///////////// FIXME: old stuff -> need to transform / update / whatever
-    fn build_summary(&self, scope: DateScope) -> anyhow::Result<SummaryReport> {
-        let window = self.summary_window(&scope)?;
+    fn build_timesheet(&self, scope: DateScope) -> anyhow::Result<Timesheet> {
+        let window = self.time_window_for(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
-        let summary = calculate_time_breakdown(&records, window)?;
+        let breakdown = calculate_time_breakdown(&records, window)?;
 
         match scope {
             DateScope::Period { period: Period::Week, .. } => {
-                let weekly_days = weekly_summary_days(&records, window)?;
-                Ok(SummaryReport::with_weekly_balance(
+                let daily_totals = calculate_daily_totals(&records, window)?;
+                Ok(Timesheet::with_weekly_balance(
                     window,
-                    summary,
+                    breakdown,
                     self.config.weekly_target_minutes(),
-                    weekly_days,
+                    daily_totals,
                 ))
             }
             DateScope::Period { period: Period::Month | Period::Year, .. } => {
-                let weekly_balances = weekly_balance_breakdown(
-                    &records,
-                    window,
-                    self.config.weekly_target_minutes(),
-                )?;
-                Ok(SummaryReport::with_weekly_breakdown(window, summary, weekly_balances))
+                let weekly_totals =
+                    calculate_weekly_totals(&records, window, self.config.weekly_target_minutes())?;
+                Ok(Timesheet::with_weekly_breakdown(window, breakdown, weekly_totals))
             }
-            _ => Ok(SummaryReport::new(window, summary)),
+            _ => Ok(Timesheet::new(window, breakdown)),
         }
     }
 
     pub fn activity(&self, scope: DateScope) -> anyhow::Result<WorkItemReport> {
-        let window = self.summary_window(&scope)?;
+        let window = self.time_window_for(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
 
         Ok(report(&records, window)?)
     }
 
-    fn summary_window(&self, scope: &DateScope) -> anyhow::Result<TimeWindow> {
+    fn time_window_for(&self, scope: &DateScope) -> anyhow::Result<TimeWindow> {
         let now = self.clock.now();
         let today = self.clock.today();
 
         let window = match scope {
             DateScope::Period { period, offset } => {
-                period_summary_window(*period, *offset, today, now)?
+                period_time_window(*period, *offset, today, now)?
             }
             DateScope::Range { from, to } => {
-                anyhow::ensure!(from <= to, "Summary start date must be on or before end date.");
+                anyhow::ensure!(from <= to, "Timesheet start date must be on or before end date.");
                 let end = next_day(*to);
 
                 date_window(*from, end, now)
             }
         };
 
-        anyhow::ensure!(!window.is_empty(), "Summary range is empty.");
+        anyhow::ensure!(!window.is_empty(), "Timesheet range is empty.");
 
         Ok(window)
     }
@@ -245,7 +242,7 @@ fn start_of_day(date: NaiveDate) -> DateTime<Local> {
 }
 
 fn next_day(date: NaiveDate) -> NaiveDate {
-    date.succ_opt().expect("summary range end should have a successor day")
+    date.succ_opt().expect("timesheet range end should have a successor day")
 }
 
 fn start_of_week(date: NaiveDate) -> NaiveDate {
@@ -253,13 +250,13 @@ fn start_of_week(date: NaiveDate) -> NaiveDate {
         .expect("week start should be representable")
 }
 
-fn period_summary_window(
+fn period_time_window(
     period: Period,
     offset: i64,
     today: NaiveDate,
     now: DateTime<Local>,
 ) -> anyhow::Result<TimeWindow> {
-    anyhow::ensure!(offset <= 0, "Summary period offset must be zero or negative.");
+    anyhow::ensure!(offset <= 0, "Timesheet period offset must be zero or negative.");
 
     let window = match period {
         Period::Week => {
@@ -305,11 +302,11 @@ fn date_window(start: NaiveDate, end: NaiveDate, now: DateTime<Local>) -> TimeWi
     TimeWindow::new(start_of_day(start), start_of_day(end).min(now))
 }
 
-fn weekly_balance_breakdown(
+fn calculate_weekly_totals(
     records: &[Record],
     window: TimeWindow,
     weekly_target_minutes: i64,
-) -> anyhow::Result<Vec<WeekBreakdown>> {
+) -> anyhow::Result<Vec<WeeklyTotals>> {
     let first_week_start = start_of_week(window.start().date_naive());
 
     std::iter::successors(Some(first_week_start), |week_start| {
@@ -326,13 +323,13 @@ fn weekly_balance_breakdown(
         let week_window =
             TimeWindow::new(full_week_start.max(window.start()), full_week_end.min(window.end()));
 
-        let week_summary = calculate_time_breakdown(records, week_window)?;
+        let week_breakdown = calculate_time_breakdown(records, week_window)?;
 
-        let worked_minutes = week_summary.work_active_minutes();
-        let break_minutes = week_summary.break_minutes();
-        let absence_minutes = week_summary.absence_minutes();
+        let worked_minutes = week_breakdown.work_active_minutes();
+        let break_minutes = week_breakdown.break_minutes();
+        let absence_minutes = week_breakdown.absence_minutes();
 
-        Ok(WeekBreakdown::new(
+        Ok(WeeklyTotals::new(
             week_start,
             worked_minutes,
             break_minutes,
@@ -344,27 +341,27 @@ fn weekly_balance_breakdown(
     .collect()
 }
 
-fn weekly_summary_days(
+fn calculate_daily_totals(
     records: &[Record],
     window: TimeWindow,
-) -> anyhow::Result<Vec<DayBreakdown>> {
+) -> anyhow::Result<Vec<DailyTotals>> {
     let first_date = window.start().date_naive();
     let last_date = window.end().date_naive();
 
-    let days_summary = std::iter::successors(Some(first_date), |date| Some(next_day(*date)))
+    let daily_totals = std::iter::successors(Some(first_date), |date| Some(next_day(*date)))
         .take_while(|date| *date <= last_date)
-        .map(|date| -> anyhow::Result<Option<DayBreakdown>> {
+        .map(|date| -> anyhow::Result<Option<DailyTotals>> {
             let day_start = start_of_day(date).max(window.start());
             let day_end = start_of_day(next_day(date)).min(window.end());
 
             if day_end > day_start {
                 let day_window = TimeWindow::new(day_start, day_end);
-                let day_summary = calculate_time_breakdown(records, day_window)?;
-                let worked_minutes = day_summary.work_active_minutes();
-                let break_minutes = day_summary.break_minutes();
-                let absence_minutes = day_summary.absence_minutes();
+                let day_breakdown = calculate_time_breakdown(records, day_window)?;
+                let worked_minutes = day_breakdown.work_active_minutes();
+                let break_minutes = day_breakdown.break_minutes();
+                let absence_minutes = day_breakdown.absence_minutes();
 
-                Ok(Some(DayBreakdown::new(date, worked_minutes, break_minutes, absence_minutes)))
+                Ok(Some(DailyTotals::new(date, worked_minutes, break_minutes, absence_minutes)))
             } else {
                 Ok(None)
             }
@@ -374,7 +371,7 @@ fn weekly_summary_days(
         .flatten()
         .collect();
 
-    Ok(days_summary)
+    Ok(daily_totals)
 }
 
 #[cfg(test)]
@@ -521,7 +518,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(&DateScope::Range { from: date(10), to: date(12) }).unwrap();
+            app.time_window_for(&DateScope::Range { from: date(10), to: date(12) }).unwrap();
 
         assert_eq!(window.start(), ts(10, 0, 0));
         assert_eq!(window.end(), ts(13, 0, 0,));
@@ -538,7 +535,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(&DateScope::Range { from: date(10), to: date(15) }).unwrap();
+            app.time_window_for(&DateScope::Range { from: date(10), to: date(15) }).unwrap();
 
         assert_eq!(window.start(), ts(10, 0, 0));
         assert_eq!(window.end(), now);
@@ -555,7 +552,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(&DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
+            app.time_window_for(&DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
         assert_eq!(window.start(), ts(12, 0, 0));
         assert_eq!(window.end(), now);
@@ -572,7 +569,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(&DateScope::Period { period: Period::Week, offset: -1 }).unwrap();
+            app.time_window_for(&DateScope::Period { period: Period::Week, offset: -1 }).unwrap();
 
         assert_eq!(window.start(), ts(5, 0, 0));
         assert_eq!(window.end(), ts(12, 0, 0));
@@ -589,7 +586,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(&DateScope::Period { period: Period::Month, offset: -1 }).unwrap();
+            app.time_window_for(&DateScope::Period { period: Period::Month, offset: -1 }).unwrap();
 
         assert_eq!(window.start(), Local.with_ymd_and_hms(2025, 12, 1, 0, 0, 0).unwrap());
         assert_eq!(window.end(), Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap());
@@ -606,7 +603,7 @@ mod tests {
         .unwrap();
 
         let window =
-            app.summary_window(&DateScope::Period { period: Period::Year, offset: -1 }).unwrap();
+            app.time_window_for(&DateScope::Period { period: Period::Year, offset: -1 }).unwrap();
 
         assert_eq!(window.start(), Local.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap());
         assert_eq!(window.end(), Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap());
@@ -622,10 +619,11 @@ mod tests {
         )
         .unwrap();
 
-        let err =
-            app.summary_window(&DateScope::Period { period: Period::Week, offset: 1 }).unwrap_err();
+        let err = app
+            .time_window_for(&DateScope::Period { period: Period::Week, offset: 1 })
+            .unwrap_err();
 
-        assert_eq!(err.to_string(), "Summary period offset must be zero or negative.");
+        assert_eq!(err.to_string(), "Timesheet period offset must be zero or negative.");
     }
 
     #[test]
@@ -640,7 +638,7 @@ mod tests {
 
         let err = app.timesheet(DateScope::Range { from: date(12), to: date(10) }).unwrap_err();
 
-        assert_eq!(err.to_string(), "Summary start date must be on or before end date.");
+        assert_eq!(err.to_string(), "Timesheet start date must be on or before end date.");
     }
 
     #[test]
@@ -662,7 +660,7 @@ mod tests {
 
         let err = app.timesheet(DateScope::Range { from: date(16), to: date(17) }).unwrap_err();
 
-        assert_eq!(err.to_string(), "Summary range is empty.");
+        assert_eq!(err.to_string(), "Timesheet range is empty.");
     }
 
     #[test]
@@ -724,10 +722,10 @@ mod tests {
         assert_eq!(report.worked_minutes(), (1 + 2 + 3 + 4 + 5) * 60);
         assert_eq!(report.balance_minutes(), Some(0));
         assert_eq!(
-            report.weekly_days().iter().map(|day| day.worked_minutes()).collect::<Vec<_>>(),
+            report.daily_totals().iter().map(|day| day.worked_minutes()).collect::<Vec<_>>(),
             vec![60, 60 << 1, 3 * 60, 60 << 2, 5 * 60, 0, 0]
         );
-        assert!(report.weekly_balances().is_empty());
+        assert!(report.weekly_totals().is_empty());
     }
 
     #[test]
@@ -750,8 +748,8 @@ mod tests {
         assert_eq!(report.weekly_target_minutes(), None);
         assert_eq!(report.worked_minutes(), 4 * 60);
         assert_eq!(report.balance_minutes(), None);
-        assert!(report.weekly_days().is_empty());
-        assert!(report.weekly_balances().is_empty());
+        assert!(report.daily_totals().is_empty());
+        assert!(report.weekly_totals().is_empty());
     }
 
     #[test]
@@ -787,7 +785,7 @@ mod tests {
 
         assert_eq!(
             report
-                .weekly_balances()
+                .weekly_totals()
                 .iter()
                 .map(|week| (
                     week.start(),
@@ -817,7 +815,7 @@ mod tests {
                 ),
             ]
         );
-        assert!(report.weekly_days().is_empty());
+        assert!(report.daily_totals().is_empty());
         assert_eq!(report.weekly_target_minutes(), None);
     }
 
@@ -839,11 +837,11 @@ mod tests {
         let report = app.timesheet(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(
-            report.summary().active_time(TimeCategory::Work(context)),
+            report.breakdown().active_time(TimeCategory::Work(context)),
             chrono::TimeDelta::hours(16)
         );
         assert_eq!(
-            report.summary().break_time(TimeCategory::Work(context)),
+            report.breakdown().break_time(TimeCategory::Work(context)),
             chrono::TimeDelta::zero()
         );
     }
@@ -872,11 +870,11 @@ mod tests {
         let report = app.timesheet(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(
-            report.summary().active_time(TimeCategory::Work(context)),
+            report.breakdown().active_time(TimeCategory::Work(context)),
             chrono::TimeDelta::hours(10)
         );
         assert_eq!(
-            report.summary().break_time(TimeCategory::Work(context)),
+            report.breakdown().break_time(TimeCategory::Work(context)),
             chrono::TimeDelta::zero()
         );
     }

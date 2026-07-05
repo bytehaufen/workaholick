@@ -14,7 +14,7 @@ pub use port::Formatter;
 #[cfg(feature = "markdown")]
 pub use markdown_formatter::MarkdownFormatter;
 
-use crate::domain::{ActivityGroupBy, SummaryReport, TimeWindow, WorkCommand, WorkItemReport};
+use crate::domain::{ActivityGroupBy, TimeWindow, Timesheet, WorkCommand, WorkItemReport};
 
 pub fn print_day(
     formatter: OutputFormatter,
@@ -40,7 +40,7 @@ pub fn print_day(
     }
 }
 
-pub fn print_timesheet(formatter: OutputFormatter, report: &SummaryReport) -> Result<()> {
+pub fn print_timesheet(formatter: OutputFormatter, report: &Timesheet) -> Result<()> {
     match formatter {
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
@@ -193,9 +193,9 @@ pub(super) struct SummaryWeekDisplay {
     pub balance: String,
 }
 
-pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
+pub(super) fn prepare_summary(report: &Timesheet) -> SummaryDisplay {
     let mut rows = report
-        .summary()
+        .breakdown()
         .iter()
         .filter(|(_, bucket)| bucket.has_time())
         .map(|(kind, bucket)| {
@@ -215,7 +215,7 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
     let total_active_minutes = rows.iter().map(|row| row.active_minutes).sum();
     let total_break_minutes = rows.iter().map(|row| row.break_minutes).sum();
     let weekly_days = report
-        .weekly_days()
+        .daily_totals()
         .iter()
         .map(|day| SummaryDayDisplay {
             day: format_summary_day(day.date()),
@@ -225,7 +225,7 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
         })
         .collect();
     let weekly_balances = report
-        .weekly_balances()
+        .weekly_totals()
         .iter()
         .map(|week| SummaryWeekDisplay {
             week: format_summary_week(week.start()),
@@ -242,19 +242,19 @@ pub(super) fn prepare_summary(report: &SummaryReport) -> SummaryDisplay {
                 .unwrap_or_else(|| "n/a".to_string()),
         })
         .collect::<Vec<_>>();
-    let weekly_balances_total = if report.weekly_balances().is_empty() {
+    let weekly_balances_total = if report.weekly_totals().is_empty() {
         None
     } else {
         let total_worked_minutes =
-            report.weekly_balances().iter().map(|week| week.worked_minutes()).sum();
+            report.weekly_totals().iter().map(|week| week.worked_minutes()).sum();
         let total_break_minutes =
-            report.weekly_balances().iter().map(|week| week.break_minutes()).sum();
+            report.weekly_totals().iter().map(|week| week.break_minutes()).sum();
         let total_absence_minutes =
-            report.weekly_balances().iter().map(|week| week.absence_minutes()).sum();
+            report.weekly_totals().iter().map(|week| week.absence_minutes()).sum();
         let total_target_minutes: i64 =
-            report.weekly_balances().iter().filter_map(|week| week.target_minutes()).sum();
+            report.weekly_totals().iter().filter_map(|week| week.target_minutes()).sum();
         let total_balance_minutes: i64 =
-            report.weekly_balances().iter().filter_map(|week| week.balance_minutes()).sum();
+            report.weekly_totals().iter().filter_map(|week| week.balance_minutes()).sum();
 
         Some(SummaryWeekDisplay {
             week: "TOTAL".to_string(),
@@ -470,8 +470,8 @@ mod tests {
     use super::*;
     use crate::domain::report::WorkItemRow;
     use crate::domain::{
-        DayBreakdown, SummaryReport, TimeWindow, WeekBreakdown, WorkCommand, WorkContext,
-        WorkItemReport, calculate_time_breakdown,
+        DailyTotals, TimeWindow, Timesheet, WeeklyTotals, WorkCommand, WorkContext, WorkItemReport,
+        calculate_time_breakdown,
     };
     use crate::test_support::*;
     use chrono::{Local, TimeZone};
@@ -681,14 +681,14 @@ mod tests {
             work_record(5, 13, 6, 30, WorkCommand::BreakEnd { description: None }),
             work_record(6, 13, 8, 0, WorkCommand::End { title: "done".into(), description: None }),
         ];
-        let report = SummaryReport::with_weekly_balance(
+        let report = Timesheet::with_weekly_balance(
             window,
             calculate_time_breakdown(&records, window).unwrap(),
             40 * 60,
             vec![
-                DayBreakdown::new(ts(12, 0, 0).date_naive(), 8 * 60, 0, 0),
-                DayBreakdown::new(ts(13, 0, 0).date_naive(), 6 * 60, 0, 0),
-                DayBreakdown::new(ts(14, 0, 0).date_naive(), 0, 0, 0),
+                DailyTotals::new(ts(12, 0, 0).date_naive(), 8 * 60, 0, 0),
+                DailyTotals::new(ts(13, 0, 0).date_naive(), 6 * 60, 0, 0),
+                DailyTotals::new(ts(14, 0, 0).date_naive(), 0, 0, 0),
             ],
         );
 
@@ -753,18 +753,18 @@ mod tests {
     #[test]
     fn prepare_summary_includes_weekly_balance_breakdown() {
         let window = TimeWindow::new(ts(1, 0, 0), ts(16, 0, 0));
-        let report = SummaryReport::with_weekly_breakdown(
+        let report = Timesheet::with_weekly_breakdown(
             window,
             calculate_time_breakdown(&[], window).unwrap(),
             vec![
-                WeekBreakdown::new(
+                WeeklyTotals::new(
                     Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
                     8 * 60,
                     0,
                     0,
                     None,
                 ),
-                WeekBreakdown::new(ts(5, 0, 0).date_naive(), 40 * 60, 0, 0, Some(40 * 60)),
+                WeeklyTotals::new(ts(5, 0, 0).date_naive(), 40 * 60, 0, 0, Some(40 * 60)),
             ],
         );
 
