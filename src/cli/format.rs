@@ -49,7 +49,7 @@ pub fn print_timesheet(formatter: OutputFormatter, report: &Timesheet) -> Result
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
             {
-                let rendered = MarkdownFormatter::format_summary(report);
+                let rendered = MarkdownFormatter::format_timesheet(report);
                 MarkdownFormatter::print(&rendered);
                 Ok(())
             }
@@ -73,7 +73,7 @@ pub fn print_activity(
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
             {
-                let rendered = MarkdownFormatter::format_report(report, group_by);
+                let rendered = MarkdownFormatter::format_activity(report, group_by);
                 MarkdownFormatter::print(&rendered);
                 Ok(())
             }
@@ -91,7 +91,7 @@ pub fn print_activity(
 pub(super) fn format_work_command(command: &WorkCommand) -> String {
     match command {
         WorkCommand::Start { context } => {
-            format!("START {}", format_summary_kind(TimeCategory::from(*context)))
+            format!("START {}", format_timesheet_category(TimeCategory::from(*context)))
         }
         WorkCommand::End { title, description } => {
             format!(
@@ -125,36 +125,36 @@ fn escape_inline_text(text: &str) -> String {
     text.replace('\\', r"\\").replace('"', r#"\""#)
 }
 
-pub(super) fn format_summary_kind(kind: TimeCategory) -> String {
-    match kind {
+pub(super) fn format_timesheet_category(category: TimeCategory) -> String {
+    match category {
         TimeCategory::Work(work_context) => format!("work ({work_context})"),
         TimeCategory::Absence(absence_kind) => format!("absence ({absence_kind})"),
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SummaryDisplay {
+pub(super) struct TimesheetView {
     pub title: String,
-    pub rows: Vec<SummaryDisplayRow>,
-    pub total: SummaryDisplayRow,
-    pub weekly_days: Vec<SummaryDayDisplay>,
-    pub weekly_balances: Vec<SummaryWeekDisplay>,
-    pub weekly_balances_total: Option<SummaryWeekDisplay>,
+    pub rows: Vec<TimesheetViewRow>,
+    pub total: TimesheetViewRow,
+    pub weekly_days: Vec<DailyTotalsView>,
+    pub weekly_balances: Vec<WeeklyTotalsView>,
+    pub weekly_balances_total: Option<WeeklyTotalsView>,
     pub target: Option<String>,
     pub balance: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ReportDisplay {
+pub(super) struct ActivityView {
     pub title: String,
-    pub rows: Vec<ReportItemDisplay>,
-    pub groups: Vec<ReportGroupDisplay>,
+    pub rows: Vec<ActivityItemView>,
+    pub groups: Vec<ActivityGroupView>,
     pub show_description: bool,
     pub show_group_description: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ReportItemDisplay {
+pub(super) struct ActivityItemView {
     pub date: String,
     pub start: String,
     pub end: String,
@@ -164,7 +164,7 @@ pub(super) struct ReportItemDisplay {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ReportGroupDisplay {
+pub(super) struct ActivityGroupView {
     pub title: String,
     pub description: String,
     pub count: String,
@@ -172,7 +172,7 @@ pub(super) struct ReportGroupDisplay {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SummaryDisplayRow {
+pub(super) struct TimesheetViewRow {
     pub activity: String,
     pub day_count: String,
     pub active: String,
@@ -180,7 +180,7 @@ pub(super) struct SummaryDisplayRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SummaryDayDisplay {
+pub(super) struct DailyTotalsView {
     pub day: String,
     pub active: String,
     pub break_time: String,
@@ -188,7 +188,7 @@ pub(super) struct SummaryDayDisplay {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct SummaryWeekDisplay {
+pub(super) struct WeeklyTotalsView {
     pub week: String,
     pub worked: String,
     pub break_time: String,
@@ -197,8 +197,8 @@ pub(super) struct SummaryWeekDisplay {
     pub balance: String,
 }
 
-pub(super) fn prepare_summary(report: &Timesheet) -> SummaryDisplay {
-    let mut rows = report
+pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
+    let mut rows = timesheet
         .breakdown()
         .iter()
         .filter(|(_, bucket)| bucket.has_time())
@@ -206,9 +206,9 @@ pub(super) fn prepare_summary(report: &Timesheet) -> SummaryDisplay {
             let active_minutes = duration_minutes(bucket.active_time());
             let break_minutes = duration_minutes(bucket.break_time());
 
-            PreparedSummaryRow {
-                activity: format_summary_kind(kind),
-                day_count: format_summary_day_count(bucket.dates()),
+            PreparedTimesheetRow {
+                activity: format_timesheet_category(kind),
+                day_count: format_timesheet_day_count(bucket.dates()),
                 active_minutes,
                 break_minutes,
             }
@@ -218,62 +218,62 @@ pub(super) fn prepare_summary(report: &Timesheet) -> SummaryDisplay {
 
     let total_active_minutes = rows.iter().map(|row| row.active_minutes).sum();
     let total_break_minutes = rows.iter().map(|row| row.break_minutes).sum();
-    let weekly_days = report
+    let weekly_days = timesheet
         .daily_totals()
         .iter()
-        .map(|day| SummaryDayDisplay {
-            day: format_summary_day(day.date()),
-            active: format_summary_duration(day.worked_minutes()),
-            break_time: format_summary_duration(day.break_minutes()),
-            absence: format_summary_duration(day.absence_minutes()),
+        .map(|day| DailyTotalsView {
+            day: format_timesheet_day(day.date()),
+            active: format_timesheet_duration(day.worked_minutes()),
+            break_time: format_timesheet_duration(day.break_minutes()),
+            absence: format_timesheet_duration(day.absence_minutes()),
         })
         .collect();
-    let weekly_balances = report
+    let weekly_balances = timesheet
         .weekly_totals()
         .iter()
-        .map(|week| SummaryWeekDisplay {
-            week: format_summary_week(week.start()),
-            worked: format_summary_duration(week.worked_minutes()),
-            break_time: format_summary_duration(week.break_minutes()),
-            absence: format_summary_duration(week.absence_minutes()),
+        .map(|week| WeeklyTotalsView {
+            week: format_timesheet_week(week.start()),
+            worked: format_timesheet_duration(week.worked_minutes()),
+            break_time: format_timesheet_duration(week.break_minutes()),
+            absence: format_timesheet_duration(week.absence_minutes()),
             target: week
                 .target_minutes()
-                .map(format_summary_duration)
+                .map(format_timesheet_duration)
                 .unwrap_or_else(|| "n/a".to_string()),
             balance: week
                 .balance_minutes()
-                .map(format_signed_summary_duration)
+                .map(format_signed_timesheet_duration)
                 .unwrap_or_else(|| "n/a".to_string()),
         })
         .collect::<Vec<_>>();
-    let weekly_balances_total = if report.weekly_totals().is_empty() {
+    let weekly_balances_total = if timesheet.weekly_totals().is_empty() {
         None
     } else {
         let total_worked_minutes =
-            report.weekly_totals().iter().map(|week| week.worked_minutes()).sum();
+            timesheet.weekly_totals().iter().map(|week| week.worked_minutes()).sum();
         let total_break_minutes =
-            report.weekly_totals().iter().map(|week| week.break_minutes()).sum();
+            timesheet.weekly_totals().iter().map(|week| week.break_minutes()).sum();
         let total_absence_minutes =
-            report.weekly_totals().iter().map(|week| week.absence_minutes()).sum();
+            timesheet.weekly_totals().iter().map(|week| week.absence_minutes()).sum();
         let total_target_minutes: i64 =
-            report.weekly_totals().iter().filter_map(|week| week.target_minutes()).sum();
+            timesheet.weekly_totals().iter().filter_map(|week| week.target_minutes()).sum();
         let total_balance_minutes: i64 =
-            report.weekly_totals().iter().filter_map(|week| week.balance_minutes()).sum();
+            timesheet.weekly_totals().iter().filter_map(|week| week.balance_minutes()).sum();
 
-        Some(SummaryWeekDisplay {
+        Some(WeeklyTotalsView {
             week: "TOTAL".to_string(),
-            worked: format_summary_duration(total_worked_minutes),
-            break_time: format_summary_duration(total_break_minutes),
-            absence: format_summary_duration(total_absence_minutes),
-            target: format_summary_duration(total_target_minutes),
-            balance: format_signed_summary_duration(total_balance_minutes),
+            worked: format_timesheet_duration(total_worked_minutes),
+            break_time: format_timesheet_duration(total_break_minutes),
+            absence: format_timesheet_duration(total_absence_minutes),
+            target: format_timesheet_duration(total_target_minutes),
+            balance: format_signed_timesheet_duration(total_balance_minutes),
         })
     };
 
-    SummaryDisplay {
-        title: format_summary_title(report.window()),
-        rows: rows.into_iter().map(SummaryDisplayRow::from).collect(),
-        total: SummaryDisplayRow::from(PreparedSummaryRow {
+    TimesheetView {
+        title: format_timesheet_title(timesheet.window()),
+        rows: rows.into_iter().map(TimesheetViewRow::from).collect(),
+        total: TimesheetViewRow::from(PreparedTimesheetRow {
             activity: "TOTAL".to_string(),
             day_count: String::new(),
             active_minutes: total_active_minutes,
@@ -282,43 +282,43 @@ pub(super) fn prepare_summary(report: &Timesheet) -> SummaryDisplay {
         weekly_days,
         weekly_balances,
         weekly_balances_total,
-        target: report.weekly_target_minutes().map(format_summary_duration),
-        balance: report.balance_minutes().map(format_signed_summary_duration),
+        target: timesheet.weekly_target_minutes().map(format_timesheet_duration),
+        balance: timesheet.balance_minutes().map(format_signed_timesheet_duration),
     }
 }
 
-pub(super) fn prepare_report(
+pub(super) fn prepare_activity_view(
     report: &ActivityReport,
     group_by: Option<ActivityGroupBy>,
-) -> ReportDisplay {
+) -> ActivityView {
     match group_by {
-        Some(ActivityGroupBy::Title) => ReportDisplay {
-            title: format_report_title(report.window(), group_by),
+        Some(ActivityGroupBy::Title) => ActivityView {
+            title: format_activity_title(report.window(), group_by),
             rows: Vec::new(),
             groups: report
                 .group_by_title()
                 .into_iter()
-                .map(|row| ReportGroupDisplay {
+                .map(|row| ActivityGroupView {
                     title: row.title().to_string(),
                     description: String::new(),
                     count: row.count().to_string(),
-                    duration: format_summary_duration(row.duration_minutes()),
+                    duration: format_timesheet_duration(row.duration_minutes()),
                 })
                 .collect(),
             show_description: false,
             show_group_description: false,
         },
-        Some(ActivityGroupBy::TitleDescription) => ReportDisplay {
-            title: format_report_title(report.window(), group_by),
+        Some(ActivityGroupBy::TitleDescription) => ActivityView {
+            title: format_activity_title(report.window(), group_by),
             rows: Vec::new(),
             groups: report
                 .group_by_title_description()
                 .into_iter()
-                .map(|row| ReportGroupDisplay {
+                .map(|row| ActivityGroupView {
                     title: row.title().to_string(),
                     description: row.description().unwrap_or("-").to_string(),
                     count: row.count().to_string(),
-                    duration: format_summary_duration(row.duration_minutes()),
+                    duration: format_timesheet_duration(row.duration_minutes()),
                 })
                 .collect(),
             show_description: false,
@@ -328,18 +328,18 @@ pub(super) fn prepare_report(
             let rows = report
                 .rows()
                 .iter()
-                .map(|row| ReportItemDisplay {
+                .map(|row| ActivityItemView {
                     date: row.date().to_string(),
-                    start: format_report_boundary(row.start(), row.date()),
-                    end: format_report_boundary(row.end(), row.date()),
-                    duration: format_summary_duration(row.duration_minutes()),
+                    start: format_activity_boundary(row.start(), row.date()),
+                    end: format_activity_boundary(row.end(), row.date()),
+                    duration: format_timesheet_duration(row.duration_minutes()),
                     title: row.title().to_string(),
                     description: row.description().unwrap_or_default().to_string(),
                 })
                 .collect::<Vec<_>>();
 
-            ReportDisplay {
-                title: format_report_title(report.window(), group_by),
+            ActivityView {
+                title: format_activity_title(report.window(), group_by),
                 show_description: rows.iter().any(|row| !row.description.is_empty()),
                 show_group_description: false,
                 rows,
@@ -349,23 +349,29 @@ pub(super) fn prepare_report(
     }
 }
 
-pub(super) fn format_summary_title(window: TimeWindow) -> String {
-    format!("Summary {}", format_summary_window(window))
+pub(super) fn format_timesheet_title(window: TimeWindow) -> String {
+    format!("Timesheet {}", format_timesheet_window(window))
 }
 
-pub(super) fn format_report_title(window: TimeWindow, group_by: Option<ActivityGroupBy>) -> String {
+pub(super) fn format_activity_title(
+    window: TimeWindow,
+    group_by: Option<ActivityGroupBy>,
+) -> String {
     match group_by {
         Some(ActivityGroupBy::Title) => {
-            format!("Report {} (grouped by title)", format_summary_window(window))
+            format!("Activity report {} (grouped by title)", format_timesheet_window(window))
         }
         Some(ActivityGroupBy::TitleDescription) => {
-            format!("Report {} (grouped by title + description)", format_summary_window(window))
+            format!(
+                "Activity report {} (grouped by title + description)",
+                format_timesheet_window(window)
+            )
         }
-        None => format!("Report {}", format_summary_window(window)),
+        None => format!("Activity report {}", format_timesheet_window(window)),
     }
 }
 
-pub(super) fn format_summary_window(window: TimeWindow) -> String {
+pub(super) fn format_timesheet_window(window: TimeWindow) -> String {
     let start = window.start();
     let end = window.end();
 
@@ -380,13 +386,13 @@ pub(super) fn format_summary_window(window: TimeWindow) -> String {
         };
     }
 
-    let start = format_summary_boundary(start);
-    let end = format_summary_boundary(end);
+    let start = format_timesheet_boundary(start);
+    let end = format_timesheet_boundary(end);
 
     if start == end { start } else { format!("{start} .. {end}") }
 }
 
-pub(super) fn format_summary_boundary(boundary: DateTime<Local>) -> String {
+pub(super) fn format_timesheet_boundary(boundary: DateTime<Local>) -> String {
     if is_midnight(boundary) {
         boundary.date_naive().to_string()
     } else {
@@ -394,7 +400,7 @@ pub(super) fn format_summary_boundary(boundary: DateTime<Local>) -> String {
     }
 }
 
-pub(super) fn format_report_boundary(boundary: DateTime<Local>, row_date: NaiveDate) -> String {
+pub(super) fn format_activity_boundary(boundary: DateTime<Local>, row_date: NaiveDate) -> String {
     if boundary.date_naive() == row_date {
         boundary.format("%H:%M").to_string()
     } else {
@@ -402,20 +408,20 @@ pub(super) fn format_report_boundary(boundary: DateTime<Local>, row_date: NaiveD
     }
 }
 
-pub(super) fn format_summary_day(date: NaiveDate) -> String {
+pub(super) fn format_timesheet_day(date: NaiveDate) -> String {
     format!("{} {}", date.weekday(), date)
 }
 
-pub(super) fn format_summary_week(date: NaiveDate) -> String {
+pub(super) fn format_timesheet_week(date: NaiveDate) -> String {
     let iso = date.iso_week();
     format!("{}-W{:02}", iso.year(), iso.week())
 }
 
-fn format_summary_day_count(dates: &HashSet<NaiveDate>) -> String {
+fn format_timesheet_day_count(dates: &HashSet<NaiveDate>) -> String {
     dates.len().to_string()
 }
 
-pub(super) fn format_summary_duration(total_minutes: i64) -> String {
+pub(super) fn format_timesheet_duration(total_minutes: i64) -> String {
     if total_minutes <= 0 {
         return "0m".to_string();
     }
@@ -434,29 +440,29 @@ pub(super) fn format_summary_duration(total_minutes: i64) -> String {
     if parts.is_empty() { "0m".to_string() } else { parts.join(" ") }
 }
 
-pub(super) fn format_signed_summary_duration(total_minutes: i64) -> String {
+pub(super) fn format_signed_timesheet_duration(total_minutes: i64) -> String {
     match total_minutes.cmp(&0) {
-        std::cmp::Ordering::Less => format!("-{}", format_summary_duration(-total_minutes)),
+        std::cmp::Ordering::Less => format!("-{}", format_timesheet_duration(-total_minutes)),
         std::cmp::Ordering::Equal => "0m".to_string(),
-        std::cmp::Ordering::Greater => format!("+{}", format_summary_duration(total_minutes)),
+        std::cmp::Ordering::Greater => format!("+{}", format_timesheet_duration(total_minutes)),
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct PreparedSummaryRow {
+struct PreparedTimesheetRow {
     activity: String,
     day_count: String,
     active_minutes: i64,
     break_minutes: i64,
 }
 
-impl From<PreparedSummaryRow> for SummaryDisplayRow {
-    fn from(row: PreparedSummaryRow) -> Self {
+impl From<PreparedTimesheetRow> for TimesheetViewRow {
+    fn from(row: PreparedTimesheetRow) -> Self {
         Self {
             activity: row.activity,
             day_count: row.day_count,
-            active: format_summary_duration(row.active_minutes),
-            break_time: format_summary_duration(row.break_minutes),
+            active: format_timesheet_duration(row.active_minutes),
+            break_time: format_timesheet_duration(row.break_minutes),
         }
     }
 }
@@ -494,39 +500,39 @@ mod tests {
     }
 
     #[test]
-    fn format_summary_duration_keeps_values_in_hours_and_minutes() {
-        assert_eq!(format_summary_duration(0), "0m");
-        assert_eq!(format_summary_duration(12), "12m");
-        assert_eq!(format_summary_duration(4 * 60 + 12), "4h 12m");
-        assert_eq!(format_summary_duration(2 * 24 * 60 + 4 * 60 + 12), "52h 12m");
-        assert_eq!(format_summary_duration(24 * 60), "24h");
+    fn format_timesheet_duration_keeps_values_in_hours_and_minutes() {
+        assert_eq!(format_timesheet_duration(0), "0m");
+        assert_eq!(format_timesheet_duration(12), "12m");
+        assert_eq!(format_timesheet_duration(4 * 60 + 12), "4h 12m");
+        assert_eq!(format_timesheet_duration(2 * 24 * 60 + 4 * 60 + 12), "52h 12m");
+        assert_eq!(format_timesheet_duration(24 * 60), "24h");
     }
 
     #[test]
-    fn format_signed_summary_duration_includes_sign() {
-        assert_eq!(format_signed_summary_duration(-(28 * 60 + 12)), "-28h 12m");
-        assert_eq!(format_signed_summary_duration(0), "0m");
-        assert_eq!(format_signed_summary_duration(28 * 60 + 12), "+28h 12m");
+    fn format_signed_timesheet_duration_includes_sign() {
+        assert_eq!(format_signed_timesheet_duration(-(28 * 60 + 12)), "-28h 12m");
+        assert_eq!(format_signed_timesheet_duration(0), "0m");
+        assert_eq!(format_signed_timesheet_duration(28 * 60 + 12), "+28h 12m");
     }
 
     #[test]
-    fn format_summary_window_uses_inclusive_dates_for_full_day_ranges() {
+    fn format_timesheet_window_uses_inclusive_dates_for_full_day_ranges() {
         let window = TimeWindow::new(ts(10, 0, 0), ts(13, 0, 0));
 
-        assert_eq!(format_summary_window(window), "2026-01-10 .. 2026-01-12");
+        assert_eq!(format_timesheet_window(window), "2026-01-10 .. 2026-01-12");
     }
 
     #[test]
-    fn format_summary_window_keeps_partial_boundaries_exact() {
+    fn format_timesheet_window_keeps_partial_boundaries_exact() {
         let window = TimeWindow::new(ts(10, 0, 0), ts(12, 14, 15));
 
-        assert_eq!(format_summary_window(window), "2026-01-10 .. 2026-01-12 14:15");
+        assert_eq!(format_timesheet_window(window), "2026-01-10 .. 2026-01-12 14:15");
     }
 
     #[test]
-    fn format_summary_week_uses_iso_week_label() {
+    fn format_timesheet_week_uses_iso_week_label() {
         assert_eq!(
-            format_summary_week(
+            format_timesheet_week(
                 Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive()
             ),
             "2026-W01"
@@ -534,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_report_renders_detailed_rows() {
+    fn prepare_activity_view_renders_detailed_rows() {
         let report = ActivityReport::new(
             TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
             vec![
@@ -557,16 +563,16 @@ mod tests {
             ],
         );
 
-        let display = prepare_report(&report, None);
+        let display = prepare_activity_view(&report, None);
 
-        assert_eq!(display.title, "Report 2026-01-10");
+        assert_eq!(display.title, "Activity report 2026-01-10");
         assert!(display.groups.is_empty());
         assert!(display.show_description);
         assert!(!display.show_group_description);
         assert_eq!(
             display.rows,
             vec![
-                ReportItemDisplay {
+                ActivityItemView {
                     date: "2026-01-10".into(),
                     start: "08:00".into(),
                     end: "10:00".into(),
@@ -574,7 +580,7 @@ mod tests {
                     title: "handoff".into(),
                     description: "sync".into(),
                 },
-                ReportItemDisplay {
+                ActivityItemView {
                     date: "2026-01-10".into(),
                     start: "10:00".into(),
                     end: "12:00".into(),
@@ -587,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_report_groups_rows_by_title() {
+    fn prepare_activity_view_groups_rows_by_title() {
         let report = ActivityReport::new(
             TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
             vec![
@@ -610,14 +616,14 @@ mod tests {
             ],
         );
 
-        let display = prepare_report(&report, Some(ActivityGroupBy::Title));
+        let display = prepare_activity_view(&report, Some(ActivityGroupBy::Title));
 
-        assert_eq!(display.title, "Report 2026-01-10 (grouped by title)");
+        assert_eq!(display.title, "Activity report 2026-01-10 (grouped by title)");
         assert!(display.rows.is_empty());
         assert!(!display.show_group_description);
         assert_eq!(
             display.groups,
-            vec![ReportGroupDisplay {
+            vec![ActivityGroupView {
                 title: "review".into(),
                 description: String::new(),
                 count: "2".into(),
@@ -627,7 +633,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_report_groups_rows_by_title_description() {
+    fn prepare_activity_view_groups_rows_by_title_description() {
         let report = ActivityReport::new(
             TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
             vec![
@@ -650,21 +656,21 @@ mod tests {
             ],
         );
 
-        let display = prepare_report(&report, Some(ActivityGroupBy::TitleDescription));
+        let display = prepare_activity_view(&report, Some(ActivityGroupBy::TitleDescription));
 
-        assert_eq!(display.title, "Report 2026-01-10 (grouped by title + description)");
+        assert_eq!(display.title, "Activity report 2026-01-10 (grouped by title + description)");
         assert!(display.rows.is_empty());
         assert!(display.show_group_description);
         assert_eq!(
             display.groups,
             vec![
-                ReportGroupDisplay {
+                ActivityGroupView {
                     title: "review".into(),
                     description: "PR #184".into(),
                     count: "1".into(),
                     duration: "2h".into(),
                 },
-                ReportGroupDisplay {
+                ActivityGroupView {
                     title: "review".into(),
                     description: "-".into(),
                     count: "1".into(),
@@ -675,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_summary_sorts_rows_and_builds_total() {
+    fn prepare_timesheet_view_sorts_rows_and_builds_total() {
         let window = TimeWindow::new(ts(12, 0, 0), ts(15, 0, 0));
         let records = vec![
             work_record(1, 12, 0, 0, WorkCommand::Start { context: WorkContext::Home }),
@@ -696,19 +702,19 @@ mod tests {
             ],
         );
 
-        let display = prepare_summary(&report);
+        let display = prepare_timesheet_view(&report);
 
-        assert_eq!(display.title, "Summary 2026-01-12 .. 2026-01-14");
+        assert_eq!(display.title, "Timesheet 2026-01-12 .. 2026-01-14");
         assert_eq!(
             display.rows,
             vec![
-                SummaryDisplayRow {
+                TimesheetViewRow {
                     activity: "work (home)".into(),
                     day_count: "1".into(),
                     active: "2h 15m".into(),
                     break_time: "0m".into(),
                 },
-                SummaryDisplayRow {
+                TimesheetViewRow {
                     activity: "work (office)".into(),
                     day_count: "1".into(),
                     active: "3h 30m".into(),
@@ -718,7 +724,7 @@ mod tests {
         );
         assert_eq!(
             display.total,
-            SummaryDisplayRow {
+            TimesheetViewRow {
                 activity: "TOTAL".into(),
                 day_count: String::new(),
                 active: "5h 45m".into(),
@@ -728,19 +734,19 @@ mod tests {
         assert_eq!(
             display.weekly_days,
             vec![
-                SummaryDayDisplay {
+                DailyTotalsView {
                     day: "Mon 2026-01-12".into(),
                     active: "8h".into(),
                     break_time: "0m".into(),
                     absence: "0m".into(),
                 },
-                SummaryDayDisplay {
+                DailyTotalsView {
                     day: "Tue 2026-01-13".into(),
                     active: "6h".into(),
                     break_time: "0m".into(),
                     absence: "0m".into(),
                 },
-                SummaryDayDisplay {
+                DailyTotalsView {
                     day: "Wed 2026-01-14".into(),
                     active: "0m".into(),
                     break_time: "0m".into(),
@@ -755,9 +761,9 @@ mod tests {
     }
 
     #[test]
-    fn prepare_summary_includes_weekly_balance_breakdown() {
+    fn prepare_timesheet_view_includes_weekly_balance_breakdown() {
         let window = TimeWindow::new(ts(1, 0, 0), ts(16, 0, 0));
-        let report = Timesheet::with_weekly_breakdown(
+        let timesheet = Timesheet::with_weekly_breakdown(
             window,
             calculate_time_breakdown(&[], window).unwrap(),
             vec![
@@ -772,12 +778,12 @@ mod tests {
             ],
         );
 
-        let display = prepare_summary(&report);
+        let display = prepare_timesheet_view(&timesheet);
 
         assert_eq!(
             display.weekly_balances,
             vec![
-                SummaryWeekDisplay {
+                WeeklyTotalsView {
                     week: "2026-W01".into(),
                     worked: "8h".into(),
                     break_time: "0m".into(),
@@ -785,7 +791,7 @@ mod tests {
                     target: "n/a".into(),
                     balance: "n/a".into(),
                 },
-                SummaryWeekDisplay {
+                WeeklyTotalsView {
                     week: "2026-W02".into(),
                     worked: "40h".into(),
                     break_time: "0m".into(),
@@ -797,7 +803,7 @@ mod tests {
         );
         assert_eq!(
             display.weekly_balances_total,
-            Some(SummaryWeekDisplay {
+            Some(WeeklyTotalsView {
                 week: "TOTAL".into(),
                 worked: "48h".into(),
                 break_time: "0m".into(),

@@ -8,7 +8,7 @@ use crate::domain::{
 };
 
 use super::Formatter;
-use super::{format_work_command, prepare_report, prepare_summary};
+use super::{format_work_command, prepare_activity_view, prepare_timesheet_view};
 
 pub struct MarkdownFormatter;
 
@@ -76,8 +76,8 @@ impl Formatter for MarkdownFormatter {
         output
     }
 
-    fn format_summary(report: &Timesheet) -> String {
-        let summary = prepare_summary(report);
+    fn format_timesheet(report: &Timesheet) -> String {
+        let summary = prepare_timesheet_view(report);
         let mut output = String::new();
         let has_weekly_days = !summary.weekly_days.is_empty();
         let has_weekly_balances = !summary.weekly_balances.is_empty();
@@ -170,8 +170,8 @@ impl Formatter for MarkdownFormatter {
         output
     }
 
-    fn format_report(report: &ActivityReport, group_by: Option<ActivityGroupBy>) -> String {
-        let report = prepare_report(report, group_by);
+    fn format_activity(report: &ActivityReport, group_by: Option<ActivityGroupBy>) -> String {
+        let report = prepare_activity_view(report, group_by);
         let mut output = String::new();
         output.push_str(&format!("# {}\n\n", report.title));
 
@@ -348,11 +348,11 @@ mod tests {
             work_record(6, 13, 8, 0, WorkCommand::End { title: "done".into(), description: None }),
         ]);
 
-        let rendered = MarkdownFormatter::format_summary(&report);
+        let rendered = MarkdownFormatter::format_timesheet(&report);
 
         assert_eq!(
             &rendered,
-            r#"# Summary 2026-01-12 .. 2026-01-14
+            r#"# Timesheet 2026-01-12 .. 2026-01-14
 
 | Activity | Days | Active | Break |
 | :-- | --: | --: | --: |
@@ -382,11 +382,11 @@ mod tests {
         );
         let report = Timesheet::new(window, calculate_time_breakdown(&[], window).unwrap());
 
-        let rendered = MarkdownFormatter::format_summary(&report);
+        let rendered = MarkdownFormatter::format_timesheet(&report);
 
         assert_eq!(
             &rendered,
-            r#"# Summary 2026-01-10
+            r#"# Timesheet 2026-01-10
 
 _No tracked time._
 "#
@@ -420,11 +420,11 @@ _No tracked time._
             ],
         );
 
-        let rendered = MarkdownFormatter::format_summary(&report);
+        let rendered = MarkdownFormatter::format_timesheet(&report);
 
         assert_eq!(
             &rendered,
-            r#"# Summary 2026-01-01 .. 2026-01-15
+            r#"# Timesheet 2026-01-01 .. 2026-01-15
 
 _No tracked time._
 
@@ -439,11 +439,11 @@ _No tracked time._
 
     #[test]
     fn markdown_format_report_renders_detailed_rows() {
-        let rendered = MarkdownFormatter::format_report(&detailed_report(), None);
+        let rendered = MarkdownFormatter::format_activity(&detailed_report(), None);
 
         assert_eq!(
             &rendered,
-            r#"# Report 2026-01-10
+            r#"# Activity report 2026-01-10
 
 | Date | Start | End | Duration | Title | Description |
 | :-- | :-- | :-- | --: | :-- | :-- |
@@ -456,11 +456,11 @@ _No tracked time._
     #[test]
     fn markdown_format_report_renders_grouped_rows() {
         let rendered =
-            MarkdownFormatter::format_report(&detailed_report(), Some(ActivityGroupBy::Title));
+            MarkdownFormatter::format_activity(&detailed_report(), Some(ActivityGroupBy::Title));
 
         assert_eq!(
             &rendered,
-            r#"# Report 2026-01-10 (grouped by title)
+            r#"# Activity report 2026-01-10 (grouped by title)
 
 | Title | Count | Duration |
 | :-- | --: | --: |
@@ -472,14 +472,14 @@ _No tracked time._
 
     #[test]
     fn markdown_format_report_renders_grouped_rows_by_title_description() {
-        let rendered = MarkdownFormatter::format_report(
+        let rendered = MarkdownFormatter::format_activity(
             &detailed_report(),
             Some(ActivityGroupBy::TitleDescription),
         );
 
         assert_eq!(
             &rendered,
-            r#"# Report 2026-01-10 (grouped by title + description)
+            r#"# Activity report 2026-01-10 (grouped by title + description)
 
 | Title | Description | Count | Duration |
 | :-- | :-- | --: | --: |
@@ -491,7 +491,7 @@ _No tracked time._
 
     #[test]
     fn markdown_format_report_prints_work_specific_empty_state() {
-        let rendered = MarkdownFormatter::format_report(
+        let rendered = MarkdownFormatter::format_activity(
             &ActivityReport::new(
                 TimeWindow::new(
                     Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
@@ -504,7 +504,7 @@ _No tracked time._
 
         assert_eq!(
             &rendered,
-            r#"# Report 2026-01-10
+            r#"# Activity report 2026-01-10
 
 _No completed work items._
 "#

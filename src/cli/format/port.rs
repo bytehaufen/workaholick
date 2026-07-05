@@ -13,7 +13,7 @@ pub trait Formatter {
 
     fn format_day(date: NaiveDate, day_overview: &DayOverview) -> String;
 
-    fn format_summary(report: &Timesheet) -> String;
+    fn format_timesheet(report: &Timesheet) -> String;
 
-    fn format_report(report: &ActivityReport, group_by: Option<ActivityGroupBy>) -> String;
+    fn format_activity(report: &ActivityReport, group_by: Option<ActivityGroupBy>) -> String;
 }
