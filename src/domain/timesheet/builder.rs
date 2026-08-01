@@ -52,11 +52,11 @@ fn calculate_weekly_totals(
         let week_window =
             TimeWindow::new(full_week_start.max(window.start()), full_week_end.min(window.end()));
 
-        let week_breakdown = calculate_time_breakdown(records, week_window)?;
+        let week_time_breakdown = calculate_time_breakdown(records, week_window)?;
 
-        let worked_minutes = week_breakdown.work_active_minutes();
-        let break_minutes = week_breakdown.break_minutes();
-        let absence_minutes = week_breakdown.absence_minutes();
+        let worked_minutes = week_time_breakdown.work_active_minutes();
+        let break_minutes = week_time_breakdown.break_minutes();
+        let absence_minutes = week_time_breakdown.absence_minutes();
 
         Ok(WeeklyTotals::new(
             week_start,
@@ -86,10 +86,10 @@ fn calculate_daily_totals(
 
                 if day_end > day_start {
                     let day_window = TimeWindow::new(day_start, day_end);
-                    let day_breakdown = calculate_time_breakdown(records, day_window)?;
-                    let worked_minutes = day_breakdown.work_active_minutes();
-                    let break_minutes = day_breakdown.break_minutes();
-                    let absence_minutes = day_breakdown.absence_minutes();
+                    let day_time_breakdown = calculate_time_breakdown(records, day_window)?;
+                    let worked_minutes = day_time_breakdown.work_active_minutes();
+                    let break_minutes = day_time_breakdown.break_minutes();
+                    let absence_minutes = day_time_breakdown.absence_minutes();
 
                     Ok(Some(DailyTotals::new(date, worked_minutes, break_minutes, absence_minutes)))
                 } else {

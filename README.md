@@ -5,7 +5,7 @@
 ## Configuration
 
 - Path to data
-- `weekly_target_hours` for weekly summary balance, e.g. `40.0` or `37.5`
+- `weekly_target_hours` for weekly timesheet balance, e.g. `40.0` or `37.5`
 - Output format 'markdown' \| 'plain'
 
 ## Shell completions

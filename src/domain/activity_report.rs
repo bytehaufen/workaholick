@@ -72,13 +72,13 @@ impl WorkItemRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReportTitleGroup {
+pub struct ActivityTitleGroup {
     title: String,
     count: usize,
     duration_minutes: i64,
 }
 
-impl ReportTitleGroup {
+impl ActivityTitleGroup {
     fn new(title: String, count: usize, duration_minutes: i64) -> Self {
         Self { title, count, duration_minutes }
     }
@@ -97,14 +97,14 @@ impl ReportTitleGroup {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReportTitleDescriptionGroup {
+pub struct ActivityTitleDescriptionGroup {
     title: String,
     description: Option<String>,
     count: usize,
     duration_minutes: i64,
 }
 
-impl ReportTitleDescriptionGroup {
+impl ActivityTitleDescriptionGroup {
     fn new(
         title: String,
         description: Option<String>,
@@ -150,7 +150,7 @@ impl ActivityReport {
         &self.rows
     }
 
-    pub(crate) fn group_by_title(&self) -> Vec<ReportTitleGroup> {
+    pub(crate) fn group_by_title(&self) -> Vec<ActivityTitleGroup> {
         let mut by_title = self.rows.iter().fold(
             std::collections::HashMap::<String, (usize, i64)>::new(),
             |mut grouped, row| {
@@ -164,7 +164,7 @@ impl ActivityReport {
         let mut rows = by_title
             .drain()
             .map(|(title, (count, duration_minutes))| {
-                ReportTitleGroup::new(title, count, duration_minutes)
+                ActivityTitleGroup::new(title, count, duration_minutes)
             })
             .collect::<Vec<_>>();
 
@@ -177,7 +177,7 @@ impl ActivityReport {
         rows
     }
 
-    pub(crate) fn group_by_title_description(&self) -> Vec<ReportTitleDescriptionGroup> {
+    pub(crate) fn group_by_title_description(&self) -> Vec<ActivityTitleDescriptionGroup> {
         let mut by_title_description = self.rows.iter().fold(
             std::collections::HashMap::<(String, Option<String>), (usize, i64)>::new(),
             |mut grouped, row| {
@@ -192,7 +192,7 @@ impl ActivityReport {
         let mut rows = by_title_description
             .drain()
             .map(|((title, description), (count, duration_minutes))| {
-                ReportTitleDescriptionGroup::new(title, description, count, duration_minutes)
+                ActivityTitleDescriptionGroup::new(title, description, count, duration_minutes)
             })
             .collect::<Vec<_>>();
 
@@ -356,8 +356,8 @@ mod tests {
     }
 
     #[test]
-    fn report_splits_log_and_end_into_separate_rows() {
-        let report = calculate_activity_report(
+    fn activity_report_splits_log_and_end_into_separate_rows() {
+        let activity_report = calculate_activity_report(
             &[
                 work_record(1, 10, 8, 0, WorkCommand::Start { context: WorkContext::Office }),
                 work_record(
@@ -380,7 +380,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            report.rows(),
+            activity_report.rows(),
             &[
                 WorkItemRow::new(
                     ts(10, 10, 0).date_naive(),
@@ -403,8 +403,8 @@ mod tests {
     }
 
     #[test]
-    fn report_excludes_breaks_from_row_duration() {
-        let report = calculate_activity_report(
+    fn activity_report_excludes_breaks_from_row_duration() {
+        let activity_report = calculate_activity_report(
             &[
                 work_record(1, 10, 8, 0, WorkCommand::Start { context: WorkContext::Travel }),
                 work_record(2, 10, 10, 0, WorkCommand::BreakStart),
@@ -422,7 +422,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            report.rows(),
+            activity_report.rows(),
             &[WorkItemRow::new(
                 ts(10, 13, 0).date_naive(),
                 ts(10, 8, 0),
@@ -435,8 +435,8 @@ mod tests {
     }
 
     #[test]
-    fn report_ignores_absence_records() {
-        let report = calculate_activity_report(
+    fn activity_report_ignores_absence_records() {
+        let activity_report = calculate_activity_report(
             &[
                 absence_record(1, 10, AbsenceKind::Holiday, AbsencePortion::HalfDay),
                 work_record(2, 10, 8, 0, WorkCommand::Start { context: WorkContext::Office }),
@@ -452,13 +452,13 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(report.rows().len(), 1);
-        assert_eq!(report.rows()[0].title(), "done");
+        assert_eq!(activity_report.rows().len(), 1);
+        assert_eq!(activity_report.rows()[0].title(), "done");
     }
 
     #[test]
-    fn report_clips_rows_to_the_requested_window() {
-        let report = calculate_activity_report(
+    fn activity_report_clips_rows_to_the_requested_window() {
+        let activity_report = calculate_activity_report(
             &[
                 work_record(1, 9, 20, 0, WorkCommand::Start { context: WorkContext::Home }),
                 work_record(
@@ -474,7 +474,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            report.rows(),
+            activity_report.rows(),
             &[WorkItemRow::new(
                 ts(10, 10, 0).date_naive(),
                 ts(10, 0, 0),
@@ -487,19 +487,19 @@ mod tests {
     }
 
     #[test]
-    fn report_ignores_trailing_open_work_without_log_or_end() {
-        let report = calculate_activity_report(
+    fn activity_report_ignores_trailing_open_work_without_log_or_end() {
+        let activity_report = calculate_activity_report(
             &[work_record(1, 10, 8, 0, WorkCommand::Start { context: WorkContext::Travel })],
             window(10, 0, 11, 0),
         )
         .unwrap();
 
-        assert!(report.rows().is_empty());
+        assert!(activity_report.rows().is_empty());
     }
 
     #[test]
     fn group_by_title_aggregates_exact_matches_only() {
-        let report = ActivityReport::new(
+        let activity_report = ActivityReport::new(
             window(10, 0, 11, 0),
             vec![
                 WorkItemRow::new(
@@ -530,17 +530,17 @@ mod tests {
         );
 
         assert_eq!(
-            report.group_by_title(),
+            activity_report.group_by_title(),
             vec![
-                ReportTitleGroup::new("review".into(), 2, 240),
-                ReportTitleGroup::new("Review".into(), 1, 60),
+                ActivityTitleGroup::new("review".into(), 2, 240),
+                ActivityTitleGroup::new("Review".into(), 1, 60),
             ]
         );
     }
 
     #[test]
     fn group_by_title_description_splits_distinct_descriptions() {
-        let report = ActivityReport::new(
+        let activity_report = ActivityReport::new(
             window(10, 0, 11, 0),
             vec![
                 WorkItemRow::new(
@@ -579,16 +579,16 @@ mod tests {
         );
 
         assert_eq!(
-            report.group_by_title_description(),
+            activity_report.group_by_title_description(),
             vec![
-                ReportTitleDescriptionGroup::new("review".into(), Some("PR #184".into()), 2, 180),
-                ReportTitleDescriptionGroup::new(
+                ActivityTitleDescriptionGroup::new("review".into(), Some("PR #184".into()), 2, 180),
+                ActivityTitleDescriptionGroup::new(
                     "review".into(),
                     Some("architecture notes".into()),
                     1,
                     60,
                 ),
-                ReportTitleDescriptionGroup::new("review".into(), None, 1, 30),
+                ActivityTitleDescriptionGroup::new("review".into(), None, 1, 30),
             ]
         );
     }

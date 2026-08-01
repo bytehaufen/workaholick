@@ -76,43 +76,45 @@ impl Formatter for MarkdownFormatter {
         output
     }
 
-    fn format_timesheet(report: &Timesheet) -> String {
-        let summary = prepare_timesheet_view(report);
+    fn format_timesheet(timesheet: &Timesheet) -> String {
+        let timesheet_view = prepare_timesheet_view(timesheet);
         let mut output = String::new();
-        let has_weekly_days = !summary.weekly_days.is_empty();
-        let has_weekly_balances = !summary.weekly_balances.is_empty();
-        let has_metrics = summary.target.is_some() && summary.balance.is_some();
-        output.push_str(&format!("# {}\n\n", summary.title));
+        let has_daily_totals = !timesheet_view.daily_totals.is_empty();
+        let has_weekly_totals = !timesheet_view.weekly_totals.is_empty();
+        let has_metrics = timesheet_view.target.is_some() && timesheet_view.balance.is_some();
+        output.push_str(&format!("# {}\n\n", timesheet_view.title));
 
-        if summary.rows.is_empty() {
+        if timesheet_view.rows.is_empty() {
             output.push_str("_No tracked time._\n");
-            if has_weekly_days || has_weekly_balances || has_metrics {
+            if has_daily_totals || has_weekly_totals || has_metrics {
                 output.push('\n');
             }
         } else {
             output.push_str("| Activity | Days | Active | Break |\n");
             output.push_str("| :-- | --: | --: | --: |\n");
 
-            summary.rows.iter().chain(std::iter::once(&summary.total)).for_each(|row| {
-                output.push_str(&format!(
-                    "| {} | {} | {} | {} |\n",
-                    escape_markdown_table_cell(&row.activity),
-                    row.day_count,
-                    row.active,
-                    row.break_time,
-                ));
-            });
+            timesheet_view.rows.iter().chain(std::iter::once(&timesheet_view.total)).for_each(
+                |row| {
+                    output.push_str(&format!(
+                        "| {} | {} | {} | {} |\n",
+                        escape_markdown_table_cell(&row.activity),
+                        row.day_count,
+                        row.active,
+                        row.break_time,
+                    ));
+                },
+            );
 
-            if has_weekly_days || has_weekly_balances || has_metrics {
+            if has_daily_totals || has_weekly_totals || has_metrics {
                 output.push('\n');
             }
         }
 
-        if has_weekly_days {
+        if has_daily_totals {
             output.push_str("| Day | Worked | Break | Absence |\n");
             output.push_str("| :-- | --: | --: | --: |\n");
 
-            summary.weekly_days.iter().for_each(|row| {
+            timesheet_view.daily_totals.iter().for_each(|row| {
                 output.push_str(&format!(
                     "| {} | {} | {} | {} |\n",
                     escape_markdown_table_cell(&row.day),
@@ -122,16 +124,16 @@ impl Formatter for MarkdownFormatter {
                 ));
             });
 
-            if has_weekly_balances || has_metrics {
+            if has_weekly_totals || has_metrics {
                 output.push('\n');
             }
         }
 
-        if has_weekly_balances {
+        if has_weekly_totals {
             output.push_str("| Week | Worked | Break | Absence | Target | Balance |\n");
             output.push_str("| :-- | --: | --: | --: | --: | --: |\n");
 
-            summary.weekly_balances.iter().for_each(|row| {
+            timesheet_view.weekly_totals.iter().for_each(|row| {
                 output.push_str(&format!(
                     "| {} | {} | {} | {} | {} | {} |\n",
                     escape_markdown_table_cell(&row.week),
@@ -143,7 +145,7 @@ impl Formatter for MarkdownFormatter {
                 ));
             });
 
-            if let Some(total) = &summary.weekly_balances_total {
+            if let Some(total) = &timesheet_view.weekly_totals_total {
                 output.push_str(&format!(
                     "| {} | {} | {} | {} | {} | {} |\n",
                     escape_markdown_table_cell(&total.week),
@@ -160,7 +162,7 @@ impl Formatter for MarkdownFormatter {
             }
         }
 
-        if let (Some(target), Some(balance)) = (&summary.target, &summary.balance) {
+        if let (Some(target), Some(balance)) = (&timesheet_view.target, &timesheet_view.balance) {
             output.push_str("| Metric | Value |\n");
             output.push_str("| :-- | --: |\n");
             output.push_str(&format!("| Week Target | {} |\n", target));
@@ -170,17 +172,20 @@ impl Formatter for MarkdownFormatter {
         output
     }
 
-    fn format_activity(report: &ActivityReport, group_by: Option<ActivityGroupBy>) -> String {
-        let report = prepare_activity_view(report, group_by);
+    fn format_activity(
+        activity_report: &ActivityReport,
+        group_by: Option<ActivityGroupBy>,
+    ) -> String {
+        let activity_view = prepare_activity_view(activity_report, group_by);
         let mut output = String::new();
-        output.push_str(&format!("# {}\n\n", report.title));
+        output.push_str(&format!("# {}\n\n", activity_view.title));
 
-        if !report.groups.is_empty() {
-            if report.show_group_description {
+        if !activity_view.groups.is_empty() {
+            if activity_view.show_group_description {
                 output.push_str("| Title | Description | Count | Duration |\n");
                 output.push_str("| :-- | :-- | --: | --: |\n");
 
-                report.groups.iter().for_each(|row| {
+                activity_view.groups.iter().for_each(|row| {
                     output.push_str(&format!(
                         "| {} | {} | {} | {} |\n",
                         escape_markdown_table_cell(&row.title),
@@ -193,7 +198,7 @@ impl Formatter for MarkdownFormatter {
                 output.push_str("| Title | Count | Duration |\n");
                 output.push_str("| :-- | --: | --: |\n");
 
-                report.groups.iter().for_each(|row| {
+                activity_view.groups.iter().for_each(|row| {
                     output.push_str(&format!(
                         "| {} | {} | {} |\n",
                         escape_markdown_table_cell(&row.title),
@@ -202,13 +207,13 @@ impl Formatter for MarkdownFormatter {
                     ));
                 });
             }
-        } else if report.rows.is_empty() {
+        } else if activity_view.rows.is_empty() {
             output.push_str("_No completed work items._\n");
-        } else if report.show_description {
+        } else if activity_view.show_description {
             output.push_str("| Date | Start | End | Duration | Title | Description |\n");
             output.push_str("| :-- | :-- | :-- | --: | :-- | :-- |\n");
 
-            report.rows.iter().for_each(|row| {
+            activity_view.rows.iter().for_each(|row| {
                 output.push_str(&format!(
                     "| {} | {} | {} | {} | {} | {} |\n",
                     row.date,
@@ -223,7 +228,7 @@ impl Formatter for MarkdownFormatter {
             output.push_str("| Date | Start | End | Duration | Title |\n");
             output.push_str("| :-- | :-- | :-- | --: | :-- |\n");
 
-            report.rows.iter().for_each(|row| {
+            activity_view.rows.iter().for_each(|row| {
                 output.push_str(&format!(
                     "| {} | {} | {} | {} | {} |\n",
                     row.date,
@@ -338,8 +343,8 @@ mod tests {
     }
 
     #[test]
-    fn markdown_format_summary_renders_sorted_rows_and_totals() {
-        let report = summary_report(vec![
+    fn markdown_format_timesheet_renders_sorted_rows_and_totals() {
+        let timesheet = timesheet(vec![
             work_record(1, 12, 0, 0, WorkCommand::Start { context: WorkContext::Home }),
             work_record(2, 12, 2, 15, WorkCommand::End { title: "done".into(), description: None }),
             work_record(3, 13, 4, 0, WorkCommand::Start { context: WorkContext::Office }),
@@ -348,7 +353,7 @@ mod tests {
             work_record(6, 13, 8, 0, WorkCommand::End { title: "done".into(), description: None }),
         ]);
 
-        let rendered = MarkdownFormatter::format_timesheet(&report);
+        let rendered = MarkdownFormatter::format_timesheet(&timesheet);
 
         assert_eq!(
             &rendered,
@@ -375,14 +380,14 @@ mod tests {
     }
 
     #[test]
-    fn markdown_format_summary_prints_empty_state() {
+    fn markdown_format_timesheet_prints_empty_state() {
         let window = TimeWindow::new(
             Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
         );
-        let report = Timesheet::new(window, calculate_time_breakdown(&[], window).unwrap());
+        let timesheet = Timesheet::new(window, calculate_time_breakdown(&[], window).unwrap());
 
-        let rendered = MarkdownFormatter::format_timesheet(&report);
+        let rendered = MarkdownFormatter::format_timesheet(&timesheet);
 
         assert_eq!(
             &rendered,
@@ -394,12 +399,12 @@ _No tracked time._
     }
 
     #[test]
-    fn markdown_format_summary_renders_weekly_balance_breakdown() {
+    fn markdown_format_timesheet_renders_weekly_balance_breakdown() {
         let window = TimeWindow::new(
             Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 16, 0, 0, 0).unwrap(),
         );
-        let report = Timesheet::with_weekly_breakdown(
+        let timesheet = Timesheet::with_weekly_breakdown(
             window,
             calculate_time_breakdown(&[], window).unwrap(),
             vec![
@@ -420,7 +425,7 @@ _No tracked time._
             ],
         );
 
-        let rendered = MarkdownFormatter::format_timesheet(&report);
+        let rendered = MarkdownFormatter::format_timesheet(&timesheet);
 
         assert_eq!(
             &rendered,
@@ -438,12 +443,12 @@ _No tracked time._
     }
 
     #[test]
-    fn markdown_format_report_renders_detailed_rows() {
-        let rendered = MarkdownFormatter::format_activity(&detailed_report(), None);
+    fn markdown_format_activity_renders_detailed_rows() {
+        let rendered = MarkdownFormatter::format_activity(&activity_report(), None);
 
         assert_eq!(
             &rendered,
-            r#"# Activity report 2026-01-10
+            r#"# Activity 2026-01-10
 
 | Date | Start | End | Duration | Title | Description |
 | :-- | :-- | :-- | --: | :-- | :-- |
@@ -454,13 +459,13 @@ _No tracked time._
     }
 
     #[test]
-    fn markdown_format_report_renders_grouped_rows() {
+    fn markdown_format_activity_renders_grouped_rows() {
         let rendered =
-            MarkdownFormatter::format_activity(&detailed_report(), Some(ActivityGroupBy::Title));
+            MarkdownFormatter::format_activity(&activity_report(), Some(ActivityGroupBy::Title));
 
         assert_eq!(
             &rendered,
-            r#"# Activity report 2026-01-10 (grouped by title)
+            r#"# Activity 2026-01-10 (grouped by title)
 
 | Title | Count | Duration |
 | :-- | --: | --: |
@@ -471,15 +476,15 @@ _No tracked time._
     }
 
     #[test]
-    fn markdown_format_report_renders_grouped_rows_by_title_description() {
+    fn markdown_format_activity_renders_grouped_rows_by_title_description() {
         let rendered = MarkdownFormatter::format_activity(
-            &detailed_report(),
+            &activity_report(),
             Some(ActivityGroupBy::TitleDescription),
         );
 
         assert_eq!(
             &rendered,
-            r#"# Activity report 2026-01-10 (grouped by title + description)
+            r#"# Activity 2026-01-10 (grouped by title + description)
 
 | Title | Description | Count | Duration |
 | :-- | :-- | --: | --: |
@@ -490,7 +495,7 @@ _No tracked time._
     }
 
     #[test]
-    fn markdown_format_report_prints_work_specific_empty_state() {
+    fn markdown_format_activity_prints_work_specific_empty_state() {
         let rendered = MarkdownFormatter::format_activity(
             &ActivityReport::new(
                 TimeWindow::new(
@@ -504,14 +509,14 @@ _No tracked time._
 
         assert_eq!(
             &rendered,
-            r#"# Activity report 2026-01-10
+            r#"# Activity 2026-01-10
 
 _No completed work items._
 "#
         );
     }
 
-    fn summary_report(records: Vec<Record>) -> Timesheet {
+    fn timesheet(records: Vec<Record>) -> Timesheet {
         let window = TimeWindow::new(
             Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap(),
@@ -544,7 +549,7 @@ _No completed work items._
         )
     }
 
-    fn detailed_report() -> ActivityReport {
+    fn activity_report() -> ActivityReport {
         ActivityReport::new(
             TimeWindow::new(
                 Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),

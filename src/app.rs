@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_window_for_historical_range_ends_at_next_midnight() {
+    fn time_window_for_historical_range_ends_at_next_midnight() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
@@ -426,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_window_for_range_including_today_clamps_end_to_now() {
+    fn time_window_for_range_including_today_clamps_end_to_now() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
@@ -443,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_window_for_current_week_clamps_end_to_now() {
+    fn time_window_for_current_week_clamps_end_to_now() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
@@ -460,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_window_for_previous_week_uses_previous_calendar_week() {
+    fn time_window_for_previous_week_uses_previous_calendar_week() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
@@ -477,7 +477,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_window_for_previous_month_uses_previous_calendar_month() {
+    fn time_window_for_previous_month_uses_previous_calendar_month() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
@@ -494,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_window_for_previous_year_uses_previous_calendar_year() {
+    fn time_window_for_previous_year_uses_previous_calendar_year() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
@@ -511,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_rejects_positive_period_offset() {
+    fn timesheet_rejects_positive_period_offset() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
@@ -528,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_rejects_reversed_explicit_range() {
+    fn timesheet_rejects_reversed_explicit_range() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
             Config::default(),
@@ -543,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_rejects_future_explicit_range_without_overlap() {
+    fn timesheet_rejects_future_explicit_range_without_overlap() {
         let now = ts(15, 12, 0);
         let store = FakeStore::default().seed(vec![(
             1.into(),
@@ -565,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    fn weekly_summary_uses_configured_schedule_and_day_breakdown() {
+    fn weekly_timesheet_uses_configured_schedule_and_daily_totals() {
         let now = ts(18, 18, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
@@ -617,20 +617,21 @@ mod tests {
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 
-        let report = app.timesheet(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
+        let timesheet =
+            app.timesheet(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
-        assert_eq!(report.weekly_target_minutes(), Some(1 + 2 + 3 + 4 + 5).map(|v| v * 60));
-        assert_eq!(report.worked_minutes(), (1 + 2 + 3 + 4 + 5) * 60);
-        assert_eq!(report.balance_minutes(), Some(0));
+        assert_eq!(timesheet.weekly_target_minutes(), Some(1 + 2 + 3 + 4 + 5).map(|v| v * 60));
+        assert_eq!(timesheet.worked_minutes(), (1 + 2 + 3 + 4 + 5) * 60);
+        assert_eq!(timesheet.balance_minutes(), Some(0));
         assert_eq!(
-            report.daily_totals().iter().map(|day| day.worked_minutes()).collect::<Vec<_>>(),
+            timesheet.daily_totals().iter().map(|day| day.worked_minutes()).collect::<Vec<_>>(),
             vec![60, 60 << 1, 3 * 60, 60 << 2, 5 * 60, 0, 0]
         );
-        assert!(report.weekly_totals().is_empty());
+        assert!(timesheet.weekly_totals().is_empty());
     }
 
     #[test]
-    fn non_week_summary_does_not_include_weekly_target() {
+    fn non_week_timesheet_does_not_include_weekly_target() {
         let now = ts(12, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![(
@@ -644,17 +645,17 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.timesheet(DateScope::Range { from: date(12), to: date(12) }).unwrap();
+        let timesheet = app.timesheet(DateScope::Range { from: date(12), to: date(12) }).unwrap();
 
-        assert_eq!(report.weekly_target_minutes(), None);
-        assert_eq!(report.worked_minutes(), 4 * 60);
-        assert_eq!(report.balance_minutes(), None);
-        assert!(report.daily_totals().is_empty());
-        assert!(report.weekly_totals().is_empty());
+        assert_eq!(timesheet.weekly_target_minutes(), None);
+        assert_eq!(timesheet.worked_minutes(), 4 * 60);
+        assert_eq!(timesheet.balance_minutes(), None);
+        assert!(timesheet.daily_totals().is_empty());
+        assert!(timesheet.weekly_totals().is_empty());
     }
 
     #[test]
-    fn month_summary_includes_weekly_balance_breakdown() {
+    fn month_timesheet_includes_weekly_totals() {
         let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
@@ -682,10 +683,11 @@ mod tests {
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 
-        let report = app.timesheet(DateScope::Period { period: Period::Month, offset: 0 }).unwrap();
+        let timesheet =
+            app.timesheet(DateScope::Period { period: Period::Month, offset: 0 }).unwrap();
 
         assert_eq!(
-            report
+            timesheet
                 .weekly_totals()
                 .iter()
                 .map(|week| (
@@ -716,12 +718,12 @@ mod tests {
                 ),
             ]
         );
-        assert!(report.daily_totals().is_empty());
-        assert_eq!(report.weekly_target_minutes(), None);
+        assert!(timesheet.daily_totals().is_empty());
+        assert_eq!(timesheet.weekly_target_minutes(), None);
     }
 
     #[test]
-    fn summary_for_historical_range_closes_open_day_at_midnight() {
+    fn timesheet_for_historical_range_closes_open_day_at_midnight() {
         let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![(
@@ -735,20 +737,20 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.timesheet(DateScope::Range { from: date(10), to: date(10) }).unwrap();
+        let timesheet = app.timesheet(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(
-            report.breakdown().active_time(TimeCategory::Work(context)),
+            timesheet.breakdown().active_time(TimeCategory::Work(context)),
             chrono::TimeDelta::hours(16)
         );
         assert_eq!(
-            report.breakdown().break_time(TimeCategory::Work(context)),
+            timesheet.breakdown().break_time(TimeCategory::Work(context)),
             chrono::TimeDelta::zero()
         );
     }
 
     #[test]
-    fn summary_for_range_uses_records_before_scope_for_carry_in_state() {
+    fn timesheet_for_range_uses_records_before_scope_for_carry_in_state() {
         let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
@@ -768,20 +770,20 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.timesheet(DateScope::Range { from: date(10), to: date(10) }).unwrap();
+        let timesheet = app.timesheet(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(
-            report.breakdown().active_time(TimeCategory::Work(context)),
+            timesheet.breakdown().active_time(TimeCategory::Work(context)),
             chrono::TimeDelta::hours(10)
         );
         assert_eq!(
-            report.breakdown().break_time(TimeCategory::Work(context)),
+            timesheet.breakdown().break_time(TimeCategory::Work(context)),
             chrono::TimeDelta::zero()
         );
     }
 
     #[test]
-    fn report_returns_completed_items_for_the_scope() {
+    fn activity_returns_completed_items_for_the_scope() {
         let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
@@ -808,17 +810,18 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.activity(DateScope::Range { from: date(10), to: date(10) }).unwrap();
+        let activity_report =
+            app.activity(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
-        assert_eq!(report.rows().len(), 2);
-        assert_eq!(report.rows()[0].title(), "handoff");
-        assert_eq!(report.rows()[0].duration_minutes(), 120);
-        assert_eq!(report.rows()[1].title(), "wrap");
-        assert_eq!(report.rows()[1].duration_minutes(), 120);
+        assert_eq!(activity_report.rows().len(), 2);
+        assert_eq!(activity_report.rows()[0].title(), "handoff");
+        assert_eq!(activity_report.rows()[0].duration_minutes(), 120);
+        assert_eq!(activity_report.rows()[1].title(), "wrap");
+        assert_eq!(activity_report.rows()[1].duration_minutes(), 120);
     }
 
     #[test]
-    fn report_uses_records_before_scope_for_carry_in_state() {
+    fn activity_uses_records_before_scope_for_carry_in_state() {
         let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
@@ -844,12 +847,13 @@ mod tests {
         )
         .unwrap();
 
-        let report = app.activity(DateScope::Range { from: date(10), to: date(10) }).unwrap();
+        let activity_report =
+            app.activity(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
-        assert_eq!(report.rows().len(), 1);
-        assert_eq!(report.rows()[0].start(), ts(10, 0, 0));
-        assert_eq!(report.rows()[0].end(), ts(10, 10, 0));
-        assert_eq!(report.rows()[0].duration_minutes(), 10 * 60);
+        assert_eq!(activity_report.rows().len(), 1);
+        assert_eq!(activity_report.rows()[0].start(), ts(10, 0, 0));
+        assert_eq!(activity_report.rows()[0].end(), ts(10, 10, 0));
+        assert_eq!(activity_report.rows()[0].duration_minutes(), 10 * 60);
     }
 
     // Validation tests

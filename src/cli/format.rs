@@ -44,12 +44,12 @@ pub fn print_day(
     }
 }
 
-pub fn print_timesheet(formatter: OutputFormatter, report: &Timesheet) -> Result<()> {
+pub fn print_timesheet(formatter: OutputFormatter, timesheet: &Timesheet) -> Result<()> {
     match formatter {
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
             {
-                let rendered = MarkdownFormatter::format_timesheet(report);
+                let rendered = MarkdownFormatter::format_timesheet(timesheet);
                 MarkdownFormatter::print(&rendered);
                 Ok(())
             }
@@ -66,14 +66,14 @@ pub fn print_timesheet(formatter: OutputFormatter, report: &Timesheet) -> Result
 
 pub fn print_activity(
     formatter: OutputFormatter,
-    report: &ActivityReport,
+    activity_report: &ActivityReport,
     group_by: Option<ActivityGroupBy>,
 ) -> Result<()> {
     match formatter {
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
             {
-                let rendered = MarkdownFormatter::format_activity(report, group_by);
+                let rendered = MarkdownFormatter::format_activity(activity_report, group_by);
                 MarkdownFormatter::print(&rendered);
                 Ok(())
             }
@@ -91,7 +91,7 @@ pub fn print_activity(
 pub(super) fn format_work_command(command: &WorkCommand) -> String {
     match command {
         WorkCommand::Start { context } => {
-            format!("START {}", format_timesheet_category(TimeCategory::from(*context)))
+            format!("START {}", format_time_category(TimeCategory::from(*context)))
         }
         WorkCommand::End { title, description } => {
             format!(
@@ -125,7 +125,7 @@ fn escape_inline_text(text: &str) -> String {
     text.replace('\\', r"\\").replace('"', r#"\""#)
 }
 
-pub(super) fn format_timesheet_category(category: TimeCategory) -> String {
+pub(super) fn format_time_category(category: TimeCategory) -> String {
     match category {
         TimeCategory::Work(work_context) => format!("work ({work_context})"),
         TimeCategory::Absence(absence_kind) => format!("absence ({absence_kind})"),
@@ -137,9 +137,9 @@ pub(super) struct TimesheetView {
     pub title: String,
     pub rows: Vec<TimesheetViewRow>,
     pub total: TimesheetViewRow,
-    pub weekly_days: Vec<DailyTotalsView>,
-    pub weekly_balances: Vec<WeeklyTotalsView>,
-    pub weekly_balances_total: Option<WeeklyTotalsView>,
+    pub daily_totals: Vec<DailyTotalsView>,
+    pub weekly_totals: Vec<WeeklyTotalsView>,
+    pub weekly_totals_total: Option<WeeklyTotalsView>,
     pub target: Option<String>,
     pub balance: Option<String>,
 }
@@ -207,8 +207,8 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
             let break_minutes = duration_minutes(bucket.break_time());
 
             PreparedTimesheetRow {
-                activity: format_timesheet_category(kind),
-                day_count: format_timesheet_day_count(bucket.dates()),
+                activity: format_time_category(kind),
+                day_count: format_day_count(bucket.dates()),
                 active_minutes,
                 break_minutes,
             }
@@ -218,35 +218,32 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
 
     let total_active_minutes = rows.iter().map(|row| row.active_minutes).sum();
     let total_break_minutes = rows.iter().map(|row| row.break_minutes).sum();
-    let weekly_days = timesheet
+    let daily_totals = timesheet
         .daily_totals()
         .iter()
         .map(|day| DailyTotalsView {
-            day: format_timesheet_day(day.date()),
-            active: format_timesheet_duration(day.worked_minutes()),
-            break_time: format_timesheet_duration(day.break_minutes()),
-            absence: format_timesheet_duration(day.absence_minutes()),
+            day: format_day_label(day.date()),
+            active: format_duration(day.worked_minutes()),
+            break_time: format_duration(day.break_minutes()),
+            absence: format_duration(day.absence_minutes()),
         })
         .collect();
-    let weekly_balances = timesheet
+    let weekly_totals = timesheet
         .weekly_totals()
         .iter()
         .map(|week| WeeklyTotalsView {
-            week: format_timesheet_week(week.start()),
-            worked: format_timesheet_duration(week.worked_minutes()),
-            break_time: format_timesheet_duration(week.break_minutes()),
-            absence: format_timesheet_duration(week.absence_minutes()),
-            target: week
-                .target_minutes()
-                .map(format_timesheet_duration)
-                .unwrap_or_else(|| "n/a".to_string()),
+            week: format_week_label(week.start()),
+            worked: format_duration(week.worked_minutes()),
+            break_time: format_duration(week.break_minutes()),
+            absence: format_duration(week.absence_minutes()),
+            target: week.target_minutes().map(format_duration).unwrap_or_else(|| "n/a".to_string()),
             balance: week
                 .balance_minutes()
-                .map(format_signed_timesheet_duration)
+                .map(format_signed_duration)
                 .unwrap_or_else(|| "n/a".to_string()),
         })
         .collect::<Vec<_>>();
-    let weekly_balances_total = if timesheet.weekly_totals().is_empty() {
+    let weekly_totals_total = if timesheet.weekly_totals().is_empty() {
         None
     } else {
         let total_worked_minutes =
@@ -262,11 +259,11 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
 
         Some(WeeklyTotalsView {
             week: "TOTAL".to_string(),
-            worked: format_timesheet_duration(total_worked_minutes),
-            break_time: format_timesheet_duration(total_break_minutes),
-            absence: format_timesheet_duration(total_absence_minutes),
-            target: format_timesheet_duration(total_target_minutes),
-            balance: format_signed_timesheet_duration(total_balance_minutes),
+            worked: format_duration(total_worked_minutes),
+            break_time: format_duration(total_break_minutes),
+            absence: format_duration(total_absence_minutes),
+            target: format_duration(total_target_minutes),
+            balance: format_signed_duration(total_balance_minutes),
         })
     };
 
@@ -279,67 +276,67 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
             active_minutes: total_active_minutes,
             break_minutes: total_break_minutes,
         }),
-        weekly_days,
-        weekly_balances,
-        weekly_balances_total,
-        target: timesheet.weekly_target_minutes().map(format_timesheet_duration),
-        balance: timesheet.balance_minutes().map(format_signed_timesheet_duration),
+        daily_totals,
+        weekly_totals,
+        weekly_totals_total,
+        target: timesheet.weekly_target_minutes().map(format_duration),
+        balance: timesheet.balance_minutes().map(format_signed_duration),
     }
 }
 
 pub(super) fn prepare_activity_view(
-    report: &ActivityReport,
+    activity_report: &ActivityReport,
     group_by: Option<ActivityGroupBy>,
 ) -> ActivityView {
     match group_by {
         Some(ActivityGroupBy::Title) => ActivityView {
-            title: format_activity_title(report.window(), group_by),
+            title: format_activity_title(activity_report.window(), group_by),
             rows: Vec::new(),
-            groups: report
+            groups: activity_report
                 .group_by_title()
                 .into_iter()
                 .map(|row| ActivityGroupView {
                     title: row.title().to_string(),
                     description: String::new(),
                     count: row.count().to_string(),
-                    duration: format_timesheet_duration(row.duration_minutes()),
+                    duration: format_duration(row.duration_minutes()),
                 })
                 .collect(),
             show_description: false,
             show_group_description: false,
         },
         Some(ActivityGroupBy::TitleDescription) => ActivityView {
-            title: format_activity_title(report.window(), group_by),
+            title: format_activity_title(activity_report.window(), group_by),
             rows: Vec::new(),
-            groups: report
+            groups: activity_report
                 .group_by_title_description()
                 .into_iter()
                 .map(|row| ActivityGroupView {
                     title: row.title().to_string(),
                     description: row.description().unwrap_or("-").to_string(),
                     count: row.count().to_string(),
-                    duration: format_timesheet_duration(row.duration_minutes()),
+                    duration: format_duration(row.duration_minutes()),
                 })
                 .collect(),
             show_description: false,
             show_group_description: true,
         },
         None => {
-            let rows = report
+            let rows = activity_report
                 .rows()
                 .iter()
                 .map(|row| ActivityItemView {
                     date: row.date().to_string(),
                     start: format_activity_boundary(row.start(), row.date()),
                     end: format_activity_boundary(row.end(), row.date()),
-                    duration: format_timesheet_duration(row.duration_minutes()),
+                    duration: format_duration(row.duration_minutes()),
                     title: row.title().to_string(),
                     description: row.description().unwrap_or_default().to_string(),
                 })
                 .collect::<Vec<_>>();
 
             ActivityView {
-                title: format_activity_title(report.window(), group_by),
+                title: format_activity_title(activity_report.window(), group_by),
                 show_description: rows.iter().any(|row| !row.description.is_empty()),
                 show_group_description: false,
                 rows,
@@ -350,7 +347,7 @@ pub(super) fn prepare_activity_view(
 }
 
 pub(super) fn format_timesheet_title(window: TimeWindow) -> String {
-    format!("Timesheet {}", format_timesheet_window(window))
+    format!("Timesheet {}", format_time_window(window))
 }
 
 pub(super) fn format_activity_title(
@@ -359,19 +356,16 @@ pub(super) fn format_activity_title(
 ) -> String {
     match group_by {
         Some(ActivityGroupBy::Title) => {
-            format!("Activity report {} (grouped by title)", format_timesheet_window(window))
+            format!("Activity {} (grouped by title)", format_time_window(window))
         }
         Some(ActivityGroupBy::TitleDescription) => {
-            format!(
-                "Activity report {} (grouped by title + description)",
-                format_timesheet_window(window)
-            )
+            format!("Activity {} (grouped by title + description)", format_time_window(window))
         }
-        None => format!("Activity report {}", format_timesheet_window(window)),
+        None => format!("Activity {}", format_time_window(window)),
     }
 }
 
-pub(super) fn format_timesheet_window(window: TimeWindow) -> String {
+pub(super) fn format_time_window(window: TimeWindow) -> String {
     let start = window.start();
     let end = window.end();
 
@@ -386,13 +380,13 @@ pub(super) fn format_timesheet_window(window: TimeWindow) -> String {
         };
     }
 
-    let start = format_timesheet_boundary(start);
-    let end = format_timesheet_boundary(end);
+    let start = format_time_boundary(start);
+    let end = format_time_boundary(end);
 
     if start == end { start } else { format!("{start} .. {end}") }
 }
 
-pub(super) fn format_timesheet_boundary(boundary: DateTime<Local>) -> String {
+pub(super) fn format_time_boundary(boundary: DateTime<Local>) -> String {
     if is_midnight(boundary) {
         boundary.date_naive().to_string()
     } else {
@@ -408,20 +402,20 @@ pub(super) fn format_activity_boundary(boundary: DateTime<Local>, row_date: Naiv
     }
 }
 
-pub(super) fn format_timesheet_day(date: NaiveDate) -> String {
+pub(super) fn format_day_label(date: NaiveDate) -> String {
     format!("{} {}", date.weekday(), date)
 }
 
-pub(super) fn format_timesheet_week(date: NaiveDate) -> String {
+pub(super) fn format_week_label(date: NaiveDate) -> String {
     let iso = date.iso_week();
     format!("{}-W{:02}", iso.year(), iso.week())
 }
 
-fn format_timesheet_day_count(dates: &HashSet<NaiveDate>) -> String {
+fn format_day_count(dates: &HashSet<NaiveDate>) -> String {
     dates.len().to_string()
 }
 
-pub(super) fn format_timesheet_duration(total_minutes: i64) -> String {
+pub(super) fn format_duration(total_minutes: i64) -> String {
     if total_minutes <= 0 {
         return "0m".to_string();
     }
@@ -440,11 +434,11 @@ pub(super) fn format_timesheet_duration(total_minutes: i64) -> String {
     if parts.is_empty() { "0m".to_string() } else { parts.join(" ") }
 }
 
-pub(super) fn format_signed_timesheet_duration(total_minutes: i64) -> String {
+pub(super) fn format_signed_duration(total_minutes: i64) -> String {
     match total_minutes.cmp(&0) {
-        std::cmp::Ordering::Less => format!("-{}", format_timesheet_duration(-total_minutes)),
+        std::cmp::Ordering::Less => format!("-{}", format_duration(-total_minutes)),
         std::cmp::Ordering::Equal => "0m".to_string(),
-        std::cmp::Ordering::Greater => format!("+{}", format_timesheet_duration(total_minutes)),
+        std::cmp::Ordering::Greater => format!("+{}", format_duration(total_minutes)),
     }
 }
 
@@ -461,8 +455,8 @@ impl From<PreparedTimesheetRow> for TimesheetViewRow {
         Self {
             activity: row.activity,
             day_count: row.day_count,
-            active: format_timesheet_duration(row.active_minutes),
-            break_time: format_timesheet_duration(row.break_minutes),
+            active: format_duration(row.active_minutes),
+            break_time: format_duration(row.break_minutes),
         }
     }
 }
@@ -500,48 +494,46 @@ mod tests {
     }
 
     #[test]
-    fn format_timesheet_duration_keeps_values_in_hours_and_minutes() {
-        assert_eq!(format_timesheet_duration(0), "0m");
-        assert_eq!(format_timesheet_duration(12), "12m");
-        assert_eq!(format_timesheet_duration(4 * 60 + 12), "4h 12m");
-        assert_eq!(format_timesheet_duration(2 * 24 * 60 + 4 * 60 + 12), "52h 12m");
-        assert_eq!(format_timesheet_duration(24 * 60), "24h");
+    fn format_duration_keeps_values_in_hours_and_minutes() {
+        assert_eq!(format_duration(0), "0m");
+        assert_eq!(format_duration(12), "12m");
+        assert_eq!(format_duration(4 * 60 + 12), "4h 12m");
+        assert_eq!(format_duration(2 * 24 * 60 + 4 * 60 + 12), "52h 12m");
+        assert_eq!(format_duration(24 * 60), "24h");
     }
 
     #[test]
-    fn format_signed_timesheet_duration_includes_sign() {
-        assert_eq!(format_signed_timesheet_duration(-(28 * 60 + 12)), "-28h 12m");
-        assert_eq!(format_signed_timesheet_duration(0), "0m");
-        assert_eq!(format_signed_timesheet_duration(28 * 60 + 12), "+28h 12m");
+    fn format_signed_duration_includes_sign() {
+        assert_eq!(format_signed_duration(-(28 * 60 + 12)), "-28h 12m");
+        assert_eq!(format_signed_duration(0), "0m");
+        assert_eq!(format_signed_duration(28 * 60 + 12), "+28h 12m");
     }
 
     #[test]
-    fn format_timesheet_window_uses_inclusive_dates_for_full_day_ranges() {
+    fn format_time_window_uses_inclusive_dates_for_full_day_ranges() {
         let window = TimeWindow::new(ts(10, 0, 0), ts(13, 0, 0));
 
-        assert_eq!(format_timesheet_window(window), "2026-01-10 .. 2026-01-12");
+        assert_eq!(format_time_window(window), "2026-01-10 .. 2026-01-12");
     }
 
     #[test]
-    fn format_timesheet_window_keeps_partial_boundaries_exact() {
+    fn format_time_window_keeps_partial_boundaries_exact() {
         let window = TimeWindow::new(ts(10, 0, 0), ts(12, 14, 15));
 
-        assert_eq!(format_timesheet_window(window), "2026-01-10 .. 2026-01-12 14:15");
+        assert_eq!(format_time_window(window), "2026-01-10 .. 2026-01-12 14:15");
     }
 
     #[test]
-    fn format_timesheet_week_uses_iso_week_label() {
+    fn format_week_label_uses_iso_week_label() {
         assert_eq!(
-            format_timesheet_week(
-                Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive()
-            ),
+            format_week_label(Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive()),
             "2026-W01"
         );
     }
 
     #[test]
     fn prepare_activity_view_renders_detailed_rows() {
-        let report = ActivityReport::new(
+        let activity_report = ActivityReport::new(
             TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
             vec![
                 WorkItemRow::new(
@@ -563,9 +555,9 @@ mod tests {
             ],
         );
 
-        let display = prepare_activity_view(&report, None);
+        let display = prepare_activity_view(&activity_report, None);
 
-        assert_eq!(display.title, "Activity report 2026-01-10");
+        assert_eq!(display.title, "Activity 2026-01-10");
         assert!(display.groups.is_empty());
         assert!(display.show_description);
         assert!(!display.show_group_description);
@@ -594,7 +586,7 @@ mod tests {
 
     #[test]
     fn prepare_activity_view_groups_rows_by_title() {
-        let report = ActivityReport::new(
+        let activity_report = ActivityReport::new(
             TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
             vec![
                 WorkItemRow::new(
@@ -616,9 +608,9 @@ mod tests {
             ],
         );
 
-        let display = prepare_activity_view(&report, Some(ActivityGroupBy::Title));
+        let display = prepare_activity_view(&activity_report, Some(ActivityGroupBy::Title));
 
-        assert_eq!(display.title, "Activity report 2026-01-10 (grouped by title)");
+        assert_eq!(display.title, "Activity 2026-01-10 (grouped by title)");
         assert!(display.rows.is_empty());
         assert!(!display.show_group_description);
         assert_eq!(
@@ -634,7 +626,7 @@ mod tests {
 
     #[test]
     fn prepare_activity_view_groups_rows_by_title_description() {
-        let report = ActivityReport::new(
+        let activity_report = ActivityReport::new(
             TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
             vec![
                 WorkItemRow::new(
@@ -656,9 +648,10 @@ mod tests {
             ],
         );
 
-        let display = prepare_activity_view(&report, Some(ActivityGroupBy::TitleDescription));
+        let display =
+            prepare_activity_view(&activity_report, Some(ActivityGroupBy::TitleDescription));
 
-        assert_eq!(display.title, "Activity report 2026-01-10 (grouped by title + description)");
+        assert_eq!(display.title, "Activity 2026-01-10 (grouped by title + description)");
         assert!(display.rows.is_empty());
         assert!(display.show_group_description);
         assert_eq!(
@@ -691,7 +684,7 @@ mod tests {
             work_record(5, 13, 6, 30, WorkCommand::BreakEnd { description: None }),
             work_record(6, 13, 8, 0, WorkCommand::End { title: "done".into(), description: None }),
         ];
-        let report = Timesheet::with_weekly_balance(
+        let timesheet = Timesheet::with_weekly_balance(
             window,
             calculate_time_breakdown(&records, window).unwrap(),
             40 * 60,
@@ -702,7 +695,7 @@ mod tests {
             ],
         );
 
-        let display = prepare_timesheet_view(&report);
+        let display = prepare_timesheet_view(&timesheet);
 
         assert_eq!(display.title, "Timesheet 2026-01-12 .. 2026-01-14");
         assert_eq!(
@@ -732,7 +725,7 @@ mod tests {
             }
         );
         assert_eq!(
-            display.weekly_days,
+            display.daily_totals,
             vec![
                 DailyTotalsView {
                     day: "Mon 2026-01-12".into(),
@@ -754,8 +747,8 @@ mod tests {
                 },
             ]
         );
-        assert!(display.weekly_balances.is_empty());
-        assert_eq!(display.weekly_balances_total, None);
+        assert!(display.weekly_totals.is_empty());
+        assert_eq!(display.weekly_totals_total, None);
         assert_eq!(display.target, Some("40h".into()));
         assert_eq!(display.balance, Some("-34h 15m".into()));
     }
@@ -781,7 +774,7 @@ mod tests {
         let display = prepare_timesheet_view(&timesheet);
 
         assert_eq!(
-            display.weekly_balances,
+            display.weekly_totals,
             vec![
                 WeeklyTotalsView {
                     week: "2026-W01".into(),
@@ -802,7 +795,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            display.weekly_balances_total,
+            display.weekly_totals_total,
             Some(WeeklyTotalsView {
                 week: "TOTAL".into(),
                 worked: "48h".into(),
@@ -812,7 +805,7 @@ mod tests {
                 balance: "0m".into(),
             })
         );
-        assert!(display.weekly_days.is_empty());
+        assert!(display.daily_totals.is_empty());
         assert_eq!(display.target, None);
         assert_eq!(display.balance, None);
     }
