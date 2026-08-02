@@ -1,6 +1,7 @@
 use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate};
 
 use crate::config::Config;
+use crate::domain::WeeklySchedule;
 use crate::domain::{
     AbsenceRecord, AbsenceRecordInput, ChangeOutcome, Period, Record, RecordChange, RecordId,
     RecordInput, Timesheet, WorkCommand, WorkContext, WorkRecord,
@@ -33,7 +34,7 @@ impl Clock for SystemClock {
 
 #[derive(Debug)]
 pub(crate) struct App<S: RecordRepository, C: Clock = SystemClock> {
-    config: Config,
+    weekly_schedule: WeeklySchedule,
     store: S,
     clock: C,
 }
@@ -48,7 +49,8 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
     pub fn new_with_clock(config: Config, store: STORE, clock: C) -> Result<Self> {
         validate_records(store.records())?;
 
-        Ok(Self { config, store, clock })
+
+        Ok(Self { weekly_schedule: config.schedule.to_weekly_schedule(), store, clock })
     }
 
     ///// Work
@@ -166,7 +168,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
             &records,
             window,
             &scope,
-            self.config.schedule.to_weekly_schedule().weekly_target_minutes(),
+            &self.weekly_schedule,
         )
     }
 

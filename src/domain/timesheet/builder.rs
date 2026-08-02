@@ -1,7 +1,7 @@
 use chrono::Days;
 
 use crate::domain::{
-    DailyTotals, Period, Record, Timesheet, WeeklyTotals, calculate_time_breakdown,
+    DailyTotals, Period, Record, Timesheet, WeeklySchedule, WeeklyTotals, calculate_time_breakdown,
     reporting::{self, DateScope, TimeWindow},
 };
 
@@ -9,7 +9,7 @@ pub(crate) fn build_timesheet(
     records: &[Record],
     window: TimeWindow,
     scope: &DateScope,
-    weekly_target_minutes: i64,
+    weekly_schedule: &WeeklySchedule,
 ) -> anyhow::Result<Timesheet> {
     let breakdown = calculate_time_breakdown(records, window)?;
 
@@ -19,12 +19,13 @@ pub(crate) fn build_timesheet(
             Ok(Timesheet::with_weekly_balance(
                 window,
                 breakdown,
-                weekly_target_minutes,
+                weekly_schedule.weekly_target_minutes(),
                 daily_totals,
             ))
         }
         DateScope::Period { period: Period::Month | Period::Year, .. } => {
-            let weekly_totals = calculate_weekly_totals(records, window, weekly_target_minutes)?;
+            let weekly_totals =
+                calculate_weekly_totals(records, window, weekly_schedule.weekly_target_minutes())?;
             Ok(Timesheet::with_weekly_breakdown(window, breakdown, weekly_totals))
         }
         _ => Ok(Timesheet::new(window, breakdown)),
