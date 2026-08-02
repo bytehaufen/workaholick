@@ -162,7 +162,12 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         let window = self.time_window_for(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
 
-        build_timesheet(&records, window, &scope, self.config.weekly_target_minutes())
+        build_timesheet(
+            &records,
+            window,
+            &scope,
+            self.config.schedule.to_weekly_schedule().weekly_target_minutes(),
+        )
     }
 
     pub fn activity(&self, scope: DateScope) -> anyhow::Result<ActivityReport> {

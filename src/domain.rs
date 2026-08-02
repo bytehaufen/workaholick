@@ -8,6 +8,7 @@ mod serde_datetime;
 mod time_accounting;
 mod timeline_validation;
 mod timesheet;
+mod weekly_schedule;
 mod work;
 mod work_state;
 
@@ -18,5 +19,6 @@ pub(crate) use record_set::{ChangeOutcome, RecordChange, RecordSet};
 pub(crate) use time_accounting::{TimeBreakdown, TimeCategory, calculate_time_breakdown};
 pub(crate) use timeline_validation::{TimelineValidationError, validate_records};
 pub(crate) use timesheet::{DailyTotals, Timesheet, WeeklyTotals, build_timesheet};
+pub(crate) use weekly_schedule::WeeklySchedule;
 pub(crate) use work::{WorkCommand, WorkContext, WorkRecord, WorkRecordInput};
 pub(crate) use work_state::{TransitionReason, transition_day_state};

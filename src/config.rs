@@ -7,7 +7,10 @@ use anyhow::{Context, Result};
 use directories::UserDirs;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::editor::{Editor, ports::FileType};
+use crate::{
+    domain::WeeklySchedule,
+    editor::{Editor, ports::FileType},
+};
 
 const APP_NAME: &str = env!("CARGO_PKG_NAME");
 const CONFIG_NAME: &str = "config";
@@ -65,6 +68,10 @@ impl ScheduleConfig {
             sun_minutes,
         }
     }
+
+    pub(crate) fn to_weekly_schedule(&self) -> WeeklySchedule {
+        WeeklySchedule::new(self.as_array())
+    }
 }
 
 impl Default for ScheduleConfig {
@@ -102,24 +109,6 @@ impl Default for Config {
             schedule: Default::default(),
             cli: CliConfig::default(),
         }
-    }
-}
-
-impl Config {
-    pub fn weekly_target_minutes(&self) -> i64 {
-        let schedule = &self.schedule;
-
-        [
-            schedule.mon_minutes,
-            schedule.tue_minutes,
-            schedule.wed_minutes,
-            schedule.thu_minutes,
-            schedule.fri_minutes,
-            schedule.sat_minutes,
-            schedule.sun_minutes,
-        ]
-        .iter()
-        .sum()
     }
 }
 
