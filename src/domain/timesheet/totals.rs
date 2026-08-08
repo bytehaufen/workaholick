@@ -8,9 +8,9 @@ struct TimeTotals {
 }
 
 impl TimeTotals {
-    /// Work - Absence + Absence minutes
+    /// Work + Absence minutes
     fn credited_minutes(&self) -> i64 {
-        self.worked_minutes - self.break_minutes + self.absence_minutes
+        self.worked_minutes + self.absence_minutes
     }
 
     fn balance_minutes(&self, target_minutes: i64) -> i64 {
@@ -95,5 +95,19 @@ impl WeeklyTotals {
 
     pub(crate) fn balance_minutes(&self) -> Option<i64> {
         self.target_minutes.map(|mins| self.time_totals.balance_minutes(mins))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_support::date;
+
+    use super::*;
+
+    #[test]
+    fn weekly_totals_calculates_balance_minutes() {
+        let weekly_totals = WeeklyTotals::new(date(7), 4 * 60, 60, 4 * 60, Some(9 * 60));
+
+        assert_eq!(weekly_totals.balance_minutes(), Some(-60));
     }
 }

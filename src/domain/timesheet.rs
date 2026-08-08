@@ -68,11 +68,19 @@ impl Timesheet {
     }
 
     pub(crate) fn worked_minutes(&self) -> i64 {
-        self.breakdown.total_active_minutes()
+        self.breakdown.work_active_minutes()
+    }
+
+    pub(crate) fn absence_minutes(&self) -> i64 {
+        self.breakdown.absence_minutes()
+    }
+
+    fn credited_minutes(&self) -> i64 {
+        self.worked_minutes() + self.absence_minutes()
     }
 
     pub(crate) fn balance_minutes(&self) -> Option<i64> {
-        self.weekly_target_minutes.map(|target| self.worked_minutes() - target)
+        self.weekly_target_minutes.map(|target| self.credited_minutes() - target)
     }
 
     pub(crate) fn daily_totals(&self) -> &[DailyTotals] {

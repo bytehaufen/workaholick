@@ -49,7 +49,6 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
     pub fn new_with_clock(config: Config, store: STORE, clock: C) -> Result<Self> {
         validate_records(store.records())?;
 
-
         Ok(Self { weekly_schedule: config.schedule.to_weekly_schedule(), store, clock })
     }
 
@@ -164,12 +163,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         let window = self.time_window_for(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
 
-        build_timesheet(
-            &records,
-            window,
-            &scope,
-            &self.weekly_schedule,
-        )
+        build_timesheet(&records, window, &scope, &self.weekly_schedule)
     }
 
     pub fn activity(&self, scope: DateScope) -> anyhow::Result<ActivityReport> {
@@ -635,6 +629,45 @@ mod tests {
             vec![60, 60 << 1, 3 * 60, 60 << 2, 5 * 60, 0, 0]
         );
         assert!(timesheet.weekly_totals().is_empty());
+    }
+
+    #[test]
+    fn weekly_timesheet_excludes_breaks_from_worked_time_and_balance() {
+        let context = WorkContext::Home;
+        let store = FakeStore::default().seed(vec![
+            (1.into(), RecordInput::new_work(ts(8, 8, 0), WorkCommand::Start { context })),
+            (2.into(), RecordInput::new_work(ts(8, 12, 0), WorkCommand::BreakStart)),
+            (
+                3.into(),
+                RecordInput::new_work(ts(8, 13, 0), WorkCommand::BreakEnd { description: None }),
+            ),
+            (
+                4.into(),
+                RecordInput::new_work(
+                    ts(8, 18, 0),
+                    WorkCommand::End { title: "".into(), description: None },
+                ),
+            ),
+        ]);
+
+        let now = ts(8, 20, 0);
+
+        let config = Config {
+            schedule: ScheduleConfig::new(0, 0, 0, 8 * 60, 0, 0, 0),
+            ..Default::default()
+        };
+
+        let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
+            .unwrap();
+
+        let timesheet =
+            app.timesheet(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
+
+        assert_eq!(timesheet.worked_minutes(), 9 * 60);
+        assert_eq!(timesheet.balance_minutes(), Some(60));
+
+        let thursday = timesheet.daily_totals().iter().find(|day| day.date() == date(8)).unwrap();
+        assert_eq!(thursday.break_minutes(), 60);
     }
 
     #[test]
