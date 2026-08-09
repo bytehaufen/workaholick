@@ -161,7 +161,6 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         self.store.commit(change)
     }
 
-    ///////////// FIXME: old stuff -> need to transform / update / whatever
     pub fn activity(&self, scope: DateScope) -> anyhow::Result<ActivityReport> {
         let window = self.time_window_for(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
@@ -178,7 +177,11 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
                 period_time_window(*period, *offset, today, now)?
             }
             DateScope::Range { from, to } => {
-                anyhow::ensure!(from <= to, "Timesheet start date must be on or before end date.");
+                anyhow::ensure!(
+                    *from <= *to,
+                    "Timesheet start date must be on or before end date."
+                );
+                anyhow::ensure!(*from <= today, "Timesheet start date is in the future.");
                 let end = reporting::next_day(*to);
 
                 date_window(*from, end, now)
@@ -540,15 +543,9 @@ mod tests {
     }
 
     #[test]
-    fn timesheet_rejects_future_explicit_range_without_overlap() {
+    fn timesheet_rejects_future_range_dates() {
         let now = ts(15, 12, 0);
-        let store = FakeStore::default().seed(vec![(
-            1.into(),
-            RecordInput::new_work(
-                ts(10, 9, 0),
-                WorkCommand::Start { context: WorkContext::Office },
-            ),
-        )]);
+        let store = FakeStore::default();
         let app = App::new_with_clock(
             Config::default(),
             store,
@@ -558,7 +555,7 @@ mod tests {
 
         let err = app.timesheet(DateScope::Range { from: date(16), to: date(17) }).unwrap_err();
 
-        assert_eq!(err.to_string(), "Timesheet range is empty.");
+        assert_eq!(err.to_string(), "Timesheet start date is in the future.");
     }
 
     #[test]
@@ -624,6 +621,41 @@ mod tests {
             timesheet.daily_totals().iter().map(|day| day.worked_minutes()).collect::<Vec<_>>(),
             vec![60, 60 << 1, 3 * 60, 60 << 2, 5 * 60, 0, 0]
         );
+        assert!(timesheet.weekly_totals().is_empty());
+    }
+
+    #[test]
+    fn range_timesheet_with_only_zero_target_days_has_zero_balance() {
+        let store = FakeStore::default().seed(vec![]);
+        let now = ts(8, 12, 0);
+        let schedule = ScheduleConfig::new(60, 2 * 60, 3 * 60, 4 * 60, 5 * 60, 0, 0);
+        let config = Config { schedule, ..Default::default() };
+        let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
+            .unwrap();
+
+        let timesheet = app.timesheet(DateScope::Range { from: date(3), to: date(4) }).unwrap();
+
+        assert_eq!(timesheet.target_minutes(), 0);
+        assert_eq!(timesheet.balance_minutes(), 0);
+        assert!(timesheet.daily_totals().is_empty());
+        assert_eq!(timesheet.weekly_totals().len(), 1);
+    }
+
+    #[test]
+    fn weekly_timesheet_uses_targets_through_current_day() {
+        let store = FakeStore::default().seed(vec![]);
+        let now = ts(8, 12, 0);
+        let schedule = ScheduleConfig::new(60, 2 * 60, 3 * 60, 4 * 60, 5 * 60, 0, 0);
+        let config = Config { schedule, ..Default::default() };
+        let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
+            .unwrap();
+
+        let timesheet =
+            app.timesheet(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
+
+        assert_eq!(timesheet.target_minutes(), 10 * 60);
+        assert_eq!(timesheet.balance_minutes(), -10 * 60);
+        assert_eq!(timesheet.daily_totals().len(), 4);
         assert!(timesheet.weekly_totals().is_empty());
     }
 
@@ -714,8 +746,8 @@ mod tests {
                     // 2026-W01: Schedule has value for Thu (Jan 1) + Fri (Jan 2)
                     Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
                     0,
-                    2 * 60 * 8,
-                    -(2 * 60 * 8)
+                    16 * 60,
+                    -(16 * 60)
                 ),
                 (
                     // 2026-W02: Schedule has value for Mon-Fri (Jan 5-9)
@@ -735,6 +767,24 @@ mod tests {
         );
         assert!(timesheet.daily_totals().is_empty());
         assert_eq!(timesheet.target_minutes(), 88 * 60);
+        assert_eq!(timesheet.balance_minutes(), -72 * 60);
+    }
+
+    #[test]
+    fn range_timesheet_uses_targets_for_selected_days() {
+        let now = ts(18, 15, 0);
+        let store = FakeStore::default();
+        let schedule = ScheduleConfig::new(60, 2 * 60, 3 * 60, 4 * 60, 5 * 60, 0, 0);
+        let config = Config { schedule, ..Default::default() };
+        let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
+            .unwrap();
+
+        let timesheet = app.timesheet(DateScope::Range { from: date(12), to: date(14) }).unwrap();
+
+        assert_eq!(timesheet.target_minutes(), 6 * 60);
+        assert_eq!(timesheet.balance_minutes(), -6 * 60);
+        assert!(timesheet.daily_totals().is_empty());
+        assert_eq!(timesheet.weekly_totals().len(), 1);
     }
 
     #[test]
