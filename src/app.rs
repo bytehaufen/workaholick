@@ -621,9 +621,9 @@ mod tests {
         let timesheet =
             app.timesheet(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
-        assert_eq!(timesheet.weekly_target_minutes(), Some(1 + 2 + 3 + 4 + 5).map(|v| v * 60));
+        assert_eq!(timesheet.target_minutes(), (1 + 2 + 3 + 4 + 5) * 60);
         assert_eq!(timesheet.worked_minutes(), (1 + 2 + 3 + 4 + 5) * 60);
-        assert_eq!(timesheet.balance_minutes(), Some(0));
+        assert_eq!(timesheet.balance_minutes(), 0);
         assert_eq!(
             timesheet.daily_totals().iter().map(|day| day.worked_minutes()).collect::<Vec<_>>(),
             vec![60, 60 << 1, 3 * 60, 60 << 2, 5 * 60, 0, 0]
@@ -664,34 +664,10 @@ mod tests {
             app.timesheet(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
         assert_eq!(timesheet.worked_minutes(), 9 * 60);
-        assert_eq!(timesheet.balance_minutes(), Some(60));
+        assert_eq!(timesheet.balance_minutes(), 60);
 
         let thursday = timesheet.daily_totals().iter().find(|day| day.date() == date(8)).unwrap();
         assert_eq!(thursday.break_minutes(), 60);
-    }
-
-    #[test]
-    fn non_week_timesheet_does_not_include_weekly_target() {
-        let now = ts(12, 12, 0);
-        let context = WorkContext::Office;
-        let store = FakeStore::default().seed(vec![(
-            1.into(),
-            RecordInput::new_work(ts(12, 8, 0), WorkCommand::Start { context }),
-        )]);
-        let app = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap();
-
-        let timesheet = app.timesheet(DateScope::Range { from: date(12), to: date(12) }).unwrap();
-
-        assert_eq!(timesheet.weekly_target_minutes(), None);
-        assert_eq!(timesheet.worked_minutes(), 4 * 60);
-        assert_eq!(timesheet.balance_minutes(), None);
-        assert!(timesheet.daily_totals().is_empty());
-        assert!(timesheet.weekly_totals().is_empty());
     }
 
     #[test]
@@ -741,25 +717,25 @@ mod tests {
                 (
                     Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
                     0,
-                    None,
-                    None
+                    5 * 60 * 8,
+                    -(5 * 60 * 8)
                 ),
                 (
                     Local.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap().date_naive(),
                     8 * 60,
-                    Some(40 * 60),
-                    Some(-(32 * 60))
+                    40 * 60,
+                    -(32 * 60)
                 ),
                 (
                     Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap().date_naive(),
                     8 * 60,
-                    None,
-                    None
+                    40 * 60,
+                    -(32 * 60)
                 ),
             ]
         );
         assert!(timesheet.daily_totals().is_empty());
-        assert_eq!(timesheet.weekly_target_minutes(), None);
+        assert_eq!(timesheet.target_minutes(), 0);
     }
 
     #[test]

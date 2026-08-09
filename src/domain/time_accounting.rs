@@ -35,10 +35,6 @@ impl TimeBreakdown {
         self.0.iter().map(|(kind, bucket)| (*kind, bucket))
     }
 
-    pub(crate) fn total_active_minutes(&self) -> i64 {
-        self.0.values().map(|bucket| bucket.active_time().num_minutes().max(0)).sum()
-    }
-
     pub(crate) fn work_active_minutes(&self) -> i64 {
         self.0
             .iter()

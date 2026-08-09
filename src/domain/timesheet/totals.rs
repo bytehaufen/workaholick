@@ -55,7 +55,7 @@ impl DailyTotals {
 pub(crate) struct WeeklyTotals {
     start: NaiveDate,
     time_totals: TimeTotals,
-    target_minutes: Option<i64>,
+    target_minutes: i64,
 }
 
 impl WeeklyTotals {
@@ -64,7 +64,7 @@ impl WeeklyTotals {
         worked_minutes: i64,
         break_minutes: i64,
         absence_minutes: i64,
-        target_minutes: Option<i64>,
+        target_minutes: i64,
     ) -> Self {
         Self {
             start,
@@ -89,12 +89,12 @@ impl WeeklyTotals {
         self.time_totals.absence_minutes
     }
 
-    pub(crate) fn target_minutes(&self) -> Option<i64> {
+    pub(crate) fn target_minutes(&self) -> i64 {
         self.target_minutes
     }
 
-    pub(crate) fn balance_minutes(&self) -> Option<i64> {
-        self.target_minutes.map(|mins| self.time_totals.balance_minutes(mins))
+    pub(crate) fn balance_minutes(&self) -> i64 {
+        self.time_totals.balance_minutes(self.target_minutes)
     }
 }
 
@@ -106,8 +106,8 @@ mod tests {
 
     #[test]
     fn weekly_totals_calculates_balance_minutes() {
-        let weekly_totals = WeeklyTotals::new(date(7), 4 * 60, 60, 4 * 60, Some(9 * 60));
+        let weekly_totals = WeeklyTotals::new(date(7), 4 * 60, 60, 4 * 60, 9 * 60);
 
-        assert_eq!(weekly_totals.balance_minutes(), Some(-60));
+        assert_eq!(weekly_totals.balance_minutes(), -60);
     }
 }

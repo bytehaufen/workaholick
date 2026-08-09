@@ -19,13 +19,13 @@ pub(crate) fn build_timesheet(
             Ok(Timesheet::with_weekly_balance(
                 window,
                 breakdown,
-                weekly_schedule.weekly_target_minutes(),
+                weekly_schedule.target_minutes(),
                 daily_totals,
             ))
         }
         DateScope::Period { period: Period::Month | Period::Year, .. } => {
             let weekly_totals =
-                calculate_weekly_totals(records, window, weekly_schedule.weekly_target_minutes())?;
+                calculate_weekly_totals(records, window, weekly_schedule.target_minutes())?;
             Ok(Timesheet::with_weekly_breakdown(window, breakdown, weekly_totals))
         }
         _ => Ok(Timesheet::new(window, breakdown)),
@@ -35,7 +35,7 @@ pub(crate) fn build_timesheet(
 fn calculate_weekly_totals(
     records: &[Record],
     window: TimeWindow,
-    weekly_target_minutes: i64,
+    target_minutes: i64,
 ) -> anyhow::Result<Vec<WeeklyTotals>> {
     let first_week_start = reporting::start_of_week(window.start().date_naive());
 
@@ -64,8 +64,7 @@ fn calculate_weekly_totals(
             worked_minutes,
             break_minutes,
             absence_minutes,
-            (week_window.start() == full_week_start && week_window.end() == full_week_end)
-                .then_some(weekly_target_minutes),
+            target_minutes,
         ))
     })
     .collect()

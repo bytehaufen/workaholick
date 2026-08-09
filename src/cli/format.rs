@@ -140,8 +140,8 @@ pub(super) struct TimesheetView {
     pub daily_totals: Vec<DailyTotalsView>,
     pub weekly_totals: Vec<WeeklyTotalsView>,
     pub weekly_totals_total: Option<WeeklyTotalsView>,
-    pub target: Option<String>,
-    pub balance: Option<String>,
+    pub target: String,
+    pub balance: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,11 +236,9 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
             worked: format_duration(week.worked_minutes()),
             break_time: format_duration(week.break_minutes()),
             absence: format_duration(week.absence_minutes()),
-            target: week.target_minutes().map(format_duration).unwrap_or_else(|| "n/a".to_string()),
-            balance: week
-                .balance_minutes()
-                .map(format_signed_duration)
-                .unwrap_or_else(|| "n/a".to_string()),
+            // target: week.target_minutes().map(format_duration).unwrap_or_else(|| "n/a".to_string()),
+            target: format_duration(week.target_minutes()),
+            balance: format_signed_duration(week.balance_minutes()),
         })
         .collect::<Vec<_>>();
     let weekly_totals_total = if timesheet.weekly_totals().is_empty() {
@@ -253,9 +251,9 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
         let total_absence_minutes =
             timesheet.weekly_totals().iter().map(|week| week.absence_minutes()).sum();
         let total_target_minutes: i64 =
-            timesheet.weekly_totals().iter().filter_map(|week| week.target_minutes()).sum();
+            timesheet.weekly_totals().iter().map(|week| week.target_minutes()).sum();
         let total_balance_minutes: i64 =
-            timesheet.weekly_totals().iter().filter_map(|week| week.balance_minutes()).sum();
+            timesheet.weekly_totals().iter().map(|week| week.balance_minutes()).sum();
 
         Some(WeeklyTotalsView {
             week: "TOTAL".to_string(),
@@ -279,8 +277,10 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
         daily_totals,
         weekly_totals,
         weekly_totals_total,
-        target: timesheet.weekly_target_minutes().map(format_duration),
-        balance: timesheet.balance_minutes().map(format_signed_duration),
+        // target: timesheet.target_minutes().map(format_duration),
+        target: format_duration(timesheet.target_minutes()),
+        // balance: timesheet.balance_minutes().map(format_signed_duration),
+        balance: format_signed_duration(timesheet.balance_minutes()),
     }
 }
 
@@ -749,8 +749,8 @@ mod tests {
         );
         assert!(display.weekly_totals.is_empty());
         assert_eq!(display.weekly_totals_total, None);
-        assert_eq!(display.target, Some("40h".into()));
-        assert_eq!(display.balance, Some("-34h 15m".into()));
+        assert_eq!(&display.target, "40h");
+        assert_eq!(&display.balance, "-34h 15m");
     }
 
     #[test]
@@ -765,9 +765,9 @@ mod tests {
                     8 * 60,
                     0,
                     0,
-                    None,
+                    0,
                 ),
-                WeeklyTotals::new(ts(5, 0, 0).date_naive(), 40 * 60, 0, 0, Some(40 * 60)),
+                WeeklyTotals::new(ts(5, 0, 0).date_naive(), 40 * 60, 0, 0, 40 * 60),
             ],
         );
 
@@ -806,7 +806,7 @@ mod tests {
             })
         );
         assert!(display.daily_totals.is_empty());
-        assert_eq!(display.target, None);
-        assert_eq!(display.balance, None);
+        assert_eq!(&display.target, "0");
+        assert_eq!(&display.balance, "0");
     }
 }

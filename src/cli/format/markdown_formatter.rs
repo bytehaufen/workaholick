@@ -81,33 +81,23 @@ impl Formatter for MarkdownFormatter {
         let mut output = String::new();
         let has_daily_totals = !timesheet_view.daily_totals.is_empty();
         let has_weekly_totals = !timesheet_view.weekly_totals.is_empty();
-        let has_metrics = timesheet_view.target.is_some() && timesheet_view.balance.is_some();
         output.push_str(&format!("# {}\n\n", timesheet_view.title));
 
-        if timesheet_view.rows.is_empty() {
-            output.push_str("_No tracked time._\n");
-            if has_daily_totals || has_weekly_totals || has_metrics {
-                output.push('\n');
-            }
-        } else {
-            output.push_str("| Activity | Days | Active | Break |\n");
-            output.push_str("| :-- | --: | --: | --: |\n");
+        output.push_str("| Activity | Days | Active | Break |\n");
+        output.push_str("| :-- | --: | --: | --: |\n");
 
-            timesheet_view.rows.iter().chain(std::iter::once(&timesheet_view.total)).for_each(
-                |row| {
-                    output.push_str(&format!(
-                        "| {} | {} | {} | {} |\n",
-                        escape_markdown_table_cell(&row.activity),
-                        row.day_count,
-                        row.active,
-                        row.break_time,
-                    ));
-                },
-            );
+        timesheet_view.rows.iter().chain(std::iter::once(&timesheet_view.total)).for_each(|row| {
+            output.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                escape_markdown_table_cell(&row.activity),
+                row.day_count,
+                row.active,
+                row.break_time,
+            ));
+        });
 
-            if has_daily_totals || has_weekly_totals || has_metrics {
-                output.push('\n');
-            }
+        if has_daily_totals || has_weekly_totals {
+            output.push('\n');
         }
 
         if has_daily_totals {
@@ -124,7 +114,7 @@ impl Formatter for MarkdownFormatter {
                 ));
             });
 
-            if has_weekly_totals || has_metrics {
+            if has_weekly_totals {
                 output.push('\n');
             }
         }
@@ -157,17 +147,13 @@ impl Formatter for MarkdownFormatter {
                 ));
             }
 
-            if has_metrics {
-                output.push('\n');
-            }
+            output.push('\n');
         }
 
-        if let (Some(target), Some(balance)) = (&timesheet_view.target, &timesheet_view.balance) {
-            output.push_str("| Metric | Value |\n");
-            output.push_str("| :-- | --: |\n");
-            output.push_str(&format!("| Week Target | {} |\n", target));
-            output.push_str(&format!("| Balance | {} |\n", balance));
-        }
+        output.push_str("\n| Metric | Value |\n");
+        output.push_str("| :-- | --: |\n");
+        output.push_str(&format!("| Week Target | {} |\n", timesheet_view.target));
+        output.push_str(&format!("| Balance | {} |\n", timesheet_view.balance));
 
         output
     }
@@ -413,14 +399,14 @@ _No tracked time._
                     8 * 60,
                     0,
                     0,
-                    None,
+                    0,
                 ),
                 WeeklyTotals::new(
                     Local.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap().date_naive(),
                     40 * 60,
                     0,
                     0,
-                    Some(40 * 60),
+                    40 * 60,
                 ),
             ],
         );
@@ -431,7 +417,9 @@ _No tracked time._
             &rendered,
             r#"# Timesheet 2026-01-01 .. 2026-01-15
 
-_No tracked time._
+| Activity | Days | Active | Break |
+| :-- | --: | --: | --: |
+| TOTAL |  | 0m | 0m |
 
 | Week | Worked | Break | Absence | Target | Balance |
 | :-- | --: | --: | --: | --: | --: |

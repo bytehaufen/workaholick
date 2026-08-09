@@ -10,7 +10,7 @@ use crate::domain::{TimeBreakdown, reporting::TimeWindow};
 pub struct Timesheet {
     window: TimeWindow,
     breakdown: TimeBreakdown,
-    weekly_target_minutes: Option<i64>,
+    target_minutes: i64,
     daily_totals: Vec<DailyTotals>,
     weekly_totals: Vec<WeeklyTotals>,
 }
@@ -20,7 +20,7 @@ impl Timesheet {
         Self {
             window,
             breakdown,
-            weekly_target_minutes: None,
+            target_minutes: 0,
             daily_totals: Vec::new(),
             weekly_totals: Vec::new(),
         }
@@ -29,16 +29,10 @@ impl Timesheet {
     pub(crate) fn with_weekly_balance(
         window: TimeWindow,
         breakdown: TimeBreakdown,
-        weekly_target_minutes: i64,
+        target_minutes: i64,
         daily_totals: Vec<DailyTotals>,
     ) -> Self {
-        Self {
-            window,
-            breakdown,
-            weekly_target_minutes: Some(weekly_target_minutes),
-            daily_totals,
-            weekly_totals: Vec::new(),
-        }
+        Self { window, breakdown, target_minutes, daily_totals, weekly_totals: Vec::new() }
     }
 
     pub(crate) fn with_weekly_breakdown(
@@ -46,13 +40,7 @@ impl Timesheet {
         breakdown: TimeBreakdown,
         weekly_totals: Vec<WeeklyTotals>,
     ) -> Self {
-        Self {
-            window,
-            breakdown,
-            weekly_target_minutes: None,
-            daily_totals: Vec::new(),
-            weekly_totals,
-        }
+        Self { window, breakdown, target_minutes: 0, daily_totals: Vec::new(), weekly_totals }
     }
 
     pub(crate) fn window(&self) -> TimeWindow {
@@ -63,8 +51,8 @@ impl Timesheet {
         &self.breakdown
     }
 
-    pub(crate) fn weekly_target_minutes(&self) -> Option<i64> {
-        self.weekly_target_minutes
+    pub(crate) fn target_minutes(&self) -> i64 {
+        self.target_minutes
     }
 
     pub(crate) fn worked_minutes(&self) -> i64 {
@@ -79,8 +67,8 @@ impl Timesheet {
         self.worked_minutes() + self.absence_minutes()
     }
 
-    pub(crate) fn balance_minutes(&self) -> Option<i64> {
-        self.weekly_target_minutes.map(|target| self.credited_minutes() - target)
+    pub(crate) fn balance_minutes(&self) -> i64 {
+        self.credited_minutes() - self.target_minutes
     }
 
     pub(crate) fn daily_totals(&self) -> &[DailyTotals] {
