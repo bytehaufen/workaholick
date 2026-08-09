@@ -29,6 +29,13 @@ impl TimeWindow {
     pub(crate) fn is_empty(self) -> bool {
         self.start >= self.end
     }
+
+    pub(crate) fn dates_in(window: TimeWindow) -> impl Iterator<Item = NaiveDate> {
+        std::iter::successors((!window.is_empty()).then_some(window.start().date_naive()), |date| {
+            date.succ_opt()
+        })
+        .take_while(move |date| start_of_day(*date) < window.end())
+    }
 }
 
 pub(crate) fn start_of_week(date: NaiveDate) -> NaiveDate {
@@ -42,4 +49,27 @@ pub(crate) fn start_of_day(date: NaiveDate) -> DateTime<Local> {
 
 pub(crate) fn next_day(date: NaiveDate) -> NaiveDate {
     date.succ_opt().expect("timesheet range end should have a successor day")
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_support::{date, ts};
+
+    use super::*;
+
+    #[test]
+    fn dates_in_excludes_the_date_starting_at_window_end() {
+        let window = TimeWindow::new(ts(9, 0, 0), ts(10, 0, 0));
+
+        let dates = TimeWindow::dates_in(window).collect::<Vec<_>>();
+        assert_eq!(dates, vec![date(9)]);
+    }
+
+    #[test]
+    fn dates_in_includes_a_date_when_window_during_it() {
+        let window = TimeWindow::new(ts(9, 0, 0), ts(10, 12, 0));
+
+        let dates = TimeWindow::dates_in(window).collect::<Vec<_>>();
+        assert_eq!(dates, vec![date(9), date(10)]);
+    }
 }

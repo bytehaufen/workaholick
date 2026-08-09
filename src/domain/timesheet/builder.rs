@@ -74,32 +74,22 @@ fn calculate_daily_totals(
     records: &[Record],
     window: TimeWindow,
 ) -> anyhow::Result<Vec<DailyTotals>> {
-    let first_date = window.start().date_naive();
-    let last_date = window.end().date_naive();
+    let daily_totals = TimeWindow::dates_in(window)
+        .map(|date| -> anyhow::Result<DailyTotals> {
+            let day_start = reporting::start_of_day(date).max(window.start());
+            let day_end = reporting::start_of_day(reporting::next_day(date)).min(window.end());
+            let day_window = TimeWindow::new(day_start, day_end);
 
-    let daily_totals =
-        std::iter::successors(Some(first_date), |date| Some(reporting::next_day(*date)))
-            .take_while(|date| *date <= last_date)
-            .map(|date| -> anyhow::Result<Option<DailyTotals>> {
-                let day_start = reporting::start_of_day(date).max(window.start());
-                let day_end = reporting::start_of_day(reporting::next_day(date)).min(window.end());
+            let breakdown = calculate_time_breakdown(records, day_window)?;
 
-                if day_end > day_start {
-                    let day_window = TimeWindow::new(day_start, day_end);
-                    let day_time_breakdown = calculate_time_breakdown(records, day_window)?;
-                    let worked_minutes = day_time_breakdown.work_active_minutes();
-                    let break_minutes = day_time_breakdown.break_minutes();
-                    let absence_minutes = day_time_breakdown.absence_minutes();
-
-                    Ok(Some(DailyTotals::new(date, worked_minutes, break_minutes, absence_minutes)))
-                } else {
-                    Ok(None)
-                }
-            })
-            .collect::<anyhow::Result<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect();
+            Ok(DailyTotals::new(
+                date,
+                breakdown.work_active_minutes(),
+                breakdown.break_minutes(),
+                breakdown.absence_minutes(),
+            ))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
 
     Ok(daily_totals)
 }
