@@ -371,7 +371,7 @@ mod tests {
             Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
         );
-        let timesheet = Timesheet::new(window, calculate_time_breakdown(&[], window).unwrap());
+        let timesheet = Timesheet::new(window, calculate_time_breakdown(&[], window).unwrap(), 0);
 
         let rendered = MarkdownFormatter::format_timesheet(&timesheet);
 
@@ -379,7 +379,14 @@ mod tests {
             &rendered,
             r#"# Timesheet 2026-01-10
 
-_No tracked time._
+| Activity | Days | Active | Break |
+| :-- | --: | --: | --: |
+| TOTAL |  | 0m | 0m |
+
+| Metric | Value |
+| :-- | --: |
+| Week Target | 0m |
+| Balance | 0m |
 "#
         );
     }
@@ -390,26 +397,23 @@ _No tracked time._
             Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 16, 0, 0, 0).unwrap(),
         );
-        let timesheet = Timesheet::with_weekly_breakdown(
-            window,
-            calculate_time_breakdown(&[], window).unwrap(),
-            vec![
-                WeeklyTotals::new(
-                    Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
-                    8 * 60,
-                    0,
-                    0,
-                    0,
-                ),
-                WeeklyTotals::new(
-                    Local.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap().date_naive(),
-                    40 * 60,
-                    0,
-                    0,
-                    40 * 60,
-                ),
-            ],
-        );
+        let breakdown = calculate_time_breakdown(&[], window).unwrap();
+        let timesheet = Timesheet::new(window, breakdown, 0).with_weekly_totals(vec![
+            WeeklyTotals::new(
+                Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
+                8 * 60,
+                0,
+                0,
+                0,
+            ),
+            WeeklyTotals::new(
+                Local.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap().date_naive(),
+                40 * 60,
+                0,
+                0,
+                40 * 60,
+            ),
+        ]);
 
         let rendered = MarkdownFormatter::format_timesheet(&timesheet);
 
@@ -423,9 +427,15 @@ _No tracked time._
 
 | Week | Worked | Break | Absence | Target | Balance |
 | :-- | --: | --: | --: | --: | --: |
-| 2026-W01 | 8h | 0m | 0m | n/a | n/a |
+| 2026-W01 | 8h | 0m | 0m | 0m | +8h |
 | 2026-W02 | 40h | 0m | 0m | 40h | 0m |
-| TOTAL | 48h | 0m | 0m | 40h | 0m |
+| TOTAL | 48h | 0m | 0m | 40h | +8h |
+
+
+| Metric | Value |
+| :-- | --: |
+| Week Target | 0m |
+| Balance | 0m |
 "#
         );
     }
@@ -509,32 +519,28 @@ _No completed work items._
             Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap(),
         );
+        let breakdown = calculate_time_breakdown(&records, window).unwrap();
 
-        Timesheet::with_weekly_balance(
-            window,
-            calculate_time_breakdown(&records, window).unwrap(),
-            40 * 60,
-            vec![
-                DailyTotals::new(
-                    Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap().date_naive(),
-                    8 * 60,
-                    0,
-                    0,
-                ),
-                DailyTotals::new(
-                    Local.with_ymd_and_hms(2026, 1, 13, 0, 0, 0).unwrap().date_naive(),
-                    6 * 60,
-                    0,
-                    0,
-                ),
-                DailyTotals::new(
-                    Local.with_ymd_and_hms(2026, 1, 14, 0, 0, 0).unwrap().date_naive(),
-                    0,
-                    0,
-                    0,
-                ),
-            ],
-        )
+        Timesheet::new(window, breakdown, 40 * 60).with_daily_totals(vec![
+            DailyTotals::new(
+                Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap().date_naive(),
+                8 * 60,
+                0,
+                0,
+            ),
+            DailyTotals::new(
+                Local.with_ymd_and_hms(2026, 1, 13, 0, 0, 0).unwrap().date_naive(),
+                6 * 60,
+                0,
+                0,
+            ),
+            DailyTotals::new(
+                Local.with_ymd_and_hms(2026, 1, 14, 0, 0, 0).unwrap().date_naive(),
+                0,
+                0,
+                0,
+            ),
+        ])
     }
 
     fn activity_report() -> ActivityReport {

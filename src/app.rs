@@ -134,7 +134,10 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
     }
 
     pub fn timesheet(&self, scope: DateScope) -> anyhow::Result<Timesheet> {
-        self.build_timesheet(scope)
+        let window = self.time_window_for(&scope)?;
+        let records = self.store.records().iter().cloned().collect::<Vec<_>>();
+
+        build_timesheet(&records, window, &scope, &self.weekly_schedule)
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -159,13 +162,6 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
     }
 
     ///////////// FIXME: old stuff -> need to transform / update / whatever
-    fn build_timesheet(&self, scope: DateScope) -> anyhow::Result<Timesheet> {
-        let window = self.time_window_for(&scope)?;
-        let records = self.store.records().iter().cloned().collect::<Vec<_>>();
-
-        build_timesheet(&records, window, &scope, &self.weekly_schedule)
-    }
-
     pub fn activity(&self, scope: DateScope) -> anyhow::Result<ActivityReport> {
         let window = self.time_window_for(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
@@ -715,27 +711,30 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 (
+                    // 2026-W01: Schedule has value for Thu (Jan 1) + Fri (Jan 2)
                     Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
                     0,
-                    5 * 60 * 8,
-                    -(5 * 60 * 8)
+                    2 * 60 * 8,
+                    -(2 * 60 * 8)
                 ),
                 (
+                    // 2026-W02: Schedule has value for Mon-Fri (Jan 5-9)
                     Local.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap().date_naive(),
                     8 * 60,
                     40 * 60,
                     -(32 * 60)
                 ),
                 (
+                    // 2026-W03: 'Now' is 15 Jan, so Mon-Thu (Jan 12-15)
                     Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap().date_naive(),
                     8 * 60,
-                    40 * 60,
-                    -(32 * 60)
+                    32 * 60,
+                    -(24 * 60)
                 ),
             ]
         );
         assert!(timesheet.daily_totals().is_empty());
-        assert_eq!(timesheet.target_minutes(), 0);
+        assert_eq!(timesheet.target_minutes(), 88 * 60);
     }
 
     #[test]

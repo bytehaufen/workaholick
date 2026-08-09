@@ -16,31 +16,22 @@ pub struct Timesheet {
 }
 
 impl Timesheet {
-    pub(crate) fn new(window: TimeWindow, breakdown: TimeBreakdown) -> Self {
+    pub(crate) fn new(window: TimeWindow, breakdown: TimeBreakdown, target_minutes: i64) -> Self {
         Self {
             window,
             breakdown,
-            target_minutes: 0,
+            target_minutes,
             daily_totals: Vec::new(),
             weekly_totals: Vec::new(),
         }
     }
 
-    pub(crate) fn with_weekly_balance(
-        window: TimeWindow,
-        breakdown: TimeBreakdown,
-        target_minutes: i64,
-        daily_totals: Vec<DailyTotals>,
-    ) -> Self {
-        Self { window, breakdown, target_minutes, daily_totals, weekly_totals: Vec::new() }
+    pub(crate) fn with_daily_totals(self, daily_totals: Vec<DailyTotals>) -> Self {
+        Self { daily_totals, ..self }
     }
 
-    pub(crate) fn with_weekly_breakdown(
-        window: TimeWindow,
-        breakdown: TimeBreakdown,
-        weekly_totals: Vec<WeeklyTotals>,
-    ) -> Self {
-        Self { window, breakdown, target_minutes: 0, daily_totals: Vec::new(), weekly_totals }
+    pub(crate) fn with_weekly_totals(self, weekly_totals: Vec<WeeklyTotals>) -> Self {
+        Self { weekly_totals, ..self }
     }
 
     pub(crate) fn window(&self) -> TimeWindow {

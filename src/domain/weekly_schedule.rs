@@ -13,10 +13,6 @@ impl WeeklySchedule {
     pub(crate) fn minutes_for(&self, weekday: Weekday) -> i64 {
         self.day_minutes[weekday.num_days_from_monday() as usize]
     }
-
-    pub(crate) fn target_minutes(&self) -> i64 {
-        self.day_minutes.iter().sum()
-    }
 }
 
 #[cfg(test)]
@@ -40,10 +36,5 @@ mod tests {
         assert_eq!(schedule.minutes_for(Weekday::Fri), 5);
         assert_eq!(schedule.minutes_for(Weekday::Sat), 6);
         assert_eq!(schedule.minutes_for(Weekday::Sun), 7);
-    }
-
-    #[test]
-    fn target_minutes_returns_sum() {
-        assert_eq!(weekly_schedule().target_minutes(), 28);
     }
 }

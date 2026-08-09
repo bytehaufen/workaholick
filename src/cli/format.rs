@@ -684,16 +684,13 @@ mod tests {
             work_record(5, 13, 6, 30, WorkCommand::BreakEnd { description: None }),
             work_record(6, 13, 8, 0, WorkCommand::End { title: "done".into(), description: None }),
         ];
-        let timesheet = Timesheet::with_weekly_balance(
-            window,
-            calculate_time_breakdown(&records, window).unwrap(),
-            40 * 60,
-            vec![
-                DailyTotals::new(ts(12, 0, 0).date_naive(), 8 * 60, 0, 0),
-                DailyTotals::new(ts(13, 0, 0).date_naive(), 6 * 60, 0, 0),
-                DailyTotals::new(ts(14, 0, 0).date_naive(), 0, 0, 0),
-            ],
-        );
+        let timesheet =
+            Timesheet::new(window, calculate_time_breakdown(&records, window).unwrap(), 40 * 60)
+                .with_daily_totals(vec![
+                    DailyTotals::new(ts(12, 0, 0).date_naive(), 8 * 60, 0, 0),
+                    DailyTotals::new(ts(13, 0, 0).date_naive(), 6 * 60, 0, 0),
+                    DailyTotals::new(ts(14, 0, 0).date_naive(), 0, 0, 0),
+                ]);
 
         let display = prepare_timesheet_view(&timesheet);
 
@@ -756,20 +753,17 @@ mod tests {
     #[test]
     fn prepare_timesheet_view_includes_weekly_balance_breakdown() {
         let window = TimeWindow::new(ts(1, 0, 0), ts(16, 0, 0));
-        let timesheet = Timesheet::with_weekly_breakdown(
-            window,
-            calculate_time_breakdown(&[], window).unwrap(),
-            vec![
-                WeeklyTotals::new(
-                    Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
-                    8 * 60,
-                    0,
-                    0,
-                    0,
-                ),
-                WeeklyTotals::new(ts(5, 0, 0).date_naive(), 40 * 60, 0, 0, 40 * 60),
-            ],
-        );
+        let breakdown = calculate_time_breakdown(&[], window).unwrap();
+        let timesheet = Timesheet::new(window, breakdown, 0).with_weekly_totals(vec![
+            WeeklyTotals::new(
+                Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
+                8 * 60,
+                0,
+                0,
+                0,
+            ),
+            WeeklyTotals::new(ts(5, 0, 0).date_naive(), 40 * 60, 0, 0, 40 * 60),
+        ]);
 
         let display = prepare_timesheet_view(&timesheet);
 
@@ -781,8 +775,8 @@ mod tests {
                     worked: "8h".into(),
                     break_time: "0m".into(),
                     absence: "0m".into(),
-                    target: "n/a".into(),
-                    balance: "n/a".into(),
+                    target: "0m".into(),
+                    balance: "+8h".into(),
                 },
                 WeeklyTotalsView {
                     week: "2026-W02".into(),
@@ -802,11 +796,11 @@ mod tests {
                 break_time: "0m".into(),
                 absence: "0m".into(),
                 target: "40h".into(),
-                balance: "0m".into(),
+                balance: "+8h".into(),
             })
         );
         assert!(display.daily_totals.is_empty());
-        assert_eq!(&display.target, "0");
-        assert_eq!(&display.balance, "0");
+        assert_eq!(&display.target, "0m");
+        assert_eq!(&display.balance, "0m");
     }
 }

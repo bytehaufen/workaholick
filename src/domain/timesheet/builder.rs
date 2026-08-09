@@ -1,4 +1,4 @@
-use chrono::Days;
+use chrono::{Datelike, Days};
 
 use crate::domain::{
     DailyTotals, Period, Record, Timesheet, WeeklySchedule, WeeklyTotals, calculate_time_breakdown,
@@ -12,30 +12,30 @@ pub(crate) fn build_timesheet(
     weekly_schedule: &WeeklySchedule,
 ) -> anyhow::Result<Timesheet> {
     let breakdown = calculate_time_breakdown(records, window)?;
+    let target_minutes = calculate_target_minutes(weekly_schedule, window);
 
+    let timesheet = Timesheet::new(window, breakdown, target_minutes);
     match scope {
         DateScope::Period { period: Period::Week, .. } => {
             let daily_totals = calculate_daily_totals(records, window)?;
-            Ok(Timesheet::with_weekly_balance(
-                window,
-                breakdown,
-                weekly_schedule.target_minutes(),
-                daily_totals,
-            ))
+            Ok(timesheet.with_daily_totals(daily_totals))
         }
-        DateScope::Period { period: Period::Month | Period::Year, .. } => {
-            let weekly_totals =
-                calculate_weekly_totals(records, window, weekly_schedule.target_minutes())?;
-            Ok(Timesheet::with_weekly_breakdown(window, breakdown, weekly_totals))
+        DateScope::Period { period: Period::Month | Period::Year, .. }
+        | DateScope::Range { .. } => {
+            let weekly_totals = calculate_weekly_totals(records, window, weekly_schedule)?;
+            Ok(timesheet.with_weekly_totals(weekly_totals))
         }
-        _ => Ok(Timesheet::new(window, breakdown)),
     }
+}
+
+fn calculate_target_minutes(schedule: &WeeklySchedule, window: TimeWindow) -> i64 {
+    TimeWindow::dates_in(window).map(|date| schedule.minutes_for(date.weekday())).sum()
 }
 
 fn calculate_weekly_totals(
     records: &[Record],
     window: TimeWindow,
-    target_minutes: i64,
+    weekly_schedule: &WeeklySchedule,
 ) -> anyhow::Result<Vec<WeeklyTotals>> {
     let first_week_start = reporting::start_of_week(window.start().date_naive());
 
@@ -58,6 +58,8 @@ fn calculate_weekly_totals(
         let worked_minutes = week_time_breakdown.work_active_minutes();
         let break_minutes = week_time_breakdown.break_minutes();
         let absence_minutes = week_time_breakdown.absence_minutes();
+
+        let target_minutes = calculate_target_minutes(weekly_schedule, week_window);
 
         Ok(WeeklyTotals::new(
             week_start,
