@@ -236,7 +236,6 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
             worked: format_duration(week.worked_minutes()),
             break_time: format_duration(week.break_minutes()),
             absence: format_duration(week.absence_minutes()),
-            // target: week.target_minutes().map(format_duration).unwrap_or_else(|| "n/a".to_string()),
             target: format_duration(week.target_minutes()),
             balance: format_signed_duration(week.balance_minutes()),
         })
@@ -277,9 +276,7 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
         daily_totals,
         weekly_totals,
         weekly_totals_total,
-        // target: timesheet.target_minutes().map(format_duration),
         target: format_duration(timesheet.target_minutes()),
-        // balance: timesheet.balance_minutes().map(format_signed_duration),
         balance: format_signed_duration(timesheet.balance_minutes()),
     }
 }
@@ -471,6 +468,7 @@ fn is_midnight(boundary: DateTime<Local>) -> bool {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::domain::{
         DailyTotals, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
@@ -752,15 +750,36 @@ mod tests {
 
     #[test]
     fn prepare_timesheet_view_includes_weekly_balance_breakdown() {
-        let window = TimeWindow::new(ts(1, 0, 0), ts(16, 0, 0));
-        let breakdown = calculate_time_breakdown(&[], window).unwrap();
-        let timesheet = Timesheet::new(window, breakdown, 0).with_weekly_totals(vec![
+        let window = TimeWindow::new(ts(1, 0, 0), ts(12, 0, 0));
+        let breakdown = calculate_time_breakdown(
+            &[
+                work_record(1, 1, 8, 0, WorkCommand::Start { context: WorkContext::Home }),
+                work_record(
+                    2,
+                    1,
+                    16,
+                    0,
+                    WorkCommand::End { title: "".to_string(), description: None },
+                ),
+                work_record(3, 5, 0, 0, WorkCommand::Start { context: WorkContext::Home }),
+                work_record(
+                    4,
+                    6,
+                    16,
+                    0,
+                    WorkCommand::End { title: "".to_string(), description: None },
+                ),
+            ],
+            window,
+        )
+        .unwrap();
+        let timesheet = Timesheet::new(window, breakdown, 56 * 60).with_weekly_totals(vec![
             WeeklyTotals::new(
                 Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
                 8 * 60,
                 0,
                 0,
-                0,
+                16 * 60,
             ),
             WeeklyTotals::new(ts(5, 0, 0).date_naive(), 40 * 60, 0, 0, 40 * 60),
         ]);
@@ -775,8 +794,8 @@ mod tests {
                     worked: "8h".into(),
                     break_time: "0m".into(),
                     absence: "0m".into(),
-                    target: "0m".into(),
-                    balance: "+8h".into(),
+                    target: "16h".into(),
+                    balance: "-8h".into(),
                 },
                 WeeklyTotalsView {
                     week: "2026-W02".into(),
@@ -795,12 +814,12 @@ mod tests {
                 worked: "48h".into(),
                 break_time: "0m".into(),
                 absence: "0m".into(),
-                target: "40h".into(),
-                balance: "+8h".into(),
+                target: "56h".into(),
+                balance: "-8h".into(),
             })
         );
         assert!(display.daily_totals.is_empty());
-        assert_eq!(&display.target, "0m");
-        assert_eq!(&display.balance, "0m");
+        assert_eq!(&display.target, "56h");
+        assert_eq!(&display.balance, "-8h");
     }
 }

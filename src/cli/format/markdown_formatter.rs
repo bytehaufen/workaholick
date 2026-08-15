@@ -83,22 +83,25 @@ impl Formatter for MarkdownFormatter {
         let has_weekly_totals = !timesheet_view.weekly_totals.is_empty();
         output.push_str(&format!("# {}\n\n", timesheet_view.title));
 
-        output.push_str("| Activity | Days | Active | Break |\n");
-        output.push_str("| :-- | --: | --: | --: |\n");
+        if timesheet_view.rows.is_empty() {
+            output.push_str("_No tracked time._\n");
+        } else {
+            output.push_str("| Activity | Days | Active | Break |\n");
+            output.push_str("| :-- | --: | --: | --: |\n");
 
-        timesheet_view.rows.iter().chain(std::iter::once(&timesheet_view.total)).for_each(|row| {
-            output.push_str(&format!(
-                "| {} | {} | {} | {} |\n",
-                escape_markdown_table_cell(&row.activity),
-                row.day_count,
-                row.active,
-                row.break_time,
-            ));
-        });
-
-        if has_daily_totals || has_weekly_totals {
-            output.push('\n');
+            timesheet_view.rows.iter().chain(std::iter::once(&timesheet_view.total)).for_each(
+                |row| {
+                    output.push_str(&format!(
+                        "| {} | {} | {} | {} |\n",
+                        escape_markdown_table_cell(&row.activity),
+                        row.day_count,
+                        row.active,
+                        row.break_time,
+                    ));
+                },
+            );
         }
+        output.push('\n');
 
         if has_daily_totals {
             output.push_str("| Day | Worked | Break | Absence |\n");
@@ -114,9 +117,7 @@ impl Formatter for MarkdownFormatter {
                 ));
             });
 
-            if has_weekly_totals {
-                output.push('\n');
-            }
+            output.push('\n');
         }
 
         if has_weekly_totals {
@@ -150,9 +151,9 @@ impl Formatter for MarkdownFormatter {
             output.push('\n');
         }
 
-        output.push_str("\n| Metric | Value |\n");
+        output.push_str("| Metric | Value |\n");
         output.push_str("| :-- | --: |\n");
-        output.push_str(&format!("| Week Target | {} |\n", timesheet_view.target));
+        output.push_str(&format!("| Target | {} |\n", timesheet_view.target));
         output.push_str(&format!("| Balance | {} |\n", timesheet_view.balance));
 
         output
@@ -359,7 +360,7 @@ mod tests {
 
 | Metric | Value |
 | :-- | --: |
-| Week Target | 40h |
+| Target | 40h |
 | Balance | -34h 15m |
 "#
         );
@@ -379,13 +380,11 @@ mod tests {
             &rendered,
             r#"# Timesheet 2026-01-10
 
-| Activity | Days | Active | Break |
-| :-- | --: | --: | --: |
-| TOTAL |  | 0m | 0m |
+_No tracked time._
 
 | Metric | Value |
 | :-- | --: |
-| Week Target | 0m |
+| Target | 0m |
 | Balance | 0m |
 "#
         );
@@ -395,16 +394,37 @@ mod tests {
     fn markdown_format_timesheet_renders_weekly_balance_breakdown() {
         let window = TimeWindow::new(
             Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
-            Local.with_ymd_and_hms(2026, 1, 16, 0, 0, 0).unwrap(),
+            Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
         );
-        let breakdown = calculate_time_breakdown(&[], window).unwrap();
-        let timesheet = Timesheet::new(window, breakdown, 0).with_weekly_totals(vec![
+        let breakdown = calculate_time_breakdown(
+            &[
+                work_record(1, 1, 8, 0, WorkCommand::Start { context: WorkContext::Home }),
+                work_record(
+                    2,
+                    1,
+                    16,
+                    0,
+                    WorkCommand::End { title: "".to_string(), description: None },
+                ),
+                work_record(3, 5, 0, 0, WorkCommand::Start { context: WorkContext::Home }),
+                work_record(
+                    4,
+                    6,
+                    16,
+                    0,
+                    WorkCommand::End { title: "".to_string(), description: None },
+                ),
+            ],
+            window,
+        )
+        .unwrap();
+        let timesheet = Timesheet::new(window, breakdown, 56 * 60).with_weekly_totals(vec![
             WeeklyTotals::new(
                 Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
                 8 * 60,
                 0,
                 0,
-                0,
+                16 * 60,
             ),
             WeeklyTotals::new(
                 Local.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap().date_naive(),
@@ -419,23 +439,23 @@ mod tests {
 
         assert_eq!(
             &rendered,
-            r#"# Timesheet 2026-01-01 .. 2026-01-15
+            r#"# Timesheet 2026-01-01 .. 2026-01-11
 
 | Activity | Days | Active | Break |
 | :-- | --: | --: | --: |
-| TOTAL |  | 0m | 0m |
+| work (home) | 3 | 48h | 0m |
+| TOTAL |  | 48h | 0m |
 
 | Week | Worked | Break | Absence | Target | Balance |
 | :-- | --: | --: | --: | --: | --: |
-| 2026-W01 | 8h | 0m | 0m | 0m | +8h |
+| 2026-W01 | 8h | 0m | 0m | 16h | -8h |
 | 2026-W02 | 40h | 0m | 0m | 40h | 0m |
-| TOTAL | 48h | 0m | 0m | 40h | +8h |
-
+| TOTAL | 48h | 0m | 0m | 56h | -8h |
 
 | Metric | Value |
 | :-- | --: |
-| Week Target | 0m |
-| Balance | 0m |
+| Target | 56h |
+| Balance | -8h |
 "#
         );
     }
