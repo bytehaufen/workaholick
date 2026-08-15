@@ -682,13 +682,16 @@ mod tests {
             work_record(5, 13, 6, 30, WorkCommand::BreakEnd { description: None }),
             work_record(6, 13, 8, 0, WorkCommand::End { title: "done".into(), description: None }),
         ];
-        let timesheet =
-            Timesheet::new(window, calculate_time_breakdown(&records, window).unwrap(), 40 * 60)
-                .with_daily_totals(vec![
-                    DailyTotals::new(ts(12, 0, 0).date_naive(), 8 * 60, 0, 0),
-                    DailyTotals::new(ts(13, 0, 0).date_naive(), 6 * 60, 0, 0),
-                    DailyTotals::new(ts(14, 0, 0).date_naive(), 0, 0, 0),
-                ]);
+        let timesheet = Timesheet::new(
+            window,
+            calculate_time_breakdown(&records, window, &empty_schedule()).unwrap(),
+            40 * 60,
+        )
+        .with_daily_totals(vec![
+            DailyTotals::new(ts(12, 0, 0).date_naive(), 8 * 60, 0, 0),
+            DailyTotals::new(ts(13, 0, 0).date_naive(), 6 * 60, 0, 0),
+            DailyTotals::new(ts(14, 0, 0).date_naive(), 0, 0, 0),
+        ]);
 
         let display = prepare_timesheet_view(&timesheet);
 
@@ -771,6 +774,7 @@ mod tests {
                 ),
             ],
             window,
+            &empty_schedule(),
         )
         .unwrap();
         let timesheet = Timesheet::new(window, breakdown, 56 * 60).with_weekly_totals(vec![

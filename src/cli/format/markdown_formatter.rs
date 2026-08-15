@@ -238,13 +238,16 @@ fn escape_markdown_table_cell(value: &str) -> String {
 mod tests {
     use chrono::{Local, TimeZone};
 
-    use crate::domain::{
-        DailyTotals, Record, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
-        activity_report::{ActivityReport, WorkItemRow},
-        calculate_time_breakdown,
-        reporting::TimeWindow,
-    };
     use crate::test_support::work_record;
+    use crate::{
+        domain::{
+            DailyTotals, Record, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
+            activity_report::{ActivityReport, WorkItemRow},
+            calculate_time_breakdown,
+            reporting::TimeWindow,
+        },
+        test_support::empty_schedule,
+    };
 
     use super::*;
 
@@ -372,7 +375,11 @@ mod tests {
             Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
         );
-        let timesheet = Timesheet::new(window, calculate_time_breakdown(&[], window).unwrap(), 0);
+        let timesheet = Timesheet::new(
+            window,
+            calculate_time_breakdown(&[], window, &empty_schedule()).unwrap(),
+            0,
+        );
 
         let rendered = MarkdownFormatter::format_timesheet(&timesheet);
 
@@ -416,6 +423,7 @@ _No tracked time._
                 ),
             ],
             window,
+            &empty_schedule(),
         )
         .unwrap();
         let timesheet = Timesheet::new(window, breakdown, 56 * 60).with_weekly_totals(vec![
@@ -539,7 +547,7 @@ _No completed work items._
             Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
             Local.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap(),
         );
-        let breakdown = calculate_time_breakdown(&records, window).unwrap();
+        let breakdown = calculate_time_breakdown(&records, window, &empty_schedule()).unwrap();
 
         Timesheet::new(window, breakdown, 40 * 60).with_daily_totals(vec![
             DailyTotals::new(

@@ -11,13 +11,13 @@ pub(crate) fn build_timesheet(
     scope: &DateScope,
     weekly_schedule: &WeeklySchedule,
 ) -> anyhow::Result<Timesheet> {
-    let breakdown = calculate_time_breakdown(records, window)?;
+    let breakdown = calculate_time_breakdown(records, window, weekly_schedule)?;
     let target_minutes = calculate_target_minutes(weekly_schedule, window);
 
     let timesheet = Timesheet::new(window, breakdown, target_minutes);
     match scope {
         DateScope::Period { period: Period::Week, .. } => {
-            let daily_totals = calculate_daily_totals(records, window)?;
+            let daily_totals = calculate_daily_totals(records, window, weekly_schedule)?;
             Ok(timesheet.with_daily_totals(daily_totals))
         }
         DateScope::Period { period: Period::Month | Period::Year, .. }
@@ -53,7 +53,7 @@ fn calculate_weekly_totals(
         let week_window =
             TimeWindow::new(full_week_start.max(window.start()), full_week_end.min(window.end()));
 
-        let week_time_breakdown = calculate_time_breakdown(records, week_window)?;
+        let week_time_breakdown = calculate_time_breakdown(records, week_window, weekly_schedule)?;
 
         let worked_minutes = week_time_breakdown.work_active_minutes();
         let break_minutes = week_time_breakdown.break_minutes();
@@ -75,6 +75,7 @@ fn calculate_weekly_totals(
 fn calculate_daily_totals(
     records: &[Record],
     window: TimeWindow,
+    weekly_schedule: &WeeklySchedule,
 ) -> anyhow::Result<Vec<DailyTotals>> {
     let daily_totals = TimeWindow::dates_in(window)
         .map(|date| -> anyhow::Result<DailyTotals> {
@@ -82,7 +83,7 @@ fn calculate_daily_totals(
             let day_end = reporting::start_of_day(reporting::next_day(date)).min(window.end());
             let day_window = TimeWindow::new(day_start, day_end);
 
-            let breakdown = calculate_time_breakdown(records, day_window)?;
+            let breakdown = calculate_time_breakdown(records, day_window, weekly_schedule)?;
 
             Ok(DailyTotals::new(
                 date,

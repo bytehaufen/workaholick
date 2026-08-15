@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use chrono::{DateTime, Local, NaiveDate, TimeDelta};
+use chrono::{DateTime, Datelike, Local, NaiveDate, TimeDelta};
 
 use crate::domain::{
-    AbsenceKind, Record, TimelineValidationError, WorkContext, reporting::TimeWindow,
-    transition_day_state, work_state::DayState,
+    AbsenceKind, AbsencePortion, AbsenceRecord, Record, TimelineValidationError, WeeklySchedule,
+    WorkContext, reporting::TimeWindow, transition_day_state, work_state::DayState,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -168,9 +168,25 @@ fn finalize_open_bucket(
     }
 }
 
+fn add_absence_minutes(
+    breakdown: &mut TimeBreakdownMap,
+    kind: AbsenceKind,
+    date: NaiveDate,
+    minutes: i64,
+) {
+    if minutes == 0 {
+        return;
+    }
+
+    let bucket = breakdown.entry(TimeCategory::Absence(kind)).or_default();
+    *bucket.active_mut() += TimeDelta::minutes(minutes);
+    _ = bucket.dates.insert(date);
+}
+
 pub(crate) fn calculate_time_breakdown(
     records: &[Record],
     window: TimeWindow,
+    weekly_schedule: &WeeklySchedule,
 ) -> Result<TimeBreakdown, TimelineValidationError> {
     struct State {
         state: DayState,
@@ -254,13 +270,63 @@ pub(crate) fn calculate_time_breakdown(
     let State { state, last_timestamp, mut breakdown } = result;
     finalize_open_bucket(&mut breakdown, state, last_timestamp, window);
 
+    add_absence_credits(&mut breakdown, records, window, weekly_schedule);
+
     Ok(TimeBreakdown(breakdown))
+}
+
+fn add_absence_credits(
+    breakdown: &mut TimeBreakdownMap,
+    records: &[Record],
+    window: TimeWindow,
+    weekly_schedule: &WeeklySchedule,
+) {
+    let dates = TimeWindow::dates_in(window).collect::<HashSet<_>>();
+
+    // Group records by day
+    let mut absence_records_by_day = records
+        .iter()
+        .filter_map(Record::as_absence)
+        .filter(|absence_record| dates.contains(absence_record.date()))
+        .fold(HashMap::<NaiveDate, Vec<&AbsenceRecord>>::new(), |mut by_date, absence_record| {
+            by_date.entry(*absence_record.date()).or_default().push(absence_record);
+            by_date
+        });
+
+    absence_records_by_day.iter_mut().for_each(|(date, absence_records)| {
+        absence_records.sort_by_key(|absence_record| *absence_record.id());
+
+        let scheduled_minutes = weekly_schedule.minutes_for(date.weekday());
+        let half_day_count = absence_records
+            .iter()
+            .filter(|record| *record.portion() == AbsencePortion::HalfDay)
+            .count();
+        let mut is_first_half_day = true;
+
+        absence_records.iter().for_each(|&absence_record| {
+            let minutes = match *absence_record.portion() {
+                AbsencePortion::FullDay => scheduled_minutes,
+                AbsencePortion::HalfDay => {
+                    let remainder = if half_day_count == 2 && is_first_half_day {
+                        scheduled_minutes % 2
+                    } else {
+                        0
+                    };
+                    is_first_half_day = false;
+
+                    scheduled_minutes / 2 + remainder
+                }
+            };
+
+            add_absence_minutes(breakdown, *absence_record.kind(), *date, minutes);
+        });
+    });
 }
 
 #[cfg(test)]
 mod test {
     use crate::domain::{Record, WorkCommand};
-    use crate::test_support::ts;
+    use crate::test_support::{absence_record, date, empty_schedule, ts, work_record};
 
     use super::*;
 
@@ -268,24 +334,27 @@ mod test {
         TimeWindow::new(ts(start_day, start_hour, 0), ts(end_day, end_hour, 0))
     }
 
-    fn record(id: u64, day: u32, hour: u32, command: WorkCommand) -> Record {
-        Record::from_input(
-            id.into(),
-            crate::domain::RecordInput::Work(crate::domain::WorkRecordInput::new(
-                ts(day, hour, 0),
-                command,
-            )),
-        )
-    }
-
     fn summarize(window: TimeWindow, records: impl IntoIterator<Item = Record>) -> TimeBreakdown {
         let records = records.into_iter().collect::<Vec<_>>();
 
-        calculate_time_breakdown(&records, window).unwrap()
+        calculate_time_breakdown(&records, window, &empty_schedule()).unwrap()
+    }
+
+    fn summarize_with_schedule(
+        window: TimeWindow,
+        records: impl IntoIterator<Item = Record>,
+        schedule: &WeeklySchedule,
+    ) -> TimeBreakdown {
+        let records = records.into_iter().collect::<Vec<_>>();
+        calculate_time_breakdown(&records, window, schedule).unwrap()
     }
 
     fn hours(n: i64) -> TimeDelta {
         TimeDelta::hours(n)
+    }
+
+    fn minutes(n: i64) -> TimeDelta {
+        TimeDelta::minutes(n)
     }
 
     fn assert_bucket(
@@ -312,16 +381,23 @@ mod test {
         let breakdown = summarize(
             window(28, 0, 28, 18),
             [
-                record(1, 28, 8, WorkCommand::Start { context: WorkContext::Home }),
-                record(
+                work_record(1, 28, 8, 0, WorkCommand::Start { context: WorkContext::Home }),
+                work_record(
                     2,
                     28,
                     9,
+                    0,
                     WorkCommand::Log { title: "still working".into(), description: None },
                 ),
-                record(3, 28, 12, WorkCommand::BreakStart),
-                record(4, 28, 13, WorkCommand::BreakEnd { description: None }),
-                record(5, 28, 17, WorkCommand::End { title: "done".into(), description: None }),
+                work_record(3, 28, 12, 0, WorkCommand::BreakStart),
+                work_record(4, 28, 13, 0, WorkCommand::BreakEnd { description: None }),
+                work_record(
+                    5,
+                    28,
+                    17,
+                    0,
+                    WorkCommand::End { title: "done".into(), description: None },
+                ),
             ],
         );
 
@@ -336,11 +412,12 @@ mod test {
         let breakdown = summarize(
             window(28, 0, 28, 12),
             [
-                record(1, 28, 8, WorkCommand::Start { context: WorkContext::Home }),
-                record(
+                work_record(1, 28, 8, 0, WorkCommand::Start { context: WorkContext::Home }),
+                work_record(
                     2,
                     28,
                     10,
+                    0,
                     WorkCommand::Log { title: "still working".into(), description: None },
                 ),
             ],
@@ -356,8 +433,8 @@ mod test {
         let breakdown = summarize(
             window(28, 0, 28, 12),
             [
-                record(1, 28, 8, WorkCommand::Start { context: WorkContext::Home }),
-                record(2, 28, 10, WorkCommand::BreakStart),
+                work_record(1, 28, 8, 0, WorkCommand::Start { context: WorkContext::Home }),
+                work_record(2, 28, 10, 0, WorkCommand::BreakStart),
             ],
         );
 
@@ -371,8 +448,14 @@ mod test {
         let breakdown = summarize(
             window(28, 0, 30, 0),
             [
-                record(1, 27, 10, WorkCommand::Start { context: WorkContext::Home }),
-                record(2, 29, 12, WorkCommand::End { title: "done".into(), description: None }),
+                work_record(1, 27, 10, 0, WorkCommand::Start { context: WorkContext::Home }),
+                work_record(
+                    2,
+                    29,
+                    12,
+                    0,
+                    WorkCommand::End { title: "done".into(), description: None },
+                ),
             ],
         );
 
@@ -394,10 +477,16 @@ mod test {
         let breakdown = summarize(
             window(28, 0, 29, 0),
             [
-                record(1, 27, 8, WorkCommand::Start { context: WorkContext::Home }),
-                record(2, 27, 12, WorkCommand::BreakStart),
-                record(3, 28, 10, WorkCommand::BreakEnd { description: None }),
-                record(4, 28, 12, WorkCommand::End { title: "done".into(), description: None }),
+                work_record(1, 27, 8, 0, WorkCommand::Start { context: WorkContext::Home }),
+                work_record(2, 27, 12, 0, WorkCommand::BreakStart),
+                work_record(3, 28, 10, 0, WorkCommand::BreakEnd { description: None }),
+                work_record(
+                    4,
+                    28,
+                    12,
+                    0,
+                    WorkCommand::End { title: "done".into(), description: None },
+                ),
             ],
         );
 
@@ -410,7 +499,7 @@ mod test {
 
         let breakdown = summarize(
             window(28, 0, 29, 0),
-            [record(1, 27, 8, WorkCommand::Start { context: WorkContext::Home })],
+            [work_record(1, 27, 8, 0, WorkCommand::Start { context: WorkContext::Home })],
         );
 
         assert_bucket(&breakdown, kind, hours(24), TimeDelta::zero());
@@ -421,13 +510,128 @@ mod test {
     fn breakdown_rejects_invalid_transition() {
         let err = calculate_time_breakdown(
             &[
-                record(1, 28, 8, WorkCommand::Start { context: WorkContext::Home }),
-                record(2, 28, 9, WorkCommand::BreakEnd { description: None }),
+                work_record(1, 28, 8, 0, WorkCommand::Start { context: WorkContext::Home }),
+                work_record(2, 28, 9, 0, WorkCommand::BreakEnd { description: None }),
             ],
             window(28, 0, 28, 12),
+            &empty_schedule(),
         )
         .unwrap_err();
 
         assert_eq!(err.to_string(), "cannot end break when not breaking for 2026-01-28");
+    }
+
+    #[test]
+    fn breakdown_credits_full_day_absence_from_schedule() {
+        let window = window(12, 0, 13, 0);
+        let schedule = WeeklySchedule::new([8 * 60, 0, 0, 0, 0, 0, 0]);
+        let records = [absence_record(1, 12, AbsenceKind::Vacation, AbsencePortion::FullDay)];
+
+        let breakdown = summarize_with_schedule(window, records, &schedule);
+
+        assert_bucket(&breakdown, TimeCategory::Absence(AbsenceKind::Vacation), hours(8), hours(0));
+        assert_bucket_dates(&breakdown, TimeCategory::Absence(AbsenceKind::Vacation), &[date(12)]);
+    }
+
+    #[test]
+    fn breakdown_credits_half_day_absence_from_schedule() {
+        let window = window(12, 0, 13, 0);
+        let schedule = WeeklySchedule::new([7 * 60 + 1, 0, 0, 0, 0, 0, 0]);
+        let records = [absence_record(1, 12, AbsenceKind::Vacation, AbsencePortion::HalfDay)];
+
+        let breakdown = summarize_with_schedule(window, records, &schedule);
+
+        assert_bucket(
+            &breakdown,
+            TimeCategory::Absence(AbsenceKind::Vacation),
+            minutes(210),
+            hours(0),
+        );
+        assert_bucket_dates(&breakdown, TimeCategory::Absence(AbsenceKind::Vacation), &[date(12)]);
+    }
+
+    #[test]
+    fn breakdown_credits_two_half_days_as_one_full_day() {
+        let window = window(12, 0, 13, 0);
+        let schedule = WeeklySchedule::new([7 * 60 + 1, 0, 0, 0, 0, 0, 0]);
+        let records = [
+            absence_record(2, 12, AbsenceKind::Vacation, AbsencePortion::HalfDay),
+            absence_record(1, 12, AbsenceKind::Sick, AbsencePortion::HalfDay),
+        ];
+
+        let breakdown = summarize_with_schedule(window, records, &schedule);
+
+        assert_bucket(&breakdown, TimeCategory::Absence(AbsenceKind::Sick), minutes(211), hours(0));
+        assert_bucket(
+            &breakdown,
+            TimeCategory::Absence(AbsenceKind::Vacation),
+            minutes(210),
+            hours(0),
+        );
+        assert_bucket_dates(&breakdown, TimeCategory::Absence(AbsenceKind::Sick), &[date(12)]);
+        assert_bucket_dates(&breakdown, TimeCategory::Absence(AbsenceKind::Vacation), &[date(12)]);
+    }
+
+    #[test]
+    fn breakdown_ignores_absence_outside_window() {
+        let window = window(12, 0, 13, 0);
+        let schedule = WeeklySchedule::new([8 * 60, 8 * 60, 8 * 60, 8 * 60, 8 * 60, 0, 0]);
+        let records = [
+            absence_record(1, 12, AbsenceKind::Vacation, AbsencePortion::HalfDay),
+            absence_record(2, 13, AbsenceKind::Vacation, AbsencePortion::HalfDay),
+        ];
+
+        let breakdown = summarize_with_schedule(window, records, &schedule);
+
+        assert_bucket(&breakdown, TimeCategory::Absence(AbsenceKind::Vacation), hours(4), hours(0));
+        assert_bucket_dates(&breakdown, TimeCategory::Absence(AbsenceKind::Vacation), &[date(12)]);
+    }
+
+    #[test]
+    fn breakdown_credits_current_day_absence_for_partial_window() {
+        let window = window(12, 0, 12, 12);
+        let schedule = WeeklySchedule::new([8 * 60, 0, 0, 0, 0, 0, 0]);
+        let records = [absence_record(1, 12, AbsenceKind::Vacation, AbsencePortion::FullDay)];
+
+        let breakdown = summarize_with_schedule(window, records, &schedule);
+
+        assert_bucket(&breakdown, TimeCategory::Absence(AbsenceKind::Vacation), hours(8), hours(0));
+        assert_bucket_dates(&breakdown, TimeCategory::Absence(AbsenceKind::Vacation), &[date(12)]);
+    }
+
+    #[test]
+    fn breakdown_credits_zero_for_zero_scheduled_day() {
+        let window = window(17, 0, 18, 12);
+        let schedule = WeeklySchedule::new([8 * 60, 8 * 60, 8 * 60, 8 * 60, 8 * 60, 0, 0]);
+        let records = [absence_record(1, 12, AbsenceKind::Vacation, AbsencePortion::FullDay)];
+
+        let breakdown = summarize_with_schedule(window, records, &schedule);
+
+        assert_bucket(&breakdown, TimeCategory::Absence(AbsenceKind::Vacation), hours(0), hours(0));
+        assert_bucket_dates(&breakdown, TimeCategory::Absence(AbsenceKind::Vacation), &[]);
+    }
+
+    #[test]
+    fn breakdown_groups_absences_of_same_kind() {
+        let window = window(12, 0, 14, 0);
+        let schedule = WeeklySchedule::new([8 * 60, 6 * 60, 0, 0, 0, 0, 0]);
+        let records = [
+            absence_record(1, 12, AbsenceKind::Vacation, AbsencePortion::FullDay),
+            absence_record(1, 13, AbsenceKind::Vacation, AbsencePortion::FullDay),
+        ];
+
+        let breakdown = summarize_with_schedule(window, records, &schedule);
+
+        assert_bucket(
+            &breakdown,
+            TimeCategory::Absence(AbsenceKind::Vacation),
+            hours(14),
+            hours(0),
+        );
+        assert_bucket_dates(
+            &breakdown,
+            TimeCategory::Absence(AbsenceKind::Vacation),
+            &[date(12), date(13)],
+        );
     }
 }

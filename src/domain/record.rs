@@ -74,6 +74,10 @@ impl Record {
     pub fn as_work(&self) -> Option<&WorkRecord> {
         if let Record::Work(record) = self { Some(record) } else { None }
     }
+
+    pub fn as_absence(&self) -> Option<&AbsenceRecord> {
+        if let Record::Absence(record) = self { Some(record) } else { None }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
