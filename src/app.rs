@@ -282,7 +282,11 @@ mod tests {
     use super::*;
     use crate::{
         config::ScheduleConfig,
-        domain::{AbsenceKind, AbsencePortion::HalfDay, RecordSet, TimeCategory, WorkContext},
+        domain::{
+            AbsenceKind,
+            AbsencePortion::{self},
+            RecordSet, TimeCategory, WorkContext,
+        },
         test_support::*,
     };
 
@@ -316,9 +320,7 @@ mod tests {
     }
 
     impl FakeStore {
-        fn seed(mut self, inputs: Vec<(RecordId, RecordInput)>) -> Self {
-            let records =
-                inputs.into_iter().map(|(id, input)| Record::from_input(id, input)).collect();
+        fn seed(mut self, records: Vec<Record>) -> Self {
             self.records = RecordSet::try_from_records(records).unwrap();
 
             self
@@ -332,6 +334,29 @@ mod tests {
 
         fn commit(&mut self, change: RecordChange) -> anyhow::Result<ChangeOutcome> {
             self.records.apply_change(&change)
+        }
+    }
+
+    fn default_config_with_schedule(
+        mon_minutes: i64,
+        tue_minutes: i64,
+        wed_minutes: i64,
+        thu_minutes: i64,
+        fri_minutes: i64,
+        sat_minutes: i64,
+        sun_minutes: i64,
+    ) -> Config {
+        Config {
+            schedule: ScheduleConfig::new(
+                mon_minutes,
+                tue_minutes,
+                wed_minutes,
+                thu_minutes,
+                fri_minutes,
+                sat_minutes,
+                sun_minutes,
+            ),
+            ..Config::default()
         }
     }
 
@@ -355,56 +380,31 @@ mod tests {
 
     #[test]
     fn day_returns_only_requested_date_records() {
-        let day_1_start = Local.with_ymd_and_hms(2026, 1, 10, 9, 0, 0).unwrap();
-        let day_1_end = Local.with_ymd_and_hms(2026, 1, 10, 17, 0, 0).unwrap();
-        let day_2_start = Local.with_ymd_and_hms(2026, 1, 11, 9, 0, 0).unwrap();
-        let day_2_end = Local.with_ymd_and_hms(2026, 1, 11, 17, 0, 0).unwrap();
+        let now = ts(10, 9, 0);
 
         let store = FakeStore::default().seed(vec![
-            (
-                1.into(),
-                RecordInput::new_work(
-                    day_1_start,
-                    WorkCommand::Start { context: WorkContext::Office },
-                ),
-            ),
-            (
-                2.into(),
-                RecordInput::new_work(
-                    day_1_end,
-                    WorkCommand::End { title: "Done".into(), description: None },
-                ),
-            ),
-            (
-                3.into(),
-                RecordInput::new_work(
-                    day_2_start,
-                    WorkCommand::Start { context: WorkContext::Home },
-                ),
-            ),
-            (
-                4.into(),
-                RecordInput::new_work(
-                    day_2_end,
-                    WorkCommand::End { title: "Done".into(), description: None },
-                ),
-            ),
+            work_record(1, 10, 9, 0, WorkCommand::Start { context: WorkContext::Office }),
+            work_record(2, 10, 17, 0, WorkCommand::End { title: "Done".into(), description: None }),
+            work_record(3, 11, 9, 0, WorkCommand::Start { context: WorkContext::Home }),
+            work_record(4, 11, 17, 0, WorkCommand::End { title: "Done".into(), description: None }),
         ]);
+
+        let day1 = ts(10, 0, 0).date_naive();
 
         let app = App::new_with_clock(
             Config::default(),
             store,
-            FixedClock { now: day_1_start, today: day_1_start.date_naive() },
+            FixedClock { now, today: now.date_naive() },
         )
         .unwrap();
 
-        let day_1_overview = app.day(day_1_start.date_naive());
+        let day_1_overview = app.day(day1);
         assert_eq!(day_1_overview.work_records.len(), 2);
         assert!(
             day_1_overview
                 .work_records
                 .iter()
-                .all(|record| record.timestamp().date_naive() == day_1_start.date_naive())
+                .all(|record| record.timestamp().date_naive() == day1)
         );
     }
 
@@ -563,51 +563,24 @@ mod tests {
         let now = ts(18, 18, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
-            (1.into(), RecordInput::new_work(ts(12, 8, 0), WorkCommand::Start { context })),
-            (
-                2.into(),
-                RecordInput::new_work(
-                    ts(12, 9, 0),
-                    WorkCommand::End { title: "done".into(), description: None },
-                ),
-            ),
-            (3.into(), RecordInput::new_work(ts(13, 8, 0), WorkCommand::Start { context })),
-            (
-                4.into(),
-                RecordInput::new_work(
-                    ts(13, 10, 0),
-                    WorkCommand::End { title: "done".into(), description: None },
-                ),
-            ),
-            (5.into(), RecordInput::new_work(ts(14, 8, 0), WorkCommand::Start { context })),
-            (
-                6.into(),
-                RecordInput::new_work(
-                    ts(14, 11, 0),
-                    WorkCommand::End { title: "done".into(), description: None },
-                ),
-            ),
-            (7.into(), RecordInput::new_work(ts(15, 8, 0), WorkCommand::Start { context })),
-            (
-                8.into(),
-                RecordInput::new_work(
-                    ts(15, 12, 0),
-                    WorkCommand::End { title: "done".into(), description: None },
-                ),
-            ),
-            (9.into(), RecordInput::new_work(ts(16, 8, 0), WorkCommand::Start { context })),
-            (
-                10.into(),
-                RecordInput::new_work(
-                    ts(16, 13, 0),
-                    WorkCommand::End { title: "done".into(), description: None },
-                ),
+            work_record(1, 12, 8, 0, WorkCommand::Start { context }),
+            work_record(2, 12, 9, 0, WorkCommand::End { title: "done".into(), description: None }),
+            work_record(3, 13, 8, 0, WorkCommand::Start { context }),
+            work_record(4, 13, 10, 0, WorkCommand::End { title: "done".into(), description: None }),
+            work_record(5, 14, 8, 0, WorkCommand::Start { context }),
+            work_record(6, 14, 11, 0, WorkCommand::End { title: "done".into(), description: None }),
+            work_record(7, 15, 8, 0, WorkCommand::Start { context }),
+            work_record(8, 15, 12, 0, WorkCommand::End { title: "done".into(), description: None }),
+            work_record(9, 16, 8, 0, WorkCommand::Start { context }),
+            work_record(
+                10,
+                16,
+                13,
+                0,
+                WorkCommand::End { title: "done".into(), description: None },
             ),
         ]);
-        let config = Config {
-            schedule: ScheduleConfig::new(60, 120, 180, 240, 300, 0, 0),
-            ..Config::default()
-        };
+        let config = default_config_with_schedule(60, 120, 180, 240, 300, 0, 0);
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 
@@ -628,8 +601,7 @@ mod tests {
     fn range_timesheet_with_only_zero_target_days_has_zero_balance() {
         let store = FakeStore::default().seed(vec![]);
         let now = ts(8, 12, 0);
-        let schedule = ScheduleConfig::new(60, 2 * 60, 3 * 60, 4 * 60, 5 * 60, 0, 0);
-        let config = Config { schedule, ..Default::default() };
+        let config = default_config_with_schedule(60, 2 * 60, 3 * 60, 4 * 60, 5 * 60, 0, 0);
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 
@@ -645,8 +617,7 @@ mod tests {
     fn weekly_timesheet_uses_targets_through_current_day() {
         let store = FakeStore::default().seed(vec![]);
         let now = ts(8, 12, 0);
-        let schedule = ScheduleConfig::new(60, 2 * 60, 3 * 60, 4 * 60, 5 * 60, 0, 0);
-        let config = Config { schedule, ..Default::default() };
+        let config = default_config_with_schedule(60, 2 * 60, 3 * 60, 4 * 60, 5 * 60, 0, 0);
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 
@@ -663,28 +634,15 @@ mod tests {
     fn weekly_timesheet_excludes_breaks_from_worked_time_and_balance() {
         let context = WorkContext::Home;
         let store = FakeStore::default().seed(vec![
-            (1.into(), RecordInput::new_work(ts(8, 8, 0), WorkCommand::Start { context })),
-            (2.into(), RecordInput::new_work(ts(8, 12, 0), WorkCommand::BreakStart)),
-            (
-                3.into(),
-                RecordInput::new_work(ts(8, 13, 0), WorkCommand::BreakEnd { description: None }),
-            ),
-            (
-                4.into(),
-                RecordInput::new_work(
-                    ts(8, 18, 0),
-                    WorkCommand::End { title: "".into(), description: None },
-                ),
-            ),
+            work_record(1, 8, 8, 0, WorkCommand::Start { context }),
+            work_record(2, 8, 12, 0, WorkCommand::BreakStart),
+            work_record(3, 8, 13, 0, WorkCommand::BreakEnd { description: None }),
+            work_record(4, 8, 18, 0, WorkCommand::End { title: "".into(), description: None }),
         ]);
 
         let now = ts(8, 20, 0);
 
-        let config = Config {
-            schedule: ScheduleConfig::new(0, 0, 0, 8 * 60, 0, 0, 0),
-            ..Default::default()
-        };
-
+        let config = default_config_with_schedule(0, 0, 0, 8 * 60, 0, 0, 0);
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 
@@ -703,27 +661,12 @@ mod tests {
         let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
-            (1.into(), RecordInput::new_work(ts(5, 8, 0), WorkCommand::Start { context })),
-            (
-                2.into(),
-                RecordInput::new_work(
-                    ts(5, 16, 0),
-                    WorkCommand::End { title: "done".into(), description: None },
-                ),
-            ),
-            (3.into(), RecordInput::new_work(ts(12, 8, 0), WorkCommand::Start { context })),
-            (
-                4.into(),
-                RecordInput::new_work(
-                    ts(12, 16, 0),
-                    WorkCommand::End { title: "done".into(), description: None },
-                ),
-            ),
+            work_record(1, 5, 8, 0, WorkCommand::Start { context }),
+            work_record(2, 5, 16, 0, WorkCommand::End { title: "done".into(), description: None }),
+            work_record(3, 12, 8, 0, WorkCommand::Start { context }),
+            work_record(4, 12, 16, 0, WorkCommand::End { title: "done".into(), description: None }),
         ]);
-        let config = Config {
-            schedule: ScheduleConfig::new(60 * 8, 60 * 8, 60 * 8, 60 * 8, 60 * 8, 0, 0),
-            ..Config::default()
-        };
+        let config = default_config_with_schedule(60 * 8, 60 * 8, 60 * 8, 60 * 8, 60 * 8, 0, 0);
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 
@@ -774,8 +717,7 @@ mod tests {
     fn range_timesheet_uses_targets_for_selected_days() {
         let now = ts(18, 15, 0);
         let store = FakeStore::default();
-        let schedule = ScheduleConfig::new(60, 2 * 60, 3 * 60, 4 * 60, 5 * 60, 0, 0);
-        let config = Config { schedule, ..Default::default() };
+        let config = default_config_with_schedule(60, 2 * 60, 3 * 60, 4 * 60, 5 * 60, 0, 0);
         let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
             .unwrap();
 
@@ -791,9 +733,12 @@ mod tests {
     fn timesheet_for_historical_range_closes_open_day_at_midnight() {
         let now = ts(15, 12, 0);
         let context = WorkContext::Office;
-        let store = FakeStore::default().seed(vec![(
-            1.into(),
-            RecordInput::new_work(ts(10, 8, 0), WorkCommand::Start { context }),
+        let store = FakeStore::default().seed(vec![work_record(
+            1,
+            10,
+            8,
+            0,
+            WorkCommand::Start { context },
         )]);
         let app = App::new_with_clock(
             Config::default(),
@@ -819,14 +764,8 @@ mod tests {
         let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
-            (1.into(), RecordInput::new_work(ts(9, 20, 0), WorkCommand::Start { context })),
-            (
-                2.into(),
-                RecordInput::new_work(
-                    ts(10, 10, 0),
-                    WorkCommand::End { title: "done".into(), description: None },
-                ),
-            ),
+            work_record(1, 9, 20, 0, WorkCommand::Start { context }),
+            work_record(2, 10, 10, 0, WorkCommand::End { title: "done".into(), description: None }),
         ]);
         let app = App::new_with_clock(
             Config::default(),
@@ -852,21 +791,15 @@ mod tests {
         let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
-            (1.into(), RecordInput::new_work(ts(10, 8, 0), WorkCommand::Start { context })),
-            (
-                2.into(),
-                RecordInput::new_work(
-                    Local.with_ymd_and_hms(2026, 1, 10, 10, 0, 0).unwrap(),
-                    WorkCommand::Log { title: "handoff".into(), description: None },
-                ),
+            work_record(1, 10, 8, 0, WorkCommand::Start { context }),
+            work_record(
+                2,
+                10,
+                10,
+                0,
+                WorkCommand::Log { title: "handoff".into(), description: None },
             ),
-            (
-                3.into(),
-                RecordInput::new_work(
-                    ts(10, 12, 0),
-                    WorkCommand::End { title: "wrap".into(), description: None },
-                ),
-            ),
+            work_record(3, 10, 12, 0, WorkCommand::End { title: "wrap".into(), description: None }),
         ]);
         let app = App::new_with_clock(
             Config::default(),
@@ -890,20 +823,8 @@ mod tests {
         let now = ts(15, 12, 0);
         let context = WorkContext::Office;
         let store = FakeStore::default().seed(vec![
-            (
-                1.into(),
-                RecordInput::new_work(
-                    Local.with_ymd_and_hms(2026, 1, 9, 20, 0, 0).unwrap(),
-                    WorkCommand::Start { context },
-                ),
-            ),
-            (
-                2.into(),
-                RecordInput::new_work(
-                    ts(10, 10, 0),
-                    WorkCommand::End { title: "done".into(), description: None },
-                ),
-            ),
+            work_record(1, 9, 20, 0, WorkCommand::Start { context }),
+            work_record(2, 10, 10, 0, WorkCommand::End { title: "done".into(), description: None }),
         ]);
         let app = App::new_with_clock(
             Config::default(),
@@ -925,12 +846,12 @@ mod tests {
     #[test]
     fn start_rejects_invalid_persisted_work_timeline() {
         let now = ts(9, 6, 0);
-        let store = FakeStore::default().seed(vec![(
-            1.into(),
-            RecordInput::new_work(
-                ts(8, 6, 0),
-                WorkCommand::Log { title: "worked harder".to_string(), description: None },
-            ),
+        let store = FakeStore::default().seed(vec![work_record(
+            1,
+            8,
+            6,
+            0,
+            WorkCommand::Log { title: "worked harder".to_string(), description: None },
         )]);
 
         let err = App::new_with_clock(
@@ -947,8 +868,8 @@ mod tests {
     fn insert_rejects_invalid_work_timeline_mutations() {
         let now = ts(11, 5, 15);
         let store = FakeStore::default().seed(vec![
-            make_record_entry(1, 11, 5, 10, WorkCommand::Start { context: WorkContext::Home }),
-            make_record_entry(2, 11, 5, 11, WorkCommand::BreakStart),
+            work_record(1, 11, 5, 10, WorkCommand::Start { context: WorkContext::Home }),
+            work_record(2, 11, 5, 11, WorkCommand::BreakStart),
         ]);
 
         let mut app = App::new_with_clock(
@@ -968,8 +889,8 @@ mod tests {
     fn update_rejects_invalid_work_timeline_permutations() {
         let now = ts(11, 8, 8);
         let store = FakeStore::default().seed(vec![
-            make_record_entry(1, 11, 8, 5, WorkCommand::Start { context: WorkContext::Home }),
-            make_record_entry(2, 11, 8, 6, WorkCommand::BreakStart),
+            work_record(1, 11, 8, 5, WorkCommand::Start { context: WorkContext::Home }),
+            work_record(2, 11, 8, 6, WorkCommand::BreakStart),
         ]);
 
         let mut app = App::new_with_clock(
@@ -994,8 +915,8 @@ mod tests {
     fn delete_rejects_invalid_work_timeline_permutations() {
         let now = ts(11, 8, 28);
         let store = FakeStore::default().seed(vec![
-            make_record_entry(1, 11, 8, 25, WorkCommand::Start { context: WorkContext::Home }),
-            make_record_entry(2, 11, 8, 26, WorkCommand::BreakStart),
+            work_record(1, 11, 8, 25, WorkCommand::Start { context: WorkContext::Home }),
+            work_record(2, 11, 8, 26, WorkCommand::BreakStart),
         ]);
 
         let mut app = App::new_with_clock(
@@ -1016,7 +937,7 @@ mod tests {
     #[test]
     fn update_rejects_record_type_changes() {
         let now = ts(11, 8, 35);
-        let store = FakeStore::default().seed(vec![make_record_entry(
+        let store = FakeStore::default().seed(vec![work_record(
             1,
             11,
             8,
@@ -1034,7 +955,7 @@ mod tests {
         let update = RecordInput::Absence(AbsenceRecordInput::new(
             ts(11, 8, 25).date_naive(),
             AbsenceKind::Vacation,
-            HalfDay,
+            AbsencePortion::HalfDay,
             Some("".into()),
         ));
         let err = app.update_record(1.into(), update).unwrap_err();

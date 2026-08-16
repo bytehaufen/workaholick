@@ -1,8 +1,8 @@
 use chrono::{DateTime, Local, NaiveDate};
 
 use crate::domain::{
-    AbsenceKind, AbsencePortion, AbsenceRecordInput, Record, RecordId, RecordInput, WeeklySchedule,
-    WorkCommand,
+    AbsenceKind, AbsencePortion, AbsenceRecordInput, Record, RecordInput, WeeklySchedule,
+    WorkCommand, WorkRecordInput,
 };
 
 pub(crate) fn ts(day: u32, hour: u32, min: u32) -> DateTime<Local> {
@@ -16,8 +16,6 @@ pub(crate) fn date(day: u32) -> NaiveDate {
 }
 
 pub(crate) fn work_record(id: u64, day: u32, hour: u32, min: u32, command: WorkCommand) -> Record {
-    use crate::domain::{Record, RecordInput, WorkRecordInput};
-
     Record::from_input(
         id.into(),
         RecordInput::Work(WorkRecordInput::new(ts(day, hour, min), command)),
@@ -39,18 +37,6 @@ pub(crate) fn absence_record(
             None,
         )),
     )
-}
-
-pub(crate) fn make_record_entry(
-    id: u64,
-    day: u32,
-    hour: u32,
-    min: u32,
-    command: WorkCommand,
-) -> (RecordId, RecordInput) {
-    let record = work_record(id, day, hour, min, command);
-
-    (*record.id(), RecordInput::from_record(&record))
 }
 
 pub(crate) fn empty_schedule() -> WeeklySchedule {
