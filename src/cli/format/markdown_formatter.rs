@@ -238,7 +238,8 @@ fn escape_markdown_table_cell(value: &str) -> String {
 mod tests {
     use chrono::{Local, TimeZone};
 
-    use crate::test_support::work_record;
+    use crate::domain::{AbsenceKind, AbsencePortion, WeeklySchedule};
+    use crate::test_support::{absence_record, date, ts, work_record};
     use crate::{
         domain::{
             DailyTotals, Record, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
@@ -399,10 +400,7 @@ _No tracked time._
 
     #[test]
     fn markdown_format_timesheet_renders_weekly_balance_breakdown() {
-        let window = TimeWindow::new(
-            Local.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
-            Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
-        );
+        let window = TimeWindow::new(ts(1, 0, 0), ts(12, 0, 0));
         let breakdown = calculate_time_breakdown(
             &[
                 work_record(1, 1, 8, 0, WorkCommand::Start { context: WorkContext::Home }),
@@ -465,6 +463,56 @@ _No tracked time._
 | Target | 56h |
 | Balance | -8h |
 "#
+        );
+    }
+
+    #[test]
+    fn markdown_format_timesheet_renders_absence_credit() {
+        let window = TimeWindow::new(ts(5, 0, 0), ts(6, 0, 0));
+        let weekly_schedule = &WeeklySchedule::new([8 * 60, 0, 0, 0, 0, 0, 0]);
+        let breakdown = calculate_time_breakdown(
+            &[
+                work_record(1, 5, 8, 0, WorkCommand::Start { context: WorkContext::Office }),
+                work_record(2, 5, 10, 0, WorkCommand::BreakStart),
+                work_record(3, 5, 11, 0, WorkCommand::BreakEnd { description: None }),
+                work_record(4, 5, 13, 0, WorkCommand::End { title: "".into(), description: None }),
+                absence_record(5, 5, AbsenceKind::Vacation, AbsencePortion::HalfDay),
+            ],
+            window,
+            weekly_schedule,
+        )
+        .unwrap();
+
+        let timesheet = Timesheet::new(window, breakdown, 8 * 60)
+            .with_daily_totals(vec![DailyTotals::new(date(5), 4 * 60, 60, 4 * 60)])
+            .with_weekly_totals(vec![WeeklyTotals::new(date(5), 4 * 60, 60, 4 * 60, 8 * 60)]);
+
+        let rendered = MarkdownFormatter::format_timesheet(&timesheet);
+
+        assert_eq!(
+            &rendered,
+            r#"# Timesheet 2026-01-05
+
+| Activity | Days | Active | Break |
+| :-- | --: | --: | --: |
+| absence (vacation) | 1 | 4h | 0m |
+| work (office) | 1 | 4h | 1h |
+| TOTAL |  | 8h | 1h |
+
+| Day | Worked | Break | Absence |
+| :-- | --: | --: | --: |
+| Mon 2026-01-05 | 4h | 1h | 4h |
+
+| Week | Worked | Break | Absence | Target | Balance |
+| :-- | --: | --: | --: | --: | --: |
+| 2026-W02 | 4h | 1h | 4h | 8h | 0m |
+| TOTAL | 4h | 1h | 4h | 8h | 0m |
+
+| Metric | Value |
+| :-- | --: |
+| Target | 8h |
+| Balance | 0m |
+"#,
         );
     }
 

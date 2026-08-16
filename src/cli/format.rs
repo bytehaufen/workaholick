@@ -471,7 +471,8 @@ mod tests {
 
     use super::*;
     use crate::domain::{
-        DailyTotals, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
+        AbsenceKind, AbsencePortion, DailyTotals, Timesheet, WeeklySchedule, WeeklyTotals,
+        WorkCommand, WorkContext,
         activity_report::{ActivityReport, WorkItemRow},
         calculate_time_breakdown,
     };
@@ -825,5 +826,89 @@ mod tests {
         assert!(display.daily_totals.is_empty());
         assert_eq!(&display.target, "56h");
         assert_eq!(&display.balance, "-8h");
+    }
+
+    #[test]
+    fn prepare_timesheet_view_includes_absence_credit() {
+        let window = TimeWindow::new(ts(5, 0, 0), ts(6, 0, 0));
+        let weekly_schedule = &WeeklySchedule::new([8 * 60, 0, 0, 0, 0, 0, 0]);
+        let breakdown = calculate_time_breakdown(
+            &[
+                work_record(1, 5, 8, 0, WorkCommand::Start { context: WorkContext::Office }),
+                work_record(2, 5, 10, 0, WorkCommand::BreakStart),
+                work_record(3, 5, 11, 0, WorkCommand::BreakEnd { description: None }),
+                work_record(4, 5, 13, 0, WorkCommand::End { title: "".into(), description: None }),
+                absence_record(5, 5, AbsenceKind::Vacation, AbsencePortion::HalfDay),
+            ],
+            window,
+            weekly_schedule,
+        )
+        .unwrap();
+
+        let timesheet = Timesheet::new(window, breakdown, 8 * 60)
+            .with_daily_totals(vec![DailyTotals::new(date(5), 4 * 60, 60, 4 * 60)])
+            .with_weekly_totals(vec![WeeklyTotals::new(date(5), 4 * 60, 60, 4 * 60, 8 * 60)]);
+
+        let display = prepare_timesheet_view(&timesheet);
+        assert_eq!(
+            display.rows,
+            vec![
+                TimesheetViewRow {
+                    activity: "absence (vacation)".into(),
+                    day_count: "1".into(),
+                    active: "4h".into(),
+                    break_time: "0m".into(),
+                },
+                TimesheetViewRow {
+                    activity: "work (office)".into(),
+                    day_count: "1".into(),
+                    active: "4h".into(),
+                    break_time: "1h".into()
+                }
+            ]
+        );
+        assert_eq!(
+            display.total,
+            TimesheetViewRow {
+                activity: "TOTAL".into(),
+                day_count: "".into(),
+                active: "8h".into(),
+                break_time: "1h".into(),
+            }
+        );
+
+        assert_eq!(
+            display.daily_totals,
+            vec![DailyTotalsView {
+                day: "Mon 2026-01-05".into(),
+                active: "4h".into(),
+                break_time: "1h".into(),
+                absence: "4h".into()
+            }]
+        );
+        assert_eq!(
+            display.weekly_totals,
+            vec![WeeklyTotalsView {
+                week: "2026-W02".into(),
+                worked: "4h".into(),
+                break_time: "1h".into(),
+                absence: "4h".into(),
+                target: "8h".into(),
+                balance: "0m".into(),
+            }]
+        );
+        assert_eq!(
+            display.weekly_totals_total,
+            Some(WeeklyTotalsView {
+                week: "TOTAL".into(),
+                worked: "4h".into(),
+                break_time: "1h".into(),
+                absence: "4h".into(),
+                target: "8h".into(),
+                balance: "0m".into()
+            })
+        );
+        assert_eq!(display.target, "8h");
+        assert_eq!(display.balance, "0m");
     }
 }
