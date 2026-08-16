@@ -285,7 +285,7 @@ mod tests {
         domain::{
             AbsenceKind,
             AbsencePortion::{self},
-            RecordSet, TimeCategory, WorkContext,
+            DailyTotals, RecordSet, TimeCategory, WorkContext,
         },
         test_support::*,
     };
@@ -556,6 +556,95 @@ mod tests {
         let err = app.timesheet(DateScope::Range { from: date(16), to: date(17) }).unwrap_err();
 
         assert_eq!(err.to_string(), "Timesheet start date is in the future.");
+    }
+
+    #[test]
+    fn range_timesheet_credits_full_day_absence() {
+        let now = ts(13, 5, 0);
+        let records = vec![absence_record(1, 12, AbsenceKind::Vacation, AbsencePortion::FullDay)];
+        let store = FakeStore::default().seed(records);
+
+        let config = default_config_with_schedule(60, 120, 180, 240, 300, 0, 0);
+
+        let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
+            .unwrap();
+
+        let timesheet = app.timesheet(DateScope::Range { from: date(12), to: date(12) }).unwrap();
+        assert_eq!(timesheet.absence_minutes(), 60);
+        assert_eq!(timesheet.worked_minutes(), 0);
+        assert_eq!(timesheet.target_minutes(), 60);
+        assert_eq!(timesheet.balance_minutes(), 0);
+    }
+
+    #[test]
+    fn range_timesheet_combines_half_day_work_and_absence() {
+        let now = ts(13, 5, 0);
+        let records = vec![
+            work_record(1, 12, 6, 0, WorkCommand::Start { context: WorkContext::Home }),
+            work_record(2, 12, 10, 0, WorkCommand::End { title: "".into(), description: None }),
+            absence_record(3, 12, AbsenceKind::Sick, AbsencePortion::HalfDay),
+        ];
+        let store = FakeStore::default().seed(records);
+        let config = default_config_with_schedule(8 * 60, 0, 0, 0, 0, 0, 0);
+        let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
+            .unwrap();
+
+        let timesheet = app.timesheet(DateScope::Range { from: date(12), to: date(12) }).unwrap();
+        assert_eq!(timesheet.worked_minutes(), 4 * 60);
+        assert_eq!(timesheet.absence_minutes(), 4 * 60);
+        assert_eq!(timesheet.target_minutes(), 8 * 60);
+        assert_eq!(timesheet.balance_minutes(), 0);
+    }
+
+    #[test]
+    fn weekly_timesheet_shows_current_day_absence_in_daily_totals() {
+        let now = ts(15, 12, 0);
+        let records = vec![absence_record(1, 15, AbsenceKind::Holiday, AbsencePortion::FullDay)];
+        let store = FakeStore::default().seed(records);
+        let config = default_config_with_schedule(0, 0, 0, 8 * 60, 0, 0, 0);
+        let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
+            .unwrap();
+
+        let timesheet =
+            app.timesheet(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
+
+        assert_eq!(timesheet.target_minutes(), 8 * 60);
+        assert_eq!(timesheet.absence_minutes(), 8 * 60);
+        assert_eq!(timesheet.balance_minutes(), 0);
+        assert!(timesheet.weekly_totals().is_empty());
+        assert_eq!(timesheet.daily_totals().len(), 4);
+        let expected = vec![
+            DailyTotals::new(date(12), 0, 0, 0),
+            DailyTotals::new(date(13), 0, 0, 0),
+            DailyTotals::new(date(14), 0, 0, 0),
+            DailyTotals::new(date(15), 0, 0, 8 * 60),
+        ];
+        assert_eq!(timesheet.daily_totals(), &expected);
+    }
+
+    #[test]
+    fn range_timesheet_weekly_total_credits_absence() {
+        let now = ts(15, 12, 0);
+        let records = vec![absence_record(1, 12, AbsenceKind::Vacation, AbsencePortion::FullDay)];
+        let store = FakeStore::default().seed(records);
+        let config = default_config_with_schedule(8 * 60, 0, 0, 0, 0, 0, 0);
+        let app = App::new_with_clock(config, store, FixedClock { now, today: now.date_naive() })
+            .unwrap();
+
+        let timesheet = app.timesheet(DateScope::Range { from: date(12), to: date(14) }).unwrap();
+
+        assert_eq!(timesheet.target_minutes(), 8 * 60);
+        assert_eq!(timesheet.absence_minutes(), 8 * 60);
+        assert_eq!(timesheet.balance_minutes(), 0);
+        assert!(timesheet.daily_totals().is_empty());
+        assert_eq!(timesheet.weekly_totals().len(), 1);
+        let weekly_total = timesheet.weekly_totals().first().unwrap();
+        assert_eq!(weekly_total.start(), date(12));
+        assert_eq!(weekly_total.target_minutes(), 8 * 60);
+        assert_eq!(weekly_total.absence_minutes(), 8 * 60);
+        assert_eq!(weekly_total.balance_minutes(), 0);
+        assert_eq!(weekly_total.worked_minutes(), 0);
+        assert_eq!(weekly_total.break_minutes(), 0);
     }
 
     #[test]
