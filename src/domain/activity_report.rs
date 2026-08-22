@@ -1,8 +1,8 @@
 use chrono::{DateTime, Local, NaiveDate};
 
 use crate::domain::{
-    Record, TimelineValidationError, WorkCommand, reporting::TimeWindow, transition_day_state,
-    work_state::DayState,
+    AbsenceKind, AbsencePortion, Record, TimelineValidationError, WorkCommand,
+    reporting::TimeWindow, transition_day_state, work_state::DayState,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,13 +53,13 @@ impl WorkItemRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActivityTitleGroup {
+pub struct ActivityWorkTitleGroup {
     title: String,
     count: usize,
     duration_minutes: i64,
 }
 
-impl ActivityTitleGroup {
+impl ActivityWorkTitleGroup {
     fn new(title: String, count: usize, duration_minutes: i64) -> Self {
         Self { title, count, duration_minutes }
     }
@@ -78,25 +78,42 @@ impl ActivityTitleGroup {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AbsenceItemRow {
+    pub date: NaiveDate,
+    pub kind: AbsenceKind,
+    pub portion: AbsencePortion,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ActivityReport {
     window: TimeWindow,
     work_items: Vec<WorkItemRow>,
+    absence_items: Vec<AbsenceItemRow>,
 }
 
 impl ActivityReport {
-    pub(crate) fn new(window: TimeWindow, work_items: Vec<WorkItemRow>) -> Self {
-        Self { window, work_items }
+    pub(crate) fn new(
+        window: TimeWindow,
+        work_items: Vec<WorkItemRow>,
+        absence_items: Vec<AbsenceItemRow>,
+    ) -> Self {
+        Self { window, work_items, absence_items }
     }
 
     pub(crate) fn window(&self) -> TimeWindow {
         self.window
     }
 
-    pub(crate) fn rows(&self) -> &[WorkItemRow] {
+    pub(crate) fn work_items(&self) -> &[WorkItemRow] {
         &self.work_items
     }
 
-    pub(crate) fn group_by_title(&self) -> Vec<ActivityTitleGroup> {
+    pub(crate) fn absence_items(&self) -> &[AbsenceItemRow] {
+        &self.absence_items
+    }
+
+    pub(crate) fn group_by_title(&self) -> Vec<ActivityWorkTitleGroup> {
         let mut by_title = self.work_items.iter().fold(
             std::collections::HashMap::<String, (usize, i64)>::new(),
             |mut grouped, row| {
@@ -110,7 +127,7 @@ impl ActivityReport {
         let mut rows = by_title
             .drain()
             .map(|(title, (count, duration_minutes))| {
-                ActivityTitleGroup::new(title, count, duration_minutes)
+                ActivityWorkTitleGroup::new(title, count, duration_minutes)
             })
             .collect::<Vec<_>>();
 
@@ -194,8 +211,7 @@ pub fn calculate_activity_report(
         rows: Vec::new(),
     };
 
-    // FIXME: Need to respect Absence
-    let state = records
+    let work_rows = records
         .iter()
         .filter_map(Record::as_work)
         .filter(|record| *record.timestamp() < window.end())
@@ -252,9 +268,23 @@ pub fn calculate_activity_report(
 
             state.state = next_state;
             Ok(state)
-        })?;
+        })?
+        .rows;
 
-    Ok(ActivityReport::new(window, state.rows))
+    let dates = TimeWindow::dates_in(window).collect::<Vec<_>>();
+    let absence_rows = records
+        .iter()
+        .filter_map(Record::as_absence)
+        .filter(|record| dates.contains(record.date()))
+        .map(|absence_record| AbsenceItemRow {
+            date: *absence_record.date(),
+            kind: *absence_record.kind(),
+            portion: *absence_record.portion(),
+            note: absence_record.note().clone(),
+        })
+        .collect();
+
+    Ok(ActivityReport::new(window, work_rows, absence_rows))
 }
 
 #[cfg(test)]
@@ -292,7 +322,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            activity_report.rows(),
+            activity_report.work_items(),
             &[
                 WorkItemRow::new(
                     ts(10, 10, 0).date_naive(),
@@ -334,7 +364,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            activity_report.rows(),
+            activity_report.work_items(),
             &[WorkItemRow::new(
                 ts(10, 13, 0).date_naive(),
                 ts(10, 8, 0),
@@ -347,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn activity_report_ignores_absence_records() {
+    fn activity_report_includes_absence_records() {
         let activity_report = calculate_activity_report(
             &[
                 absence_record(1, 10, AbsenceKind::Holiday, AbsencePortion::HalfDay),
@@ -364,8 +394,17 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(activity_report.rows().len(), 1);
-        assert_eq!(activity_report.rows()[0].title(), "done");
+        assert_eq!(activity_report.work_items().len(), 1);
+        assert_eq!(activity_report.work_items()[0].title(), "done");
+        assert_eq!(
+            activity_report.absence_items()[0],
+            AbsenceItemRow {
+                date: date(10),
+                kind: AbsenceKind::Holiday,
+                portion: AbsencePortion::HalfDay,
+                note: None
+            }
+        );
     }
 
     #[test]
@@ -386,7 +425,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            activity_report.rows(),
+            activity_report.work_items(),
             &[WorkItemRow::new(
                 ts(10, 10, 0).date_naive(),
                 ts(10, 0, 0),
@@ -406,7 +445,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(activity_report.rows().is_empty());
+        assert!(activity_report.work_items().is_empty());
     }
 
     #[test]
@@ -439,13 +478,14 @@ mod tests {
                     None,
                 ),
             ],
+            vec![],
         );
 
         assert_eq!(
             activity_report.group_by_title(),
             vec![
-                ActivityTitleGroup::new("review".into(), 2, 240),
-                ActivityTitleGroup::new("Review".into(), 1, 60),
+                ActivityWorkTitleGroup::new("review".into(), 2, 240),
+                ActivityWorkTitleGroup::new("Review".into(), 1, 60),
             ]
         );
     }

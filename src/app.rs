@@ -877,11 +877,43 @@ mod tests {
         let activity_report =
             app.activity(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
-        assert_eq!(activity_report.rows().len(), 2);
-        assert_eq!(activity_report.rows()[0].title(), "handoff");
-        assert_eq!(activity_report.rows()[0].duration_minutes(), 120);
-        assert_eq!(activity_report.rows()[1].title(), "wrap");
-        assert_eq!(activity_report.rows()[1].duration_minutes(), 120);
+        assert_eq!(activity_report.work_items().len(), 2);
+        assert_eq!(activity_report.work_items()[0].title(), "handoff");
+        assert_eq!(activity_report.work_items()[0].duration_minutes(), 120);
+        assert_eq!(activity_report.work_items()[1].title(), "wrap");
+        assert_eq!(activity_report.work_items()[1].duration_minutes(), 120);
+    }
+
+    #[test]
+    fn activity_includes_only_absences_in_current_week() {
+        let now = ts(15, 12, 0);
+
+        let store = FakeStore::default().seed(vec![
+            absence_record(1, 11, AbsenceKind::Holiday, AbsencePortion::FullDay),
+            absence_record(2, 12, AbsenceKind::Vacation, AbsencePortion::FullDay),
+            absence_record(3, 15, AbsenceKind::Sick, AbsencePortion::HalfDay),
+            absence_record(4, 16, AbsenceKind::Holiday, AbsencePortion::FullDay),
+        ]);
+
+        let app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now, today: now.date_naive() },
+        )
+        .unwrap();
+
+        let report = app.activity(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
+
+        assert!(report.work_items().is_empty());
+        assert_eq!(report.absence_items().len(), 2);
+
+        assert_eq!(report.absence_items()[0].date, date(12));
+        assert_eq!(report.absence_items()[0].kind, AbsenceKind::Vacation);
+        assert_eq!(report.absence_items()[0].portion, AbsencePortion::FullDay);
+
+        assert_eq!(report.absence_items()[1].date, date(15));
+        assert_eq!(report.absence_items()[1].kind, AbsenceKind::Sick);
+        assert_eq!(report.absence_items()[1].portion, AbsencePortion::HalfDay);
     }
 
     #[test]
@@ -902,10 +934,10 @@ mod tests {
         let activity_report =
             app.activity(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
-        assert_eq!(activity_report.rows().len(), 1);
-        assert_eq!(activity_report.rows()[0].start(), ts(10, 0, 0));
-        assert_eq!(activity_report.rows()[0].end(), ts(10, 10, 0));
-        assert_eq!(activity_report.rows()[0].duration_minutes(), 10 * 60);
+        assert_eq!(activity_report.work_items().len(), 1);
+        assert_eq!(activity_report.work_items()[0].start(), ts(10, 0, 0));
+        assert_eq!(activity_report.work_items()[0].end(), ts(10, 10, 0));
+        assert_eq!(activity_report.work_items()[0].duration_minutes(), 10 * 60);
     }
 
     // Validation tests

@@ -143,17 +143,29 @@ pub(super) struct TimesheetView {
     pub weekly_totals_total: Option<WeeklyTotalsView>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct ActivityView {
     pub title: String,
-    pub rows: Vec<ActivityItemView>,
-    pub groups: Vec<ActivityGroupView>,
-    pub show_description: bool,
-    pub show_group_description: bool,
+    pub work_items: WorkItems,
+    pub absence_items: Vec<AbsenceItemView>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum WorkItems {
+    Detailed(Vec<WorkItemView>),
+    Grouped(Vec<WorkGroupView>),
+}
+impl WorkItems {
+    fn is_empty(&self) -> bool {
+        match self {
+            WorkItems::Detailed(work_item_views) => work_item_views.is_empty(),
+            WorkItems::Grouped(work_group_views) => work_group_views.is_empty(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ActivityItemView {
+pub(super) struct WorkItemView {
     pub date: String,
     pub start: String,
     pub end: String,
@@ -163,11 +175,19 @@ pub(super) struct ActivityItemView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ActivityGroupView {
+pub(super) struct WorkGroupView {
     pub title: String,
     pub description: String,
     pub count: String,
     pub duration: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct AbsenceItemView {
+    pub date: String,
+    pub kind: String,
+    pub portion: String,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -309,57 +329,56 @@ pub(super) fn prepare_activity_view(
     activity_report: &ActivityReport,
     group_by_title: bool,
 ) -> ActivityView {
-    if group_by_title {
-        ActivityView {
-            title: format_activity_title(activity_report.window(), group_by_title),
-            rows: Vec::new(),
-            groups: activity_report
+    let work_items = if group_by_title {
+        WorkItems::Grouped(
+            activity_report
                 .group_by_title()
                 .into_iter()
-                .map(|row| ActivityGroupView {
+                .map(|row| WorkGroupView {
                     title: row.title().to_string(),
                     description: String::new(),
                     count: row.count().to_string(),
                     duration: format_duration(row.duration_minutes()),
                 })
                 .collect(),
-            show_description: false,
-            show_group_description: false,
-        }
+        )
     } else {
-        let rows = activity_report
-            .rows()
-            .iter()
-            .map(|row| ActivityItemView {
-                date: row.date().to_string(),
-                start: format_activity_boundary(row.start(), row.date()),
-                end: format_activity_boundary(row.end(), row.date()),
-                duration: format_duration(row.duration_minutes()),
-                title: row.title().to_string(),
-                description: row.description().unwrap_or_default().to_string(),
-            })
-            .collect::<Vec<_>>();
+        WorkItems::Detailed(
+            activity_report
+                .work_items()
+                .iter()
+                .map(|row| WorkItemView {
+                    date: row.date().to_string(),
+                    start: format_activity_boundary(row.start(), row.date()),
+                    end: format_activity_boundary(row.end(), row.date()),
+                    duration: format_duration(row.duration_minutes()),
+                    title: row.title().to_string(),
+                    description: row.description().unwrap_or_default().to_string(),
+                })
+                .collect::<Vec<_>>(),
+        )
+    };
 
-        ActivityView {
-            title: format_activity_title(activity_report.window(), group_by_title),
-            show_description: rows.iter().any(|row| !row.description.is_empty()),
-            show_group_description: false,
-            rows,
-            groups: Vec::new(),
-        }
+    let absence_items = activity_report
+        .absence_items()
+        .iter()
+        .map(|row| AbsenceItemView {
+            date: row.date.to_string(),
+            kind: row.kind.to_string(),
+            portion: row.portion.to_string(),
+            note: row.note.clone(),
+        })
+        .collect();
+
+    ActivityView {
+        title: format!("Activity {}", format_time_window(activity_report.window())),
+        work_items,
+        absence_items,
     }
 }
 
 pub(super) fn format_timesheet_title(window: TimeWindow) -> String {
     format!("Timesheet {}", format_time_window(window))
-}
-
-pub(super) fn format_activity_title(window: TimeWindow, group_by_title: bool) -> String {
-    if group_by_title {
-        format!("Activity {} (grouped by title)", format_time_window(window))
-    } else {
-        format!("Activity {}", format_time_window(window))
-    }
 }
 
 pub(super) fn format_time_window(window: TimeWindow) -> String {
@@ -469,7 +488,7 @@ mod tests {
     use crate::domain::{
         AbsenceKind, AbsencePortion, DailyTotals, Timesheet, WeeklySchedule, WeeklyTotals,
         WorkCommand, WorkContext,
-        activity_report::{ActivityReport, WorkItemRow},
+        activity_report::{AbsenceItemRow, ActivityReport, WorkItemRow},
         calculate_time_breakdown,
     };
     use crate::test_support::*;
@@ -529,7 +548,7 @@ mod tests {
     #[test]
     fn prepare_activity_view_renders_detailed_rows() {
         let activity_report = ActivityReport::new(
-            TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
+            TimeWindow::new(ts(10, 0, 0), ts(12, 0, 0)),
             vec![
                 WorkItemRow::new(
                     ts(10, 10, 0).date_naive(),
@@ -548,18 +567,21 @@ mod tests {
                     None,
                 ),
             ],
+            vec![AbsenceItemRow {
+                date: date(11),
+                kind: AbsenceKind::Holiday,
+                portion: AbsencePortion::FullDay,
+                note: Some("Some public holiday".to_string()),
+            }],
         );
 
         let display = prepare_activity_view(&activity_report, false);
 
-        assert_eq!(display.title, "Activity 2026-01-10");
-        assert!(display.groups.is_empty());
-        assert!(display.show_description);
-        assert!(!display.show_group_description);
+        assert_eq!(display.title, "Activity 2026-01-10 .. 2026-01-11");
         assert_eq!(
-            display.rows,
-            vec![
-                ActivityItemView {
+            display.work_items,
+            WorkItems::Detailed(vec![
+                WorkItemView {
                     date: "2026-01-10".into(),
                     start: "08:00".into(),
                     end: "10:00".into(),
@@ -567,7 +589,7 @@ mod tests {
                     title: "handoff".into(),
                     description: "sync".into(),
                 },
-                ActivityItemView {
+                WorkItemView {
                     date: "2026-01-10".into(),
                     start: "10:00".into(),
                     end: "12:00".into(),
@@ -575,14 +597,23 @@ mod tests {
                     title: "wrap".into(),
                     description: String::new(),
                 },
-            ]
+            ])
+        );
+        assert_eq!(
+            display.absence_items,
+            vec![AbsenceItemView {
+                date: "2026-01-11".to_string(),
+                kind: "holiday".to_string(),
+                portion: "full-day".to_string(),
+                note: Some("Some public holiday".to_string())
+            }]
         );
     }
 
     #[test]
     fn prepare_activity_view_groups_rows_by_title() {
         let activity_report = ActivityReport::new(
-            TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
+            TimeWindow::new(ts(10, 0, 0), ts(12, 0, 0)),
             vec![
                 WorkItemRow::new(
                     ts(10, 10, 0).date_naive(),
@@ -601,20 +632,34 @@ mod tests {
                     None,
                 ),
             ],
+            vec![AbsenceItemRow {
+                date: date(11),
+                kind: AbsenceKind::Holiday,
+                portion: AbsencePortion::FullDay,
+                note: Some("Some public holiday".to_string()),
+            }],
         );
 
         let display = prepare_activity_view(&activity_report, true);
 
-        assert_eq!(display.title, "Activity 2026-01-10 (grouped by title)");
-        assert!(display.rows.is_empty());
-        assert!(!display.show_group_description);
+        assert_eq!(display.title, "Activity 2026-01-10 .. 2026-01-11");
         assert_eq!(
-            display.groups,
-            vec![ActivityGroupView {
+            display.work_items,
+            WorkItems::Grouped(vec![WorkGroupView {
                 title: "review".into(),
                 description: String::new(),
                 count: "2".into(),
                 duration: "3h".into(),
+            }])
+        );
+
+        assert_eq!(
+            display.absence_items,
+            vec![AbsenceItemView {
+                date: "2026-01-11".to_string(),
+                kind: "holiday".to_string(),
+                portion: "full-day".to_string(),
+                note: Some("Some public holiday".to_string())
             }]
         );
     }

@@ -167,67 +167,67 @@ impl Formatter for MarkdownFormatter {
     fn format_activity(activity_report: &ActivityReport, group_by_title: bool) -> String {
         let activity_view = prepare_activity_view(activity_report, group_by_title);
         let mut output = String::new();
-        output.push_str(&format!("# {}\n\n", activity_view.title));
+        output.push_str(&format!("# {}\n", activity_view.title));
 
-        if !activity_view.groups.is_empty() {
-            if activity_view.show_group_description {
-                output.push_str("| Title | Description | Count | Duration |\n");
-                output.push_str("| :-- | :-- | --: | --: |\n");
+        if activity_view.work_items.is_empty() && activity_view.absence_items.is_empty() {
+            output.push('\n');
 
-                activity_view.groups.iter().for_each(|row| {
+            output.push_str("_No completed items._\n");
+        } else {
+            if !activity_view.work_items.is_empty() {
+                output.push_str("\n## Work items\n\n");
+
+                match activity_view.work_items {
+                    super::WorkItems::Grouped(items) => {
+                        output.push_str("| Title | Count | Duration |\n");
+                        output.push_str("| :-- | --: | --: |\n");
+
+                        items.iter().for_each(|row| {
+                            output.push_str(&format!(
+                                "| {} | {} | {} |\n",
+                                escape_markdown_table_cell(&row.title),
+                                row.count,
+                                row.duration,
+                            ));
+                        });
+                    }
+                    super::WorkItems::Detailed(items) => {
+                        output
+                            .push_str("| Date | Start | End | Duration | Title | Description |\n");
+                        output.push_str("| :-- | :-- | :-- | --: | :-- | :-- |\n");
+
+                        items.iter().for_each(|row| {
+                            output.push_str(&format!(
+                                "| {} | {} | {} | {} | {} | {} |\n",
+                                row.date,
+                                row.start,
+                                row.end,
+                                row.duration,
+                                escape_markdown_table_cell(&row.title),
+                                escape_markdown_table_cell(&row.description),
+                            ));
+                        });
+                    }
+                }
+            }
+
+            if !activity_view.absence_items.is_empty() {
+                output.push_str("\n## Absences\n\n");
+
+                output.push_str("| Date | Kind | Portion | Note |\n");
+                output.push_str("| :-- | :-- | :-- | :-- |\n");
+                activity_view.absence_items.iter().for_each(|row| {
                     output.push_str(&format!(
                         "| {} | {} | {} | {} |\n",
-                        escape_markdown_table_cell(&row.title),
-                        escape_markdown_table_cell(&row.description),
-                        row.count,
-                        row.duration,
-                    ));
-                });
-            } else {
-                output.push_str("| Title | Count | Duration |\n");
-                output.push_str("| :-- | --: | --: |\n");
-
-                activity_view.groups.iter().for_each(|row| {
-                    output.push_str(&format!(
-                        "| {} | {} | {} |\n",
-                        escape_markdown_table_cell(&row.title),
-                        row.count,
-                        row.duration,
+                        row.date,
+                        row.kind,
+                        row.portion,
+                        escape_markdown_table_cell(&row.note.clone().unwrap_or_default())
                     ));
                 });
             }
-        } else if activity_view.rows.is_empty() {
-            output.push_str("_No completed work items._\n");
-        } else if activity_view.show_description {
-            output.push_str("| Date | Start | End | Duration | Title | Description |\n");
-            output.push_str("| :-- | :-- | :-- | --: | :-- | :-- |\n");
+        };
 
-            activity_view.rows.iter().for_each(|row| {
-                output.push_str(&format!(
-                    "| {} | {} | {} | {} | {} | {} |\n",
-                    row.date,
-                    row.start,
-                    row.end,
-                    row.duration,
-                    escape_markdown_table_cell(&row.title),
-                    escape_markdown_table_cell(&row.description),
-                ));
-            });
-        } else {
-            output.push_str("| Date | Start | End | Duration | Title |\n");
-            output.push_str("| :-- | :-- | :-- | --: | :-- |\n");
-
-            activity_view.rows.iter().for_each(|row| {
-                output.push_str(&format!(
-                    "| {} | {} | {} | {} | {} |\n",
-                    row.date,
-                    row.start,
-                    row.end,
-                    row.duration,
-                    escape_markdown_table_cell(&row.title),
-                ));
-            });
-        }
         output
     }
 }
@@ -240,6 +240,7 @@ fn escape_markdown_table_cell(value: &str) -> String {
 mod tests {
     use chrono::{Local, TimeZone};
 
+    use crate::domain::activity_report::AbsenceItemRow;
     use crate::domain::{AbsenceKind, AbsencePortion, WeeklySchedule};
     use crate::test_support::{absence_record, date, ts, work_record};
     use crate::{
@@ -516,28 +517,44 @@ _No tracked time._
 
         assert_eq!(
             &rendered,
-            r#"# Activity 2026-01-10
+            r#"# Activity 2026-01-10 .. 2026-01-11
+
+## Work items
 
 | Date | Start | End | Duration | Title | Description |
 | :-- | :-- | :-- | --: | :-- | :-- |
 | 2026-01-10 | 08:00 | 10:00 | 2h | handoff | sync |
 | 2026-01-10 | 10:00 | 12:00 | 2h | wrap |  |
+
+## Absences
+
+| Date | Kind | Portion | Note |
+| :-- | :-- | :-- | :-- |
+| 2026-01-11 | holiday | full-day | Not easter sunday |
 "#
         );
     }
 
     #[test]
-    fn markdown_format_activity_renders_grouped_rows() {
+    fn markdown_format_activity_renders_work_grouped_rows() {
         let rendered = MarkdownFormatter::format_activity(&activity_report(), true);
 
         assert_eq!(
             &rendered,
-            r#"# Activity 2026-01-10 (grouped by title)
+            r#"# Activity 2026-01-10 .. 2026-01-11
+
+## Work items
 
 | Title | Count | Duration |
 | :-- | --: | --: |
 | handoff | 1 | 2h |
 | wrap | 1 | 2h |
+
+## Absences
+
+| Date | Kind | Portion | Note |
+| :-- | :-- | :-- | :-- |
+| 2026-01-11 | holiday | full-day | Not easter sunday |
 "#
         );
     }
@@ -551,6 +568,7 @@ _No tracked time._
                     Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
                 ),
                 vec![],
+                vec![],
             ),
             false,
         );
@@ -559,35 +577,31 @@ _No tracked time._
             &rendered,
             r#"# Activity 2026-01-10
 
-_No completed work items._
+_No completed items._
 "#
         );
     }
 
     fn activity_report() -> ActivityReport {
         ActivityReport::new(
-            TimeWindow::new(
-                Local.with_ymd_and_hms(2026, 1, 10, 0, 0, 0).unwrap(),
-                Local.with_ymd_and_hms(2026, 1, 11, 0, 0, 0).unwrap(),
-            ),
+            TimeWindow::new(ts(10, 0, 0), ts(12, 0, 0)),
             vec![
                 WorkItemRow::new(
-                    Local.with_ymd_and_hms(2026, 1, 10, 10, 0, 0).unwrap().date_naive(),
-                    Local.with_ymd_and_hms(2026, 1, 10, 8, 0, 0).unwrap(),
-                    Local.with_ymd_and_hms(2026, 1, 10, 10, 0, 0).unwrap(),
+                    date(10),
+                    ts(10, 8, 0),
+                    ts(10, 10, 0),
                     120,
                     "handoff".into(),
                     Some("sync".into()),
                 ),
-                WorkItemRow::new(
-                    Local.with_ymd_and_hms(2026, 1, 10, 12, 0, 0).unwrap().date_naive(),
-                    Local.with_ymd_and_hms(2026, 1, 10, 10, 0, 0).unwrap(),
-                    Local.with_ymd_and_hms(2026, 1, 10, 12, 0, 0).unwrap(),
-                    120,
-                    "wrap".into(),
-                    None,
-                ),
+                WorkItemRow::new(date(10), ts(10, 10, 0), ts(10, 12, 0), 120, "wrap".into(), None),
             ],
+            vec![AbsenceItemRow {
+                date: date(11),
+                kind: AbsenceKind::Holiday,
+                portion: AbsencePortion::FullDay,
+                note: Some("Not easter sunday".to_string()),
+            }],
         )
     }
 }
