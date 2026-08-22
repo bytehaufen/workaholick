@@ -8,8 +8,7 @@ use std::path::PathBuf;
 use strum::VariantNames;
 
 use crate::domain::{
-    AbsenceKind, AbsencePortion, AbsenceRecordInput, Period, WorkContext,
-    activity_report::ActivityGroupBy, reporting::DateScope,
+    AbsenceKind, AbsencePortion, AbsenceRecordInput, Period, WorkContext, reporting::DateScope,
 };
 
 // FIXME: Update when domain implemented
@@ -24,7 +23,7 @@ fn examples_help() -> String {
   workaholick absence sick --date 2026-05-01 --portion half-day --note \"doctor\"
   workaholick day
   workaholick timesheet week -1
-  workaholick activity --from 2026-04-01 --to 2026-04-06 --group-by title
+  workaholick activity --from 2026-04-01 --to 2026-04-06 --group-by-title
 "
     )
 }
@@ -277,9 +276,9 @@ pub struct ActivityArgs {
     #[command(flatten)]
     pub scope_args: ScopeArgs,
 
-    /// Group the activity rows
-    #[arg(long, value_enum)]
-    pub group_by: Option<ActivityGroupBy>,
+    /// Group the work activity rows by title
+    #[arg(long)]
+    pub group_by_title: bool,
 }
 
 impl ActivityArgs {
@@ -347,13 +346,13 @@ mod tests {
         };
 
         assert_eq!(args.scope(), DateScope::Period { period: Period::Week, offset: 0 });
-        assert_eq!(args.group_by, None);
+        assert!(!args.group_by_title);
     }
 
     #[test]
     fn activity_scope_parses_grouping() {
         let cli =
-            Cli::try_parse_from(["workaholick", "activity", "week", "-1", "--group-by", "title"])
+            Cli::try_parse_from(["workaholick", "activity", "week", "-1", "--group-by-title"])
                 .unwrap();
 
         let CliCommand::Activity(args) = cli.command else {
@@ -361,20 +360,7 @@ mod tests {
         };
 
         assert_eq!(args.scope(), DateScope::Period { period: Period::Week, offset: -1 });
-        assert_eq!(args.group_by, Some(ActivityGroupBy::Title));
-    }
-
-    #[test]
-    fn activity_scope_parses_title_description_grouping() {
-        let cli =
-            Cli::try_parse_from(["workaholick", "activity", "--group-by", "title-description"])
-                .unwrap();
-
-        let CliCommand::Activity(args) = cli.command else {
-            panic!("expected activity command");
-        };
-
-        assert_eq!(args.group_by, Some(ActivityGroupBy::TitleDescription));
+        assert!(args.group_by_title);
     }
 
     #[test]

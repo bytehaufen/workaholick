@@ -140,6 +140,13 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         build_timesheet(&records, window, &scope, &self.weekly_schedule)
     }
 
+    pub fn activity(&self, scope: DateScope) -> anyhow::Result<ActivityReport> {
+        let window = self.time_window_for(&scope)?;
+        let records = self.store.records().iter().cloned().collect::<Vec<_>>();
+
+        Ok(activity_report::calculate_activity_report(&records, window)?)
+    }
+
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     fn next_id(&self) -> RecordId {
@@ -159,13 +166,6 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         validate_records(&candidate)?;
 
         self.store.commit(change)
-    }
-
-    pub fn activity(&self, scope: DateScope) -> anyhow::Result<ActivityReport> {
-        let window = self.time_window_for(&scope)?;
-        let records = self.store.records().iter().cloned().collect::<Vec<_>>();
-
-        Ok(activity_report::calculate_activity_report(&records, window)?)
     }
 
     fn time_window_for(&self, scope: &DateScope) -> anyhow::Result<TimeWindow> {

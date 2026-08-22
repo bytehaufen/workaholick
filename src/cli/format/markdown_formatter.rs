@@ -2,10 +2,7 @@ use chrono::NaiveDate;
 use termimad::Alignment;
 
 use crate::DayOverview;
-use crate::domain::{
-    Timesheet,
-    activity_report::{ActivityGroupBy, ActivityReport},
-};
+use crate::domain::{Timesheet, activity_report::ActivityReport};
 
 use super::Formatter;
 use super::{format_work_command, prepare_activity_view, prepare_timesheet_view};
@@ -167,11 +164,8 @@ impl Formatter for MarkdownFormatter {
         output
     }
 
-    fn format_activity(
-        activity_report: &ActivityReport,
-        group_by: Option<ActivityGroupBy>,
-    ) -> String {
-        let activity_view = prepare_activity_view(activity_report, group_by);
+    fn format_activity(activity_report: &ActivityReport, group_by_title: bool) -> String {
+        let activity_view = prepare_activity_view(activity_report, group_by_title);
         let mut output = String::new();
         output.push_str(&format!("# {}\n\n", activity_view.title));
 
@@ -518,7 +512,7 @@ _No tracked time._
 
     #[test]
     fn markdown_format_activity_renders_detailed_rows() {
-        let rendered = MarkdownFormatter::format_activity(&activity_report(), None);
+        let rendered = MarkdownFormatter::format_activity(&activity_report(), false);
 
         assert_eq!(
             &rendered,
@@ -534,8 +528,7 @@ _No tracked time._
 
     #[test]
     fn markdown_format_activity_renders_grouped_rows() {
-        let rendered =
-            MarkdownFormatter::format_activity(&activity_report(), Some(ActivityGroupBy::Title));
+        let rendered = MarkdownFormatter::format_activity(&activity_report(), true);
 
         assert_eq!(
             &rendered,
@@ -550,25 +543,6 @@ _No tracked time._
     }
 
     #[test]
-    fn markdown_format_activity_renders_grouped_rows_by_title_description() {
-        let rendered = MarkdownFormatter::format_activity(
-            &activity_report(),
-            Some(ActivityGroupBy::TitleDescription),
-        );
-
-        assert_eq!(
-            &rendered,
-            r#"# Activity 2026-01-10 (grouped by title + description)
-
-| Title | Description | Count | Duration |
-| :-- | :-- | --: | --: |
-| handoff | sync | 1 | 2h |
-| wrap | - | 1 | 2h |
-"#
-        );
-    }
-
-    #[test]
     fn markdown_format_activity_prints_work_specific_empty_state() {
         let rendered = MarkdownFormatter::format_activity(
             &ActivityReport::new(
@@ -578,7 +552,7 @@ _No tracked time._
                 ),
                 vec![],
             ),
-            None,
+            false,
         );
 
         assert_eq!(

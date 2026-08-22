@@ -84,7 +84,7 @@ fn run_inner<S: RecordRepository>(
             let scope = activity_args.scope();
             let activity_report = app.activity(scope.clone())?;
 
-            format::print_activity(formatter, &activity_report, activity_args.group_by)
+            format::print_activity(formatter, &activity_report, activity_args.group_by_title)
         }
     }
 }

@@ -17,9 +17,7 @@ pub use port::Formatter;
 pub use markdown_formatter::MarkdownFormatter;
 
 use crate::domain::{
-    Timesheet, WorkCommand,
-    activity_report::{ActivityGroupBy, ActivityReport},
-    reporting::TimeWindow,
+    Timesheet, WorkCommand, activity_report::ActivityReport, reporting::TimeWindow,
 };
 
 pub fn print_day(
@@ -69,13 +67,13 @@ pub fn print_timesheet(formatter: OutputFormatter, timesheet: &Timesheet) -> Res
 pub fn print_activity(
     formatter: OutputFormatter,
     activity_report: &ActivityReport,
-    group_by: Option<ActivityGroupBy>,
+    group_by_title: bool,
 ) -> Result<()> {
     match formatter {
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
             {
-                let rendered = MarkdownFormatter::format_activity(activity_report, group_by);
+                let rendered = MarkdownFormatter::format_activity(activity_report, group_by_title);
                 MarkdownFormatter::print(&rendered);
                 Ok(())
             }
@@ -309,11 +307,11 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
 
 pub(super) fn prepare_activity_view(
     activity_report: &ActivityReport,
-    group_by: Option<ActivityGroupBy>,
+    group_by_title: bool,
 ) -> ActivityView {
-    match group_by {
-        Some(ActivityGroupBy::Title) => ActivityView {
-            title: format_activity_title(activity_report.window(), group_by),
+    if group_by_title {
+        ActivityView {
+            title: format_activity_title(activity_report.window(), group_by_title),
             rows: Vec::new(),
             groups: activity_report
                 .group_by_title()
@@ -327,44 +325,27 @@ pub(super) fn prepare_activity_view(
                 .collect(),
             show_description: false,
             show_group_description: false,
-        },
-        Some(ActivityGroupBy::TitleDescription) => ActivityView {
-            title: format_activity_title(activity_report.window(), group_by),
-            rows: Vec::new(),
-            groups: activity_report
-                .group_by_title_description()
-                .into_iter()
-                .map(|row| ActivityGroupView {
-                    title: row.title().to_string(),
-                    description: row.description().unwrap_or("-").to_string(),
-                    count: row.count().to_string(),
-                    duration: format_duration(row.duration_minutes()),
-                })
-                .collect(),
-            show_description: false,
-            show_group_description: true,
-        },
-        None => {
-            let rows = activity_report
-                .rows()
-                .iter()
-                .map(|row| ActivityItemView {
-                    date: row.date().to_string(),
-                    start: format_activity_boundary(row.start(), row.date()),
-                    end: format_activity_boundary(row.end(), row.date()),
-                    duration: format_duration(row.duration_minutes()),
-                    title: row.title().to_string(),
-                    description: row.description().unwrap_or_default().to_string(),
-                })
-                .collect::<Vec<_>>();
+        }
+    } else {
+        let rows = activity_report
+            .rows()
+            .iter()
+            .map(|row| ActivityItemView {
+                date: row.date().to_string(),
+                start: format_activity_boundary(row.start(), row.date()),
+                end: format_activity_boundary(row.end(), row.date()),
+                duration: format_duration(row.duration_minutes()),
+                title: row.title().to_string(),
+                description: row.description().unwrap_or_default().to_string(),
+            })
+            .collect::<Vec<_>>();
 
-            ActivityView {
-                title: format_activity_title(activity_report.window(), group_by),
-                show_description: rows.iter().any(|row| !row.description.is_empty()),
-                show_group_description: false,
-                rows,
-                groups: Vec::new(),
-            }
+        ActivityView {
+            title: format_activity_title(activity_report.window(), group_by_title),
+            show_description: rows.iter().any(|row| !row.description.is_empty()),
+            show_group_description: false,
+            rows,
+            groups: Vec::new(),
         }
     }
 }
@@ -373,18 +354,11 @@ pub(super) fn format_timesheet_title(window: TimeWindow) -> String {
     format!("Timesheet {}", format_time_window(window))
 }
 
-pub(super) fn format_activity_title(
-    window: TimeWindow,
-    group_by: Option<ActivityGroupBy>,
-) -> String {
-    match group_by {
-        Some(ActivityGroupBy::Title) => {
-            format!("Activity {} (grouped by title)", format_time_window(window))
-        }
-        Some(ActivityGroupBy::TitleDescription) => {
-            format!("Activity {} (grouped by title + description)", format_time_window(window))
-        }
-        None => format!("Activity {}", format_time_window(window)),
+pub(super) fn format_activity_title(window: TimeWindow, group_by_title: bool) -> String {
+    if group_by_title {
+        format!("Activity {} (grouped by title)", format_time_window(window))
+    } else {
+        format!("Activity {}", format_time_window(window))
     }
 }
 
@@ -576,7 +550,7 @@ mod tests {
             ],
         );
 
-        let display = prepare_activity_view(&activity_report, None);
+        let display = prepare_activity_view(&activity_report, false);
 
         assert_eq!(display.title, "Activity 2026-01-10");
         assert!(display.groups.is_empty());
@@ -629,7 +603,7 @@ mod tests {
             ],
         );
 
-        let display = prepare_activity_view(&activity_report, Some(ActivityGroupBy::Title));
+        let display = prepare_activity_view(&activity_report, true);
 
         assert_eq!(display.title, "Activity 2026-01-10 (grouped by title)");
         assert!(display.rows.is_empty());
@@ -642,55 +616,6 @@ mod tests {
                 count: "2".into(),
                 duration: "3h".into(),
             }]
-        );
-    }
-
-    #[test]
-    fn prepare_activity_view_groups_rows_by_title_description() {
-        let activity_report = ActivityReport::new(
-            TimeWindow::new(ts(10, 0, 0), ts(11, 0, 0)),
-            vec![
-                WorkItemRow::new(
-                    ts(10, 10, 0).date_naive(),
-                    ts(10, 8, 0),
-                    ts(10, 10, 0),
-                    120,
-                    "review".into(),
-                    Some("PR #184".into()),
-                ),
-                WorkItemRow::new(
-                    ts(10, 12, 0).date_naive(),
-                    ts(10, 10, 0),
-                    ts(10, 12, 0),
-                    30,
-                    "review".into(),
-                    None,
-                ),
-            ],
-        );
-
-        let display =
-            prepare_activity_view(&activity_report, Some(ActivityGroupBy::TitleDescription));
-
-        assert_eq!(display.title, "Activity 2026-01-10 (grouped by title + description)");
-        assert!(display.rows.is_empty());
-        assert!(display.show_group_description);
-        assert_eq!(
-            display.groups,
-            vec![
-                ActivityGroupView {
-                    title: "review".into(),
-                    description: "PR #184".into(),
-                    count: "1".into(),
-                    duration: "2h".into(),
-                },
-                ActivityGroupView {
-                    title: "review".into(),
-                    description: "-".into(),
-                    count: "1".into(),
-                    duration: "30m".into(),
-                },
-            ]
         );
     }
 

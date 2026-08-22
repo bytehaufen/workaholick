@@ -2,10 +2,7 @@ use chrono::NaiveDate;
 
 use crate::{
     DayOverview,
-    domain::{
-        Timesheet,
-        activity_report::{ActivityGroupBy, ActivityReport},
-    },
+    domain::{Timesheet, activity_report::ActivityReport},
 };
 
 pub trait Formatter {
@@ -15,8 +12,5 @@ pub trait Formatter {
 
     fn format_timesheet(timesheet: &Timesheet) -> String;
 
-    fn format_activity(
-        activity_report: &ActivityReport,
-        group_by: Option<ActivityGroupBy>,
-    ) -> String;
+    fn format_activity(activity_report: &ActivityReport, group_by_title: bool) -> String;
 }
