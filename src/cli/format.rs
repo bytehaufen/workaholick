@@ -145,8 +145,6 @@ pub(super) struct TimesheetView {
     pub daily_totals_total: Option<DailyTotalsView>,
     pub weekly_totals: Vec<WeeklyTotalsView>,
     pub weekly_totals_total: Option<WeeklyTotalsView>,
-    pub target: String,
-    pub balance: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -307,8 +305,6 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
         daily_totals_total,
         weekly_totals,
         weekly_totals_total,
-        target: format_duration(timesheet.target_minutes()),
-        balance: format_signed_duration(timesheet.balance_minutes()),
     }
 }
 
@@ -717,7 +713,6 @@ mod tests {
         let timesheet = Timesheet::new(
             window,
             calculate_time_breakdown(&records, window, &empty_schedule()).unwrap(),
-            40 * 60,
         )
         .with_daily_totals(vec![
             DailyTotals::new(ts(12, 0, 0).date_naive(), 8 * 60, 0, 0, 8 * 60),
@@ -797,8 +792,6 @@ mod tests {
 
         assert!(display.weekly_totals.is_empty());
         assert_eq!(display.weekly_totals_total, None);
-        assert_eq!(&display.target, "40h");
-        assert_eq!(&display.balance, "-34h 15m");
     }
 
     #[test]
@@ -827,7 +820,7 @@ mod tests {
             &empty_schedule(),
         )
         .unwrap();
-        let timesheet = Timesheet::new(window, breakdown, 56 * 60).with_weekly_totals(vec![
+        let timesheet = Timesheet::new(window, breakdown).with_weekly_totals(vec![
             WeeklyTotals::new(
                 Local.with_ymd_and_hms(2025, 12, 29, 0, 0, 0).unwrap().date_naive(),
                 8 * 60,
@@ -873,8 +866,6 @@ mod tests {
             })
         );
         assert!(display.daily_totals.is_empty());
-        assert_eq!(&display.target, "56h");
-        assert_eq!(&display.balance, "-8h");
     }
 
     #[test]
@@ -894,7 +885,7 @@ mod tests {
         )
         .unwrap();
 
-        let timesheet = Timesheet::new(window, breakdown, 8 * 60)
+        let timesheet = Timesheet::new(window, breakdown)
             .with_daily_totals(vec![DailyTotals::new(date(5), 4 * 60, 60, 4 * 60, 8 * 60)])
             .with_weekly_totals(vec![WeeklyTotals::new(date(5), 4 * 60, 60, 4 * 60, 8 * 60)]);
 
@@ -959,7 +950,5 @@ mod tests {
                 balance: "0m".into()
             })
         );
-        assert_eq!(display.target, "8h");
-        assert_eq!(display.balance, "0m");
     }
 }

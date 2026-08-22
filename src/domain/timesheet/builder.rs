@@ -12,9 +12,8 @@ pub(crate) fn build_timesheet(
     weekly_schedule: &WeeklySchedule,
 ) -> anyhow::Result<Timesheet> {
     let breakdown = calculate_time_breakdown(records, window, weekly_schedule)?;
-    let target_minutes = calculate_target_minutes(weekly_schedule, window);
 
-    let timesheet = Timesheet::new(window, breakdown, target_minutes);
+    let timesheet = Timesheet::new(window, breakdown);
     match scope {
         DateScope::Period { period: Period::Week, .. } => {
             let daily_totals = calculate_daily_totals(records, window, weekly_schedule)?;

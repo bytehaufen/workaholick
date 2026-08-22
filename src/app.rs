@@ -285,7 +285,7 @@ mod tests {
         domain::{
             AbsenceKind,
             AbsencePortion::{self},
-            DailyTotals, RecordSet, TimeCategory, WorkContext,
+            DailyTotals, RecordSet, TimeCategory, WeeklyTotals, WorkContext,
         },
         test_support::*,
     };
@@ -570,10 +570,7 @@ mod tests {
             .unwrap();
 
         let timesheet = app.timesheet(DateScope::Range { from: date(12), to: date(12) }).unwrap();
-        assert_eq!(timesheet.absence_minutes(), 60);
-        assert_eq!(timesheet.worked_minutes(), 0);
-        assert_eq!(timesheet.target_minutes(), 60);
-        assert_eq!(timesheet.balance_minutes(), 0);
+        assert_eq!(timesheet.weekly_totals(), &[WeeklyTotals::new(date(12), 0, 0, 60, 60)]);
     }
 
     #[test]
@@ -590,10 +587,10 @@ mod tests {
             .unwrap();
 
         let timesheet = app.timesheet(DateScope::Range { from: date(12), to: date(12) }).unwrap();
-        assert_eq!(timesheet.worked_minutes(), 4 * 60);
-        assert_eq!(timesheet.absence_minutes(), 4 * 60);
-        assert_eq!(timesheet.target_minutes(), 8 * 60);
-        assert_eq!(timesheet.balance_minutes(), 0);
+        assert_eq!(
+            timesheet.weekly_totals(),
+            &vec![WeeklyTotals::new(date(12), 4 * 60, 0, 4 * 60, 8 * 60)]
+        );
     }
 
     #[test]
@@ -608,9 +605,6 @@ mod tests {
         let timesheet =
             app.timesheet(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
-        assert_eq!(timesheet.target_minutes(), 8 * 60);
-        assert_eq!(timesheet.absence_minutes(), 8 * 60);
-        assert_eq!(timesheet.balance_minutes(), 0);
         assert!(timesheet.weekly_totals().is_empty());
         assert_eq!(timesheet.daily_totals().len(), 4);
         let expected = vec![
@@ -633,9 +627,6 @@ mod tests {
 
         let timesheet = app.timesheet(DateScope::Range { from: date(12), to: date(14) }).unwrap();
 
-        assert_eq!(timesheet.target_minutes(), 8 * 60);
-        assert_eq!(timesheet.absence_minutes(), 8 * 60);
-        assert_eq!(timesheet.balance_minutes(), 0);
         assert!(timesheet.daily_totals().is_empty());
         assert_eq!(timesheet.weekly_totals().len(), 1);
         let weekly_total = timesheet.weekly_totals().first().unwrap();
@@ -676,9 +667,6 @@ mod tests {
         let timesheet =
             app.timesheet(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
-        assert_eq!(timesheet.target_minutes(), (1 + 2 + 3 + 4 + 5) * 60);
-        assert_eq!(timesheet.worked_minutes(), (1 + 2 + 3 + 4 + 5) * 60);
-        assert_eq!(timesheet.balance_minutes(), 0);
         assert_eq!(
             timesheet.daily_totals().iter().map(|day| day.worked_minutes()).collect::<Vec<_>>(),
             vec![60, 60 << 1, 3 * 60, 60 << 2, 5 * 60, 0, 0]
@@ -696,8 +684,6 @@ mod tests {
 
         let timesheet = app.timesheet(DateScope::Range { from: date(3), to: date(4) }).unwrap();
 
-        assert_eq!(timesheet.target_minutes(), 0);
-        assert_eq!(timesheet.balance_minutes(), 0);
         assert!(timesheet.daily_totals().is_empty());
         assert_eq!(timesheet.weekly_totals().len(), 1);
     }
@@ -713,8 +699,6 @@ mod tests {
         let timesheet =
             app.timesheet(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
-        assert_eq!(timesheet.target_minutes(), 10 * 60);
-        assert_eq!(timesheet.balance_minutes(), -10 * 60);
         assert_eq!(timesheet.daily_totals().len(), 4);
         assert!(timesheet.weekly_totals().is_empty());
     }
@@ -737,9 +721,6 @@ mod tests {
 
         let timesheet =
             app.timesheet(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
-
-        assert_eq!(timesheet.worked_minutes(), 9 * 60);
-        assert_eq!(timesheet.balance_minutes(), 60);
 
         let thursday = timesheet.daily_totals().iter().find(|day| day.date() == date(8)).unwrap();
         assert_eq!(thursday.break_minutes(), 60);
@@ -798,8 +779,6 @@ mod tests {
             ]
         );
         assert!(timesheet.daily_totals().is_empty());
-        assert_eq!(timesheet.target_minutes(), 88 * 60);
-        assert_eq!(timesheet.balance_minutes(), -72 * 60);
     }
 
     #[test]
@@ -812,8 +791,6 @@ mod tests {
 
         let timesheet = app.timesheet(DateScope::Range { from: date(12), to: date(14) }).unwrap();
 
-        assert_eq!(timesheet.target_minutes(), 6 * 60);
-        assert_eq!(timesheet.balance_minutes(), -6 * 60);
         assert!(timesheet.daily_totals().is_empty());
         assert_eq!(timesheet.weekly_totals().len(), 1);
     }
