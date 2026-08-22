@@ -614,10 +614,10 @@ mod tests {
         assert!(timesheet.weekly_totals().is_empty());
         assert_eq!(timesheet.daily_totals().len(), 4);
         let expected = vec![
-            DailyTotals::new(date(12), 0, 0, 0),
-            DailyTotals::new(date(13), 0, 0, 0),
-            DailyTotals::new(date(14), 0, 0, 0),
-            DailyTotals::new(date(15), 0, 0, 8 * 60),
+            DailyTotals::new(date(12), 0, 0, 0, 0),
+            DailyTotals::new(date(13), 0, 0, 0, 0),
+            DailyTotals::new(date(14), 0, 0, 0, 0),
+            DailyTotals::new(date(15), 0, 0, 8 * 60, 8 * 60),
         ];
         assert_eq!(timesheet.daily_totals(), &expected);
     }

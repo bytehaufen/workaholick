@@ -90,6 +90,7 @@ fn calculate_daily_totals(
                 breakdown.work_active_minutes(),
                 breakdown.break_minutes(),
                 breakdown.absence_minutes(),
+                weekly_schedule.minutes_for(day_start.weekday()),
             ))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;

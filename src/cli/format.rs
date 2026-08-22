@@ -7,7 +7,11 @@ use std::collections::HashSet;
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
 
-use crate::{DayOverview, config::OutputFormatter, domain::TimeCategory};
+use crate::{
+    DayOverview,
+    config::OutputFormatter,
+    domain::{DailyTotals, TimeCategory},
+};
 
 pub use port::Formatter;
 
@@ -138,6 +142,7 @@ pub(super) struct TimesheetView {
     pub rows: Vec<TimesheetViewRow>,
     pub total: TimesheetViewRow,
     pub daily_totals: Vec<DailyTotalsView>,
+    pub daily_totals_total: Option<DailyTotalsView>,
     pub weekly_totals: Vec<WeeklyTotalsView>,
     pub weekly_totals_total: Option<WeeklyTotalsView>,
     pub target: String,
@@ -185,6 +190,8 @@ pub(super) struct DailyTotalsView {
     pub active: String,
     pub break_time: String,
     pub absence: String,
+    pub target: String,
+    pub balance: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,8 +233,31 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
             active: format_duration(day.worked_minutes()),
             break_time: format_duration(day.break_minutes()),
             absence: format_duration(day.absence_minutes()),
+            target: format_duration(day.target_minutes()),
+            balance: format_signed_duration(day.balance_minutes()),
         })
         .collect();
+
+    let daily_totals_total = if timesheet.daily_totals().is_empty() {
+        None
+    } else {
+        let totals = timesheet.daily_totals();
+        let total_worked_minutes = totals.iter().map(DailyTotals::worked_minutes).sum();
+        let total_break_minutes = totals.iter().map(DailyTotals::break_minutes).sum();
+        let total_absence_minutes = totals.iter().map(DailyTotals::absence_minutes).sum();
+        let total_target_minutes = totals.iter().map(DailyTotals::target_minutes).sum();
+        let total_balance_minutes = totals.iter().map(DailyTotals::balance_minutes).sum();
+
+        Some(DailyTotalsView {
+            day: "TOTAL".to_string(),
+            active: format_duration(total_worked_minutes),
+            break_time: format_duration(total_break_minutes),
+            absence: format_duration(total_absence_minutes),
+            target: format_duration(total_target_minutes),
+            balance: format_signed_duration(total_balance_minutes),
+        })
+    };
+
     let weekly_totals = timesheet
         .weekly_totals()
         .iter()
@@ -274,6 +304,7 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
             break_minutes: total_break_minutes,
         }),
         daily_totals,
+        daily_totals_total,
         weekly_totals,
         weekly_totals_total,
         target: format_duration(timesheet.target_minutes()),
@@ -689,9 +720,9 @@ mod tests {
             40 * 60,
         )
         .with_daily_totals(vec![
-            DailyTotals::new(ts(12, 0, 0).date_naive(), 8 * 60, 0, 0),
-            DailyTotals::new(ts(13, 0, 0).date_naive(), 6 * 60, 0, 0),
-            DailyTotals::new(ts(14, 0, 0).date_naive(), 0, 0, 0),
+            DailyTotals::new(ts(12, 0, 0).date_naive(), 8 * 60, 0, 0, 8 * 60),
+            DailyTotals::new(ts(13, 0, 0).date_naive(), 6 * 60, 0, 0, 8 * 60),
+            DailyTotals::new(ts(14, 0, 0).date_naive(), 0, 0, 0, 8 * 60),
         ]);
 
         let display = prepare_timesheet_view(&timesheet);
@@ -731,21 +762,39 @@ mod tests {
                     active: "8h".into(),
                     break_time: "0m".into(),
                     absence: "0m".into(),
+                    target: "8h".into(),
+                    balance: "0m".into(),
                 },
                 DailyTotalsView {
                     day: "Tue 2026-01-13".into(),
                     active: "6h".into(),
                     break_time: "0m".into(),
                     absence: "0m".into(),
+                    target: "8h".into(),
+                    balance: "-2h".into()
                 },
                 DailyTotalsView {
                     day: "Wed 2026-01-14".into(),
                     active: "0m".into(),
                     break_time: "0m".into(),
                     absence: "0m".into(),
+                    target: "8h".into(),
+                    balance: "-8h".into()
                 },
             ]
         );
+        assert_eq!(
+            display.daily_totals_total,
+            Some(DailyTotalsView {
+                day: "TOTAL".into(),
+                active: "14h".into(),
+                break_time: "0m".into(),
+                absence: "0m".into(),
+                target: "24h".into(),
+                balance: "-10h".into()
+            })
+        );
+
         assert!(display.weekly_totals.is_empty());
         assert_eq!(display.weekly_totals_total, None);
         assert_eq!(&display.target, "40h");
@@ -846,7 +895,7 @@ mod tests {
         .unwrap();
 
         let timesheet = Timesheet::new(window, breakdown, 8 * 60)
-            .with_daily_totals(vec![DailyTotals::new(date(5), 4 * 60, 60, 4 * 60)])
+            .with_daily_totals(vec![DailyTotals::new(date(5), 4 * 60, 60, 4 * 60, 8 * 60)])
             .with_weekly_totals(vec![WeeklyTotals::new(date(5), 4 * 60, 60, 4 * 60, 8 * 60)]);
 
         let display = prepare_timesheet_view(&timesheet);
@@ -883,7 +932,9 @@ mod tests {
                 day: "Mon 2026-01-05".into(),
                 active: "4h".into(),
                 break_time: "1h".into(),
-                absence: "4h".into()
+                absence: "4h".into(),
+                target: "8h".into(),
+                balance: "0m".into(),
             }]
         );
         assert_eq!(

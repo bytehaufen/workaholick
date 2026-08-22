@@ -104,18 +104,32 @@ impl Formatter for MarkdownFormatter {
         output.push('\n');
 
         if has_daily_totals {
-            output.push_str("| Day | Worked | Break | Absence |\n");
-            output.push_str("| :-- | --: | --: | --: |\n");
+            output.push_str("| Day | Worked | Break | Absence | Target | Balance |\n");
+            output.push_str("| :-- | --: | --: | --: | --: | --: |\n");
 
             timesheet_view.daily_totals.iter().for_each(|row| {
                 output.push_str(&format!(
-                    "| {} | {} | {} | {} |\n",
+                    "| {} | {} | {} | {} | {} | {} |\n",
                     escape_markdown_table_cell(&row.day),
                     row.active,
                     row.break_time,
                     row.absence,
+                    row.target,
+                    row.balance
                 ));
             });
+
+            if let Some(total) = &timesheet_view.daily_totals_total {
+                output.push_str(&format!(
+                    "| {} | {} | {} | {} | {} | {} |\n",
+                    escape_markdown_table_cell(&total.day),
+                    total.active,
+                    total.break_time,
+                    total.absence,
+                    total.target,
+                    total.balance,
+                ));
+            };
 
             output.push('\n');
         }
@@ -242,7 +256,7 @@ mod tests {
     use crate::test_support::{absence_record, date, ts, work_record};
     use crate::{
         domain::{
-            DailyTotals, Record, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
+            DailyTotals, Timesheet, WeeklyTotals, WorkCommand, WorkContext,
             activity_report::{ActivityReport, WorkItemRow},
             calculate_time_breakdown,
             reporting::TimeWindow,
@@ -335,13 +349,24 @@ mod tests {
 
     #[test]
     fn markdown_format_timesheet_renders_sorted_rows_and_totals() {
-        let timesheet = timesheet(vec![
+        let window = TimeWindow::new(ts(12, 0, 0), ts(15, 0, 0));
+
+        let records = vec![
             work_record(1, 12, 0, 0, WorkCommand::Start { context: WorkContext::Home }),
             work_record(2, 12, 2, 15, WorkCommand::End { title: "done".into(), description: None }),
             work_record(3, 13, 4, 0, WorkCommand::Start { context: WorkContext::Office }),
             work_record(4, 13, 6, 0, WorkCommand::BreakStart),
             work_record(5, 13, 6, 30, WorkCommand::BreakEnd { description: None }),
             work_record(6, 13, 8, 0, WorkCommand::End { title: "done".into(), description: None }),
+        ];
+
+        let weekly_schedule = &WeeklySchedule::new([8 * 60, 8 * 60, 8 * 60, 0, 0, 0, 0]);
+        let breakdown = calculate_time_breakdown(&records, window, weekly_schedule).unwrap();
+
+        let timesheet = Timesheet::new(window, breakdown, 40 * 60).with_daily_totals(vec![
+            DailyTotals::new(date(12), 2 * 60 + 15, 0, 0, 8 * 60),
+            DailyTotals::new(date(13), 3 * 60 + 30, 30, 0, 8 * 60),
+            DailyTotals::new(date(14), 0, 0, 0, 8 * 60),
         ]);
 
         let rendered = MarkdownFormatter::format_timesheet(&timesheet);
@@ -356,11 +381,12 @@ mod tests {
 | work (office) | 1 | 3h 30m | 30m |
 | TOTAL |  | 5h 45m | 30m |
 
-| Day | Worked | Break | Absence |
-| :-- | --: | --: | --: |
-| Mon 2026-01-12 | 8h | 0m | 0m |
-| Tue 2026-01-13 | 6h | 0m | 0m |
-| Wed 2026-01-14 | 0m | 0m | 0m |
+| Day | Worked | Break | Absence | Target | Balance |
+| :-- | --: | --: | --: | --: | --: |
+| Mon 2026-01-12 | 2h 15m | 0m | 0m | 8h | -5h 45m |
+| Tue 2026-01-13 | 3h 30m | 30m | 0m | 8h | -4h 30m |
+| Wed 2026-01-14 | 0m | 0m | 0m | 8h | -8h |
+| TOTAL | 5h 45m | 30m | 0m | 24h | -18h 15m |
 
 | Metric | Value |
 | :-- | --: |
@@ -484,7 +510,7 @@ _No tracked time._
         .unwrap();
 
         let timesheet = Timesheet::new(window, breakdown, 8 * 60)
-            .with_daily_totals(vec![DailyTotals::new(date(5), 4 * 60, 60, 4 * 60)])
+            .with_daily_totals(vec![DailyTotals::new(date(5), 4 * 60, 60, 4 * 60, 8 * 60)])
             .with_weekly_totals(vec![WeeklyTotals::new(date(5), 4 * 60, 60, 4 * 60, 8 * 60)]);
 
         let rendered = MarkdownFormatter::format_timesheet(&timesheet);
@@ -499,9 +525,10 @@ _No tracked time._
 | work (office) | 1 | 4h | 1h |
 | TOTAL |  | 8h | 1h |
 
-| Day | Worked | Break | Absence |
-| :-- | --: | --: | --: |
-| Mon 2026-01-05 | 4h | 1h | 4h |
+| Day | Worked | Break | Absence | Target | Balance |
+| :-- | --: | --: | --: | --: | --: |
+| Mon 2026-01-05 | 4h | 1h | 4h | 8h | 0m |
+| TOTAL | 4h | 1h | 4h | 8h | 0m |
 
 | Week | Worked | Break | Absence | Target | Balance |
 | :-- | --: | --: | --: | --: | --: |
@@ -588,35 +615,6 @@ _No tracked time._
 _No completed work items._
 "#
         );
-    }
-
-    fn timesheet(records: Vec<Record>) -> Timesheet {
-        let window = TimeWindow::new(
-            Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap(),
-            Local.with_ymd_and_hms(2026, 1, 15, 0, 0, 0).unwrap(),
-        );
-        let breakdown = calculate_time_breakdown(&records, window, &empty_schedule()).unwrap();
-
-        Timesheet::new(window, breakdown, 40 * 60).with_daily_totals(vec![
-            DailyTotals::new(
-                Local.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap().date_naive(),
-                8 * 60,
-                0,
-                0,
-            ),
-            DailyTotals::new(
-                Local.with_ymd_and_hms(2026, 1, 13, 0, 0, 0).unwrap().date_naive(),
-                6 * 60,
-                0,
-                0,
-            ),
-            DailyTotals::new(
-                Local.with_ymd_and_hms(2026, 1, 14, 0, 0, 0).unwrap().date_naive(),
-                0,
-                0,
-                0,
-            ),
-        ])
     }
 
     fn activity_report() -> ActivityReport {

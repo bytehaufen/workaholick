@@ -22,6 +22,7 @@ impl TimeTotals {
 pub(crate) struct DailyTotals {
     date: NaiveDate,
     time_totals: TimeTotals,
+    target_minutes: i64,
 }
 
 impl DailyTotals {
@@ -30,8 +31,13 @@ impl DailyTotals {
         worked_minutes: i64,
         break_minutes: i64,
         absence_minutes: i64,
+        target_minutes: i64,
     ) -> Self {
-        Self { date, time_totals: TimeTotals { worked_minutes, break_minutes, absence_minutes } }
+        Self {
+            date,
+            time_totals: TimeTotals { worked_minutes, break_minutes, absence_minutes },
+            target_minutes,
+        }
     }
 
     pub(crate) fn date(&self) -> NaiveDate {
@@ -48,6 +54,14 @@ impl DailyTotals {
 
     pub(crate) fn absence_minutes(&self) -> i64 {
         self.time_totals.absence_minutes
+    }
+
+    pub(crate) fn target_minutes(&self) -> i64 {
+        self.target_minutes
+    }
+
+    pub(crate) fn balance_minutes(&self) -> i64 {
+        self.time_totals.balance_minutes(self.target_minutes())
     }
 }
 
