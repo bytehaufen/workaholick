@@ -2,8 +2,6 @@
 mod markdown_formatter;
 mod port;
 
-use std::collections::HashSet;
-
 use anyhow::Result;
 use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
 
@@ -177,7 +175,7 @@ pub(super) struct ActivityGroupView {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct TimesheetViewRow {
     pub activity: String,
-    pub day_count: String,
+    pub day_count: usize,
     pub active: String,
     pub break_time: String,
 }
@@ -213,7 +211,7 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
 
             PreparedTimesheetRow {
                 activity: format_time_category(kind),
-                day_count: format_day_count(bucket.dates()),
+                day_count: bucket.dates().len(),
                 active_minutes,
                 break_minutes,
             }
@@ -221,6 +219,7 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| left.activity.cmp(&right.activity));
 
+    let total_day_count = rows.iter().map(|row| row.day_count).sum();
     let total_active_minutes = rows.iter().map(|row| row.active_minutes).sum();
     let total_break_minutes = rows.iter().map(|row| row.break_minutes).sum();
     let daily_totals = timesheet
@@ -297,7 +296,7 @@ pub(super) fn prepare_timesheet_view(timesheet: &Timesheet) -> TimesheetView {
         rows: rows.into_iter().map(TimesheetViewRow::from).collect(),
         total: TimesheetViewRow::from(PreparedTimesheetRow {
             activity: "TOTAL".to_string(),
-            day_count: String::new(),
+            day_count: total_day_count,
             active_minutes: total_active_minutes,
             break_minutes: total_break_minutes,
         }),
@@ -435,10 +434,6 @@ pub(super) fn format_week_label(date: NaiveDate) -> String {
     format!("{}-W{:02}", iso.year(), iso.week())
 }
 
-fn format_day_count(dates: &HashSet<NaiveDate>) -> String {
-    dates.len().to_string()
-}
-
 pub(super) fn format_duration(total_minutes: i64) -> String {
     if total_minutes <= 0 {
         return "0m".to_string();
@@ -469,7 +464,7 @@ pub(super) fn format_signed_duration(total_minutes: i64) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PreparedTimesheetRow {
     activity: String,
-    day_count: String,
+    day_count: usize,
     active_minutes: i64,
     break_minutes: i64,
 }
@@ -728,13 +723,13 @@ mod tests {
             vec![
                 TimesheetViewRow {
                     activity: "work (home)".into(),
-                    day_count: "1".into(),
+                    day_count: 1,
                     active: "2h 15m".into(),
                     break_time: "0m".into(),
                 },
                 TimesheetViewRow {
                     activity: "work (office)".into(),
-                    day_count: "1".into(),
+                    day_count: 1,
                     active: "3h 30m".into(),
                     break_time: "30m".into(),
                 },
@@ -744,7 +739,7 @@ mod tests {
             display.total,
             TimesheetViewRow {
                 activity: "TOTAL".into(),
-                day_count: String::new(),
+                day_count: 2,
                 active: "5h 45m".into(),
                 break_time: "30m".into(),
             }
@@ -895,13 +890,13 @@ mod tests {
             vec![
                 TimesheetViewRow {
                     activity: "absence (vacation)".into(),
-                    day_count: "1".into(),
+                    day_count: 1,
                     active: "4h".into(),
                     break_time: "0m".into(),
                 },
                 TimesheetViewRow {
                     activity: "work (office)".into(),
-                    day_count: "1".into(),
+                    day_count: 1,
                     active: "4h".into(),
                     break_time: "1h".into()
                 }
@@ -911,7 +906,7 @@ mod tests {
             display.total,
             TimesheetViewRow {
                 activity: "TOTAL".into(),
-                day_count: "".into(),
+                day_count: 2,
                 active: "8h".into(),
                 break_time: "1h".into(),
             }

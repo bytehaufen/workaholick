@@ -373,7 +373,7 @@ mod tests {
 | :-- | --: | --: | --: |
 | work (home) | 1 | 2h 15m | 0m |
 | work (office) | 1 | 3h 30m | 30m |
-| TOTAL |  | 5h 45m | 30m |
+| TOTAL | 2 | 5h 45m | 30m |
 
 | Day | Worked | Break | Absence | Target | Balance |
 | :-- | --: | --: | --: | --: | --: |
@@ -459,7 +459,7 @@ _No tracked time._
 | Activity | Days | Active | Break |
 | :-- | --: | --: | --: |
 | work (home) | 3 | 48h | 0m |
-| TOTAL |  | 48h | 0m |
+| TOTAL | 3 | 48h | 0m |
 
 | Week | Worked | Break | Absence | Target | Balance |
 | :-- | --: | --: | --: | --: | --: |
@@ -501,7 +501,7 @@ _No tracked time._
 | :-- | --: | --: | --: |
 | absence (vacation) | 1 | 4h | 0m |
 | work (office) | 1 | 4h | 1h |
-| TOTAL |  | 8h | 1h |
+| TOTAL | 2 | 8h | 1h |
 
 | Day | Worked | Break | Absence | Target | Balance |
 | :-- | --: | --: | --: | --: | --: |
