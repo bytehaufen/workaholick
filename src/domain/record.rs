@@ -4,7 +4,7 @@ use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    WorkCommand, WorkRecordInput,
+    AbsenceKind, AbsencePortion, WorkCommand, WorkRecordInput,
     absence::{AbsenceRecord, AbsenceRecordInput},
     work::WorkRecord,
 };
@@ -101,6 +101,15 @@ impl RecordInput {
     pub fn new_work(timestamp: DateTime<Local>, command: WorkCommand) -> Self {
         Self::Work(WorkRecordInput::new(timestamp, command))
     }
+
+    pub fn new_absence(
+        date: NaiveDate,
+        kind: AbsenceKind,
+        portion: AbsencePortion,
+        note: Option<String>,
+    ) -> Self {
+        Self::Absence(AbsenceRecordInput::new(date, kind, portion, note))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,9 +168,7 @@ mod tests {
 
     use chrono::TimeZone;
 
-    use crate::domain::{
-        AbsenceKind, AbsencePortion, AbsenceRecordInput, WorkCommand, WorkContext, WorkRecordInput,
-    };
+    use crate::domain::{AbsenceKind, AbsencePortion, WorkCommand, WorkContext, WorkRecordInput};
 
     #[test]
     fn serializes_work_record_start() {

@@ -1,10 +1,10 @@
 use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate};
 
 use crate::config::Config;
-use crate::domain::WeeklySchedule;
+use crate::domain::{AbsenceKind, AbsencePortion, WeeklySchedule};
 use crate::domain::{
-    AbsenceRecord, AbsenceRecordInput, ChangeOutcome, Period, Record, RecordChange, RecordId,
-    RecordInput, Timesheet, WorkCommand, WorkContext, WorkRecord,
+    AbsenceRecord, ChangeOutcome, Period, Record, RecordChange, RecordId, RecordInput, Timesheet,
+    WorkCommand, WorkContext, WorkRecord,
     activity_report::{self, ActivityReport},
     build_timesheet,
     reporting::{self, DateScope, TimeWindow},
@@ -91,10 +91,49 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         self.insert_record(input)
     }
 
-    ///// Absence
-    pub fn add_absence(&mut self, input: AbsenceRecordInput) -> anyhow::Result<RecordId> {
-        let input = RecordInput::Absence(input);
-        self.insert_record(input)
+    pub fn add_absence_range(
+        &mut self,
+        kind: AbsenceKind,
+        portion: AbsencePortion,
+        note: Option<String>,
+        range: Option<(NaiveDate, NaiveDate)>,
+    ) -> anyhow::Result<Vec<RecordId>> {
+        let (from, to) = range.unwrap_or_else(|| {
+            let today = self.clock.today();
+            (today, today)
+        });
+
+        anyhow::ensure!(from <= to, "Absence start date must be on or before end date");
+        let mut candidate = self.store.records().clone();
+
+        let dates_iter = std::iter::successors(Some(from), |date| date.succ_opt())
+            .take_while(|date| *date <= to);
+
+        let changes = dates_iter
+            .map(|date| -> anyhow::Result<(RecordChange, RecordId)> {
+                let id = candidate.next_id();
+
+                let change = RecordChange::Insert {
+                    id,
+                    input: RecordInput::new_absence(date, kind, portion, note.clone()),
+                };
+
+                let _ = candidate.apply_change(&change)?;
+
+                Ok((change, id))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        validate_records(&candidate)?;
+
+        let ids = changes.iter().map(|change| change.1).collect::<Vec<_>>();
+
+        changes.into_iter().try_for_each(|change| -> anyhow::Result<()> {
+            let _ = self.store.commit(change.0)?;
+            Ok(())
+        })?;
+
+        Ok(ids)
     }
 
     ///// Common
@@ -1050,17 +1089,213 @@ mod tests {
         )
         .unwrap();
 
-        let update = RecordInput::Absence(AbsenceRecordInput::new(
+        let update = RecordInput::new_absence(
             ts(11, 8, 25).date_naive(),
             AbsenceKind::Vacation,
             AbsencePortion::HalfDay,
             Some("".into()),
-        ));
+        );
         let err = app.update_record(1.into(), update).unwrap_err();
 
         assert_eq!(err.to_string(), "record 1 cannot be updated with a different record type");
 
         let expected = app.store.records().get(&1.into()).unwrap().as_work().unwrap().command();
         assert!(matches!(expected, WorkCommand::Start { context: WorkContext::Home }));
+    }
+
+    #[test]
+    fn add_absence_defaults_to_clock_today() {
+        let ts = ts(23, 13, 30);
+        let store = FakeStore::default();
+        let mut app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now: ts, today: ts.date_naive() },
+        )
+        .unwrap();
+
+        let ids = app
+            .add_absence_range(AbsenceKind::Vacation, AbsencePortion::FullDay, None, None)
+            .unwrap();
+
+        assert_eq!(ids.len(), 1);
+        let absence_records = app.day(date(23)).absence_records;
+        assert_eq!(absence_records.len(), 1);
+        assert_eq!(*absence_records[0].id(), ids[0]);
+        assert_eq!(*absence_records[0].date(), date(23));
+    }
+
+    #[test]
+    fn add_absence_adds_one_record_for_single_date() {
+        let ts = ts(23, 13, 30);
+        let store = FakeStore::default();
+        let mut app = App::new_with_clock(
+            Config::default(),
+            store,
+            FixedClock { now: ts, today: ts.date_naive() },
+        )
+        .unwrap();
+
+        let ids = app
+            .add_absence_range(
+                AbsenceKind::Vacation,
+                AbsencePortion::FullDay,
+                None,
+                Some((date(24), date(24))),
+            )
+            .unwrap();
+
+        assert_eq!(ids.len(), 1);
+        let absence_records = app.day(date(24)).absence_records;
+        assert_eq!(absence_records.len(), 1);
+        assert_eq!(*absence_records[0].id(), ids[0]);
+        assert_eq!(*absence_records[0].date(), date(24));
+    }
+
+    #[test]
+    fn add_absence_adds_multiple_records_for_date_range() {
+        let ts = ts(23, 13, 30);
+        let mut app = App::new_with_clock(
+            Config::default(),
+            FakeStore::default(),
+            FixedClock { now: ts, today: ts.date_naive() },
+        )
+        .unwrap();
+
+        let ids = app
+            .add_absence_range(
+                AbsenceKind::Vacation,
+                AbsencePortion::FullDay,
+                None,
+                Some((date(24), date(26))),
+            )
+            .unwrap();
+
+        assert_eq!(ids.len(), 3);
+        {
+            let absence_records = app.day(date(24)).absence_records;
+            assert_eq!(absence_records.len(), 1);
+            assert_eq!(*absence_records[0].id(), ids[0]);
+            assert_eq!(*absence_records[0].date(), date(24));
+        }
+        {
+            let absence_records = app.day(date(25)).absence_records;
+            assert_eq!(absence_records.len(), 1);
+            assert_eq!(*absence_records[0].id(), ids[1]);
+            assert_eq!(*absence_records[0].date(), date(25));
+        }
+        {
+            let absence_records = app.day(date(26)).absence_records;
+            assert_eq!(absence_records.len(), 1);
+            assert_eq!(*absence_records[0].id(), ids[2]);
+            assert_eq!(*absence_records[0].date(), date(26));
+        }
+        {
+            let absence_records = app.day(date(27)).absence_records;
+            assert!(absence_records.is_empty());
+        }
+    }
+
+    #[test]
+    fn add_absence_rejects_reversed_data_range() {
+        let ts = ts(23, 13, 50);
+        let mut app = App::new_with_clock(
+            Config::default(),
+            FakeStore::default(),
+            FixedClock { now: ts, today: ts.date_naive() },
+        )
+        .unwrap();
+
+        let err = app
+            .add_absence_range(
+                AbsenceKind::Vacation,
+                AbsencePortion::FullDay,
+                None,
+                Some((date(25), date(24))),
+            )
+            .unwrap_err();
+
+        assert_eq!(err.to_string(), "Absence start date must be on or before end date");
+        assert!(app.day(date(24)).is_empty());
+        assert!(app.day(date(25)).is_empty());
+    }
+
+    #[test]
+    fn add_absence_copies_kind_port_and_note_to_each_date() {
+        let ts = ts(23, 13, 30);
+        let mut app = App::new_with_clock(
+            Config::default(),
+            FakeStore::default(),
+            FixedClock { now: ts, today: ts.date_naive() },
+        )
+        .unwrap();
+
+        let ids = app
+            .add_absence_range(
+                AbsenceKind::Vacation,
+                AbsencePortion::FullDay,
+                Some("doc".to_string()),
+                Some((date(24), date(25))),
+            )
+            .unwrap();
+
+        assert_eq!(ids.len(), 2);
+
+        let assert_details = |absence_record: &AbsenceRecord, id: RecordId, date: NaiveDate| {
+            assert_eq!(*absence_record.id(), id);
+            assert_eq!(*absence_record.date(), date);
+            assert_eq!(*absence_record.kind(), AbsenceKind::Vacation);
+            assert_eq!(*absence_record.portion(), AbsencePortion::FullDay);
+            assert_eq!(*absence_record.note(), Some("doc".to_string()));
+        };
+
+        {
+            let absence_records = app.day(date(24)).absence_records;
+            assert_eq!(absence_records.len(), 1);
+            assert_details(&absence_records[0], ids[0], date(24));
+        }
+        {
+            let absence_records = app.day(date(25)).absence_records;
+            assert_eq!(absence_records.len(), 1);
+            assert_details(&absence_records[0], ids[1], date(25));
+        }
+    }
+
+    #[test]
+    fn add_absence_range_validates_before_commiting() {
+        let ts = ts(23, 13, 30);
+        let mut app = App::new_with_clock(
+            Config::default(),
+            FakeStore::default().seed(vec![absence_record(
+                42,
+                23,
+                AbsenceKind::Vacation,
+                AbsencePortion::FullDay,
+            )]),
+            FixedClock { now: ts, today: ts.date_naive() },
+        )
+        .unwrap();
+
+        let err = app
+            .add_absence_range(
+                AbsenceKind::Holiday,
+                AbsencePortion::FullDay,
+                Some("doc".to_string()),
+                Some((date(23), date(24))),
+            )
+            .unwrap_err();
+
+        assert_eq!(err.to_string(), "more than one full-day absence for 2026-01-23");
+
+        {
+            let absence_records = app.day(date(23)).absence_records;
+            assert_eq!(absence_records.len(), 1);
+            assert_eq!(*absence_records[0].id(), RecordId::from(42));
+            assert_eq!(*absence_records[0].kind(), AbsenceKind::Vacation);
+        }
+        {
+            let absence_records = app.day(date(24)).absence_records;
+            assert!(absence_records.is_empty());
+        }
     }
 }

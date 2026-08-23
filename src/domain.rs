@@ -12,7 +12,7 @@ mod weekly_schedule;
 mod work;
 mod work_state;
 
-pub(crate) use absence::{AbsenceKind, AbsencePortion, AbsenceRecord, AbsenceRecordInput};
+pub(crate) use absence::{AbsenceKind, AbsencePortion, AbsenceRecord};
 pub(crate) use period::Period;
 pub(crate) use record::{Record, RecordId, RecordInput};
 pub(crate) use record_set::{ChangeOutcome, RecordChange, RecordSet};

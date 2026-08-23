@@ -1,13 +1,10 @@
-use chrono::{DateTime, Local, NaiveDate};
+use chrono::{DateTime, Local, NaiveDate, TimeZone};
 
 use crate::domain::{
-    AbsenceKind, AbsencePortion, AbsenceRecordInput, Record, RecordInput, WeeklySchedule,
-    WorkCommand, WorkRecordInput,
+    AbsenceKind, AbsencePortion, Record, RecordInput, WeeklySchedule, WorkCommand, WorkRecordInput,
 };
 
 pub(crate) fn ts(day: u32, hour: u32, min: u32) -> DateTime<Local> {
-    use chrono::TimeZone;
-
     Local.with_ymd_and_hms(2026, 1, day, hour, min, 0).unwrap()
 }
 
@@ -30,12 +27,7 @@ pub(crate) fn absence_record(
 ) -> Record {
     Record::from_input(
         id.into(),
-        RecordInput::Absence(AbsenceRecordInput::new(
-            ts(day, 0, 0).date_naive(),
-            kind,
-            portion,
-            None,
-        )),
+        RecordInput::new_absence(ts(day, 0, 0).date_naive(), kind, portion, None),
     )
 }
 

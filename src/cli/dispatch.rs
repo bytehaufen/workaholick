@@ -2,8 +2,9 @@ use super::args::{Cli, CliCommand};
 use super::edit_format::{parse_edited, render_for_edit};
 use super::format;
 use crate::App;
-use crate::cli::args::WorkSubcommand;
+use crate::cli::args::{AbsenceDetailsArgs, WorkSubcommand};
 use crate::config::OutputFormatter;
+use crate::domain::RecordId;
 use crate::editor::{Editor, ports::FileType};
 use crate::store::RecordRepository;
 
@@ -40,9 +41,13 @@ fn run_inner<S: RecordRepository>(
             println!("✅ Record with ID {id} added.");
             Ok(())
         }
-        CliCommand::Absence { kind, details } => {
-            let id = app.add_absence(details.into_input(kind))?;
-            println!("✅ Record with ID {id} added.");
+        CliCommand::Absence { details, dates } => {
+            let range = dates.into_range()?;
+            let AbsenceDetailsArgs { kind, portion, note } = details;
+
+            let ids = app.add_absence_range(kind, portion, note, range)?;
+            let ids_str = ids.iter().map(RecordId::to_string).collect::<Vec<_>>().join(", ");
+            println!("✅ Record with ID(s) {ids_str} added.");
             Ok(())
         }
         CliCommand::Delete { id } => {

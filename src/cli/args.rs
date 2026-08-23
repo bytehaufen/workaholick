@@ -7,9 +7,7 @@ use clap_complete::Shell;
 use std::path::PathBuf;
 use strum::VariantNames;
 
-use crate::domain::{
-    AbsenceKind, AbsencePortion, AbsenceRecordInput, Period, WorkContext, reporting::DateScope,
-};
+use crate::domain::{AbsenceKind, AbsencePortion, Period, WorkContext, reporting::DateScope};
 
 // FIXME: Update when domain implemented
 const HEADER: Style = clap_cargo::style::HEADER;
@@ -19,7 +17,9 @@ fn examples_help() -> String {
   workaholick work start office
   workaholick work log \"Code review\" --description \"PR #184\"
   workaholick work end \"Wrap up\" --description \"Release prep\"
+  workaholick absence vacation
   workaholick absence vacation --date 2026-05-01
+  workaholick absence vacation --from 2026-05-01 -to 2026-05-04
   workaholick absence sick --date 2026-05-01 --portion half-day --note \"doctor\"
   workaholick day
   workaholick timesheet week -1
@@ -71,13 +71,13 @@ pub enum CliCommand {
     /// Record an absence for a date
     #[command(visible_alias = "a")]
     Absence {
-        /// Kind of absence to record
-        #[arg( value_parser = absence_kind_parser())]
-        kind: AbsenceKind,
-
         /// Absence details
         #[command(flatten)]
         details: AbsenceDetailsArgs,
+
+        /// Absence date range
+        #[command(flatten)]
+        dates: AbsenceDateArgs,
     },
 
     /// Delete one or more records
@@ -189,11 +189,11 @@ pub enum WorkSubcommand {
 }
 
 /// Shared arguments for absence creation
-#[derive(Args, Debug, Clone)]
-pub struct AbsenceDetailsArgs {
-    /// Date of the absence (YYYY-MM-DD)
-    #[arg(long)]
-    pub date: NaiveDate,
+#[derive(Args, Debug, Clone, PartialEq)]
+pub(crate) struct AbsenceDetailsArgs {
+    /// Kind of absence to record
+    #[arg( value_parser = absence_kind_parser())]
+    pub kind: AbsenceKind,
 
     /// Full day by default, set to half-day when needed
     #[arg(long, value_enum, default_value = "full-day")]
@@ -204,9 +204,35 @@ pub struct AbsenceDetailsArgs {
     pub note: Option<String>,
 }
 
-impl AbsenceDetailsArgs {
-    pub(crate) fn into_input(self, kind: AbsenceKind) -> AbsenceRecordInput {
-        AbsenceRecordInput::new(self.date, kind, self.portion, self.note)
+/// Shared date range args
+#[derive(Args, Debug, Clone, PartialEq)]
+#[command(group(
+    ArgGroup::new("absence-date")
+         .args(["date", "from"])
+         .required(false)
+))]
+pub(crate) struct AbsenceDateArgs {
+    /// Date of the absence
+    #[arg(long, conflicts_with_all = ["from", "to"])]
+    pub date: Option<NaiveDate>,
+
+    /// Start date for an explicit range (YYYY-MM-DD)
+    #[arg(long, requires = "to", conflicts_with = "date")]
+    pub from: Option<NaiveDate>,
+
+    /// End date for an explicit range (YYYY-MM-DD)
+    #[arg(long, requires = "from", conflicts_with = "date")]
+    pub to: Option<NaiveDate>,
+}
+
+impl AbsenceDateArgs {
+    pub(crate) fn into_range(self) -> anyhow::Result<Option<(NaiveDate, NaiveDate)>> {
+        match (self.date, self.from, self.to) {
+            (None, None, None) => Ok(None),
+            (Some(date), None, None) => Ok(Some((date, date))),
+            (None, Some(from), Some(to)) => Ok(Some((from, to))),
+            _ => anyhow::bail!("provide either --date or both --from and --to"),
+        }
     }
 }
 
@@ -372,5 +398,105 @@ mod tests {
         };
 
         assert_eq!(shell, CompletionShell::Zsh);
+    }
+
+    #[test]
+    fn absence_defaults_to_no_explicit_date() {
+        let cli = Cli::try_parse_from(["workaholick", "absence", "vacation"]).unwrap();
+
+        let CliCommand::Absence { details, dates } = cli.command else {
+            panic!("expected absence command");
+        };
+
+        assert_eq!(
+            details,
+            AbsenceDetailsArgs {
+                kind: AbsenceKind::Vacation,
+                portion: AbsencePortion::FullDay,
+                note: None
+            }
+        );
+        assert_eq!(dates, AbsenceDateArgs { date: None, from: None, to: None });
+    }
+
+    #[test]
+    fn absence_parses_single_date() {
+        let cli =
+            Cli::try_parse_from(["workaholick", "absence", "holiday", "--date", "2026-01-10"])
+                .unwrap();
+
+        let CliCommand::Absence { details, dates } = cli.command else {
+            panic!("expected absence command");
+        };
+
+        assert_eq!(
+            details,
+            AbsenceDetailsArgs {
+                kind: AbsenceKind::Holiday,
+                portion: AbsencePortion::FullDay,
+                note: None
+            }
+        );
+        assert_eq!(
+            dates,
+            AbsenceDateArgs {
+                date: Some(NaiveDate::from_ymd_opt(2026, 1, 10).unwrap()),
+                from: None,
+                to: None,
+            }
+        );
+    }
+
+    #[test]
+    fn absence_parses_date_range() {
+        let cli = Cli::try_parse_from([
+            "workaholick",
+            "absence",
+            "sick-child",
+            "--from",
+            "2026-08-23",
+            "--to",
+            "2026-08-26",
+        ])
+        .unwrap();
+
+        let CliCommand::Absence { details, dates } = cli.command else {
+            panic!("expected absence command");
+        };
+
+        assert_eq!(
+            details,
+            AbsenceDetailsArgs {
+                kind: AbsenceKind::SickChild,
+                portion: AbsencePortion::FullDay,
+                note: None
+            }
+        );
+        assert_eq!(
+            dates,
+            AbsenceDateArgs {
+                date: None,
+                from: Some(NaiveDate::from_ymd_opt(2026, 8, 23).unwrap()),
+                to: Some(NaiveDate::from_ymd_opt(2026, 8, 26).unwrap())
+            }
+        );
+    }
+
+    #[test]
+    fn absence_rejects_only_from() {
+        let err = Cli::try_parse_from(["workahlick", "absence", "vacation", "--from", "2026-8-23"])
+            .unwrap_err();
+
+        assert!(err.to_string().contains("the following required arguments were not provided"));
+        assert!(err.to_string().contains("--to"));
+    }
+
+    #[test]
+    fn absence_rejects_only_to() {
+        let err = Cli::try_parse_from(["workahlick", "absence", "vacation", "--to", "2026-8-23"])
+            .unwrap_err();
+
+        assert!(err.to_string().contains("the following required arguments were not provided"));
+        assert!(err.to_string().contains("--from"));
     }
 }
