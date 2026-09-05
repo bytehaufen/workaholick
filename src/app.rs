@@ -223,7 +223,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
                 anyhow::ensure!(*from <= today, "Timesheet start date is in the future.");
                 let end = reporting::next_day(*to)?;
 
-                date_window(*from, end, now)
+                date_window(*from, end, now)?
             }
         };
 
@@ -270,7 +270,7 @@ fn period_time_window(
 ) -> anyhow::Result<TimeWindow> {
     anyhow::ensure!(offset <= 0, "Timesheet period offset must be zero or negative.");
 
-    let window = match period {
+    match period {
         Period::Week => {
             let current_week_start = reporting::start_of_week(today);
             let weeks_back = offset.unsigned_abs();
@@ -308,13 +308,15 @@ fn period_time_window(
 
             date_window(start, end, now)
         }
-    };
-
-    Ok(window)
+    }
 }
 
-fn date_window(start: NaiveDate, end: NaiveDate, now: DateTime<Local>) -> TimeWindow {
-    TimeWindow::new(reporting::start_of_day(start), reporting::start_of_day(end).min(now))
+fn date_window(
+    start: NaiveDate,
+    end: NaiveDate,
+    now: DateTime<Local>,
+) -> anyhow::Result<TimeWindow> {
+    Ok(TimeWindow::new(reporting::start_of_day(start)?, reporting::start_of_day(end)?.min(now)))
 }
 
 #[cfg(test)]

@@ -38,18 +38,19 @@ fn calculate_weekly_totals(
     weekly_schedule: &WeeklySchedule,
 ) -> anyhow::Result<Vec<WeeklyTotals>> {
     let first_week_start = reporting::start_of_week(window.start().date_naive())?;
+    let last_date = window.last_included_date();
 
     std::iter::successors(Some(first_week_start), |week_start| {
         week_start.checked_add_days(Days::new(7))
     })
-    .take_while(|&week_start| reporting::start_of_day(week_start) < window.end())
+    .take_while(|week_start| last_date.is_some_and(|last| *week_start <= last))
     .map(|week_start| {
         let week_end = week_start
             .checked_add_days(Days::new(7))
             .context("week end should be representable")?;
 
-        let full_week_start = reporting::start_of_day(week_start);
-        let full_week_end = reporting::start_of_day(week_end);
+        let full_week_start = reporting::start_of_day(week_start)?;
+        let full_week_end = reporting::start_of_day(week_end)?;
 
         let week_window =
             TimeWindow::new(full_week_start.max(window.start()), full_week_end.min(window.end()));
@@ -80,8 +81,8 @@ fn calculate_daily_totals(
 ) -> anyhow::Result<Vec<DailyTotals>> {
     let daily_totals = TimeWindow::dates_in(window)
         .map(|date| -> anyhow::Result<DailyTotals> {
-            let day_start = reporting::start_of_day(date).max(window.start());
-            let day_end = reporting::start_of_day(reporting::next_day(date)?).min(window.end());
+            let day_start = reporting::start_of_day(date)?.max(window.start());
+            let day_end = reporting::start_of_day(reporting::next_day(date)?)?.min(window.end());
             let day_window = TimeWindow::new(day_start, day_end);
 
             let breakdown = calculate_time_breakdown(records, day_window, weekly_schedule)?;

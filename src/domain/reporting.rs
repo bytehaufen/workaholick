@@ -1,5 +1,5 @@
 use crate::domain::Period;
-use chrono::{DateTime, Datelike, Days, Local, NaiveDate, TimeZone};
+use chrono::{DateTime, Datelike, Days, Local, NaiveDate, NaiveTime, TimeZone};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum DateScope {
@@ -31,10 +31,26 @@ impl TimeWindow {
     }
 
     pub(crate) fn dates_in(window: TimeWindow) -> impl Iterator<Item = NaiveDate> {
+        let last_date = window.last_included_date();
+
         std::iter::successors((!window.is_empty()).then_some(window.start().date_naive()), |date| {
             date.succ_opt()
         })
-        .take_while(move |date| start_of_day(*date) < window.end())
+        .take_while(move |date| last_date.is_some_and(|last| *date <= last))
+    }
+
+    /// Returns the last included date in this window.
+    /// If the window ends at 00:00 then the previous calendar date is returned.
+    pub(crate) fn last_included_date(self) -> Option<NaiveDate> {
+        if self.is_empty() {
+            return None;
+        }
+
+        if self.end.time() == NaiveTime::MIN {
+            self.end.date_naive().pred_opt()
+        } else {
+            Some(self.end.date_naive())
+        }
     }
 }
 
@@ -43,8 +59,11 @@ pub(crate) fn start_of_week(date: NaiveDate) -> anyhow::Result<NaiveDate> {
         .ok_or_else(|| anyhow::anyhow!("week start is outside      the supported date range"))
 }
 
-pub(crate) fn start_of_day(date: NaiveDate) -> DateTime<Local> {
-    Local.with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0).unwrap()
+pub(crate) fn start_of_day(date: NaiveDate) -> anyhow::Result<DateTime<Local>> {
+    Local
+        .with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0)
+        .single()
+        .ok_or_else(|| anyhow::anyhow!("ambiguous or nonexistent time conversion"))
 }
 
 pub(crate) fn next_day(date: NaiveDate) -> anyhow::Result<NaiveDate> {
