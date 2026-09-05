@@ -1,7 +1,13 @@
+use std::path::PathBuf;
+
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
 
-use crate::domain::{
-    AbsenceKind, AbsencePortion, Record, RecordInput, WeeklySchedule, WorkCommand, WorkRecordInput,
+use crate::{
+    config::{CliConfig, Config},
+    domain::{
+        AbsenceKind, AbsencePortion, Record, RecordInput, WeeklySchedule, WorkCommand,
+        WorkRecordInput,
+    },
 };
 
 pub(crate) fn ts(day: u32, hour: u32, min: u32) -> DateTime<Local> {
@@ -33,4 +39,12 @@ pub(crate) fn absence_record(
 
 pub(crate) fn empty_schedule() -> WeeklySchedule {
     WeeklySchedule::new([0; 7])
+}
+
+pub(crate) fn test_config() -> Config {
+    Config {
+        store_path: PathBuf::from("/tmp/workaholick-test.jsonl"),
+        schedule: Default::default(),
+        cli: CliConfig::default(),
+    }
 }

@@ -41,6 +41,8 @@ unused_results = "deny"
 dbg_macro = "warn"
 todo = "warn"
 unimplemented = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
 
 [lints.rustdoc]
 broken_intra_doc_links = "deny"

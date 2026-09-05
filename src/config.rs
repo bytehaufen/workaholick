@@ -102,13 +102,13 @@ pub enum OutputFormatter {
     Markdown,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            store_path: default_store_path(),
+impl Config {
+    fn for_current_user() -> anyhow::Result<Self> {
+        Ok(Self {
+            store_path: default_store_path()?,
             schedule: Default::default(),
             cli: CliConfig::default(),
-        }
+        })
     }
 }
 
@@ -171,7 +171,7 @@ pub fn init_at(path: impl AsRef<Path>) -> Result<PathBuf> {
             .with_context(|| format!("creating config directory {}", parent.display()))?;
     }
 
-    let cfg = Config::default();
+    let cfg = Config::for_current_user()?;
     save(path, &cfg)?;
 
     Ok(path.to_path_buf())
@@ -180,7 +180,10 @@ pub fn init_at(path: impl AsRef<Path>) -> Result<PathBuf> {
 pub fn load_from(path: impl AsRef<Path>) -> Result<Config> {
     let path = path.as_ref();
     ensure_exists(path)?;
-    confy::load_path(path).with_context(|| format!("reading config file {}", path.display()))
+
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("reading config file {}", path.display()))?;
+    toml::from_str(&contents).with_context(|| format!("parsing config file {}", path.display()))
 }
 
 pub fn show_from(path: impl AsRef<Path>) -> Result<String> {
@@ -258,18 +261,20 @@ fn ensure_exists(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn default_store_path() -> PathBuf {
+fn default_store_path() -> anyhow::Result<PathBuf> {
     let home = UserDirs::new()
         .map(|user_dirs| user_dirs.home_dir().to_path_buf())
-        .expect("no home directory found");
+        .context("no home directory found")?;
 
-    home.join(APP_NAME).join("data.jsonl")
+    Ok(home.join(APP_NAME).join("data.jsonl"))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{APP_NAME, Config, OutputFormatter};
+    use super::*;
+    use crate::config::{APP_NAME, OutputFormatter};
     use crate::editor::ports::{Editor, FileType};
+    use crate::test_support::test_config;
     use anyhow::Result;
     use std::{cell::RefCell, fs, path::PathBuf};
 
@@ -300,12 +305,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("custom-config.toml");
 
-        let _ = super::init_at(&path).unwrap();
-        let loaded = super::load_from(&path).unwrap();
-        let shown = super::show_from(&path).unwrap();
+        let expected = Config::for_current_user().unwrap();
+        let created_path = init_at(&path).unwrap();
+        let loaded = load_from(&path).unwrap();
+        let shown = show_from(&path).unwrap();
 
-        assert_eq!(loaded.store_path, super::Config::default().store_path);
-        assert_eq!(loaded.schedule, super::Config::default().schedule);
+        assert_eq!(created_path, path);
+        assert_eq!(loaded.store_path, expected.store_path);
+        assert_eq!(loaded.schedule, expected.schedule);
         assert_eq!(loaded.cli.formatter, OutputFormatter::Markdown);
         assert!(shown.contains("[cli]"));
         assert!(shown.contains("formatter"));
@@ -333,7 +340,7 @@ mod tests {
 
     #[test]
     fn default_schedule_has_correct_sum() {
-        let sum: i64 = Config::default().schedule.as_array().iter().sum();
+        let sum: i64 = test_config().schedule.as_array().iter().sum();
         assert_eq!(sum, 5 * 480);
     }
 

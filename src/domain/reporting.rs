@@ -38,17 +38,18 @@ impl TimeWindow {
     }
 }
 
-pub(crate) fn start_of_week(date: NaiveDate) -> NaiveDate {
+pub(crate) fn start_of_week(date: NaiveDate) -> anyhow::Result<NaiveDate> {
     date.checked_sub_days(Days::new(date.weekday().num_days_from_monday().into()))
-        .expect("week start should be representable")
+        .ok_or_else(|| anyhow::anyhow!("week start is outside      the supported date range"))
 }
 
 pub(crate) fn start_of_day(date: NaiveDate) -> DateTime<Local> {
     Local.with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0).unwrap()
 }
 
-pub(crate) fn next_day(date: NaiveDate) -> NaiveDate {
-    date.succ_opt().expect("timesheet range end should have a successor day")
+pub(crate) fn next_day(date: NaiveDate) -> anyhow::Result<NaiveDate> {
+    date.succ_opt()
+        .ok_or_else(|| anyhow::anyhow!("timesheet range end should have a successor day"))
 }
 
 #[cfg(test)]

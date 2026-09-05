@@ -221,7 +221,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
                     "Timesheet start date must be on or before end date."
                 );
                 anyhow::ensure!(*from <= today, "Timesheet start date is in the future.");
-                let end = reporting::next_day(*to);
+                let end = reporting::next_day(*to)?;
 
                 date_window(*from, end, now)
             }
@@ -275,23 +275,25 @@ fn period_time_window(
             let current_week_start = reporting::start_of_week(today);
             let weeks_back = offset.unsigned_abs();
             let days_back = weeks_back.checked_mul(7).context("week offset is too large")?;
-            let start = current_week_start
+            let start = current_week_start?
                 .checked_sub_days(Days::new(days_back))
                 .context("week offset is too large")?;
-            let end = start.checked_add_days(Days::new(7)).expect("week end should exist");
+            let end =
+                start.checked_add_days(Days::new(7)).with_context(|| "week end should exist")?;
 
             date_window(start, end, now)
         }
         Period::Month => {
             let current_month_start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
-                .expect("month start should be valid");
+                .with_context(|| "month start should be valid")?;
             let months_back =
                 u32::try_from(offset.unsigned_abs()).context("month offset is too large")?;
             let start = current_month_start
                 .checked_sub_months(Months::new(months_back))
-                .context("month offset is too large")?;
-            let end =
-                start.checked_add_months(Months::new(1)).expect("next month start should be valid");
+                .with_context(|| "month offset is too large")?;
+            let end = start
+                .checked_add_months(Months::new(1))
+                .with_context(|| "next month start should be valid")?;
 
             date_window(start, end, now)
         }
@@ -299,9 +301,10 @@ fn period_time_window(
             let years_back =
                 i32::try_from(offset.unsigned_abs()).context("year offset is too large")?;
             let year = today.year().checked_sub(years_back).context("year offset is too large")?;
-            let start = NaiveDate::from_ymd_opt(year, 1, 1).expect("year start should be valid");
-            let end =
-                NaiveDate::from_ymd_opt(year + 1, 1, 1).expect("next year start should be valid");
+            let start = NaiveDate::from_ymd_opt(year, 1, 1)
+                .with_context(|| "year start should be valid")?;
+            let end = NaiveDate::from_ymd_opt(year + 1, 1, 1)
+                .with_context(|| "next year start should be valid")?;
 
             date_window(start, end, now)
         }
@@ -395,7 +398,7 @@ mod tests {
                 sat_minutes,
                 sun_minutes,
             ),
-            ..Config::default()
+            ..test_config()
         }
     }
 
@@ -404,7 +407,7 @@ mod tests {
         let fixed_now = Local.with_ymd_and_hms(2026, 1, 10, 9, 30, 0).unwrap();
         let clock = FixedClock { now: fixed_now, today: fixed_now.date_naive() };
         let store = FakeStore::default();
-        let mut app = App::new_with_clock(Config::default(), store, clock).unwrap();
+        let mut app = App::new_with_clock(test_config(), store, clock).unwrap();
 
         let _ = app.start_work(WorkContext::Office).unwrap();
 
@@ -430,12 +433,9 @@ mod tests {
 
         let day1 = ts(10, 0, 0).date_naive();
 
-        let app = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap();
+        let app =
+            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
+                .unwrap();
 
         let day_1_overview = app.day(day1);
         assert_eq!(day_1_overview.work_records.len(), 2);
@@ -451,7 +451,7 @@ mod tests {
     fn time_window_for_historical_range_ends_at_next_midnight() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             FakeStore::default(),
             FixedClock { now, today: now.date_naive() },
         )
@@ -468,7 +468,7 @@ mod tests {
     fn time_window_for_range_including_today_clamps_end_to_now() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             FakeStore::default(),
             FixedClock { now, today: now.date_naive() },
         )
@@ -485,7 +485,7 @@ mod tests {
     fn time_window_for_current_week_clamps_end_to_now() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             FakeStore::default(),
             FixedClock { now, today: now.date_naive() },
         )
@@ -502,7 +502,7 @@ mod tests {
     fn time_window_for_previous_week_uses_previous_calendar_week() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             FakeStore::default(),
             FixedClock { now, today: now.date_naive() },
         )
@@ -519,7 +519,7 @@ mod tests {
     fn time_window_for_previous_month_uses_previous_calendar_month() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             FakeStore::default(),
             FixedClock { now, today: now.date_naive() },
         )
@@ -536,7 +536,7 @@ mod tests {
     fn time_window_for_previous_year_uses_previous_calendar_year() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             FakeStore::default(),
             FixedClock { now, today: now.date_naive() },
         )
@@ -553,7 +553,7 @@ mod tests {
     fn timesheet_rejects_positive_period_offset() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             FakeStore::default(),
             FixedClock { now, today: now.date_naive() },
         )
@@ -570,7 +570,7 @@ mod tests {
     fn timesheet_rejects_reversed_explicit_range() {
         let now = ts(15, 12, 0);
         let app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             FakeStore::default(),
             FixedClock { now, today: now.date_naive() },
         )
@@ -585,12 +585,9 @@ mod tests {
     fn timesheet_rejects_future_range_dates() {
         let now = ts(15, 12, 0);
         let store = FakeStore::default();
-        let app = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap();
+        let app =
+            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
+                .unwrap();
 
         let err = app.timesheet(DateScope::Range { from: date(16), to: date(17) }).unwrap_err();
 
@@ -845,12 +842,9 @@ mod tests {
             0,
             WorkCommand::Start { context },
         )]);
-        let app = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap();
+        let app =
+            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
+                .unwrap();
 
         let timesheet = app.timesheet(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
@@ -872,12 +866,9 @@ mod tests {
             work_record(1, 9, 20, 0, WorkCommand::Start { context }),
             work_record(2, 10, 10, 0, WorkCommand::End { title: "done".into(), description: None }),
         ]);
-        let app = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap();
+        let app =
+            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
+                .unwrap();
 
         let timesheet = app.timesheet(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
@@ -906,12 +897,9 @@ mod tests {
             ),
             work_record(3, 10, 12, 0, WorkCommand::End { title: "wrap".into(), description: None }),
         ]);
-        let app = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap();
+        let app =
+            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
+                .unwrap();
 
         let activity_report =
             app.activity(DateScope::Range { from: date(10), to: date(10) }).unwrap();
@@ -934,12 +922,9 @@ mod tests {
             absence_record(4, 16, AbsenceKind::Holiday, AbsencePortion::FullDay),
         ]);
 
-        let app = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap();
+        let app =
+            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
+                .unwrap();
 
         let report = app.activity(DateScope::Period { period: Period::Week, offset: 0 }).unwrap();
 
@@ -963,12 +948,9 @@ mod tests {
             work_record(1, 9, 20, 0, WorkCommand::Start { context }),
             work_record(2, 10, 10, 0, WorkCommand::End { title: "done".into(), description: None }),
         ]);
-        let app = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap();
+        let app =
+            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
+                .unwrap();
 
         let activity_report =
             app.activity(DateScope::Range { from: date(10), to: date(10) }).unwrap();
@@ -991,12 +973,9 @@ mod tests {
             WorkCommand::Log { title: "worked harder".to_string(), description: None },
         )]);
 
-        let err = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap_err();
+        let err =
+            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
+                .unwrap_err();
 
         assert_eq!(err.to_string(), "cannot log while idle for 2026-01-08");
     }
@@ -1009,12 +988,9 @@ mod tests {
             work_record(2, 11, 5, 11, WorkCommand::BreakStart),
         ]);
 
-        let mut app = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap();
+        let mut app =
+            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
+                .unwrap();
 
         let err = app.log_work("refactoring round  42".into(), None).unwrap_err();
 
@@ -1030,12 +1006,9 @@ mod tests {
             work_record(2, 11, 8, 6, WorkCommand::BreakStart),
         ]);
 
-        let mut app = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap();
+        let mut app =
+            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
+                .unwrap();
 
         let update =
             RecordInput::new_work(ts(11, 8, 6), WorkCommand::Start { context: WorkContext::Home });
@@ -1056,12 +1029,9 @@ mod tests {
             work_record(2, 11, 8, 26, WorkCommand::BreakStart),
         ]);
 
-        let mut app = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap();
+        let mut app =
+            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
+                .unwrap();
 
         let err = app.delete_record(1.into()).unwrap_err();
 
@@ -1082,12 +1052,9 @@ mod tests {
             WorkCommand::Start { context: WorkContext::Home },
         )]);
 
-        let mut app = App::new_with_clock(
-            Config::default(),
-            store,
-            FixedClock { now, today: now.date_naive() },
-        )
-        .unwrap();
+        let mut app =
+            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
+                .unwrap();
 
         let update = RecordInput::new_absence(
             ts(11, 8, 25).date_naive(),
@@ -1108,7 +1075,7 @@ mod tests {
         let ts = ts(23, 13, 30);
         let store = FakeStore::default();
         let mut app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             store,
             FixedClock { now: ts, today: ts.date_naive() },
         )
@@ -1130,7 +1097,7 @@ mod tests {
         let ts = ts(23, 13, 30);
         let store = FakeStore::default();
         let mut app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             store,
             FixedClock { now: ts, today: ts.date_naive() },
         )
@@ -1156,7 +1123,7 @@ mod tests {
     fn add_absence_adds_multiple_records_for_date_range() {
         let ts = ts(23, 13, 30);
         let mut app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             FakeStore::default(),
             FixedClock { now: ts, today: ts.date_naive() },
         )
@@ -1200,7 +1167,7 @@ mod tests {
     fn add_absence_rejects_reversed_data_range() {
         let ts = ts(23, 13, 50);
         let mut app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             FakeStore::default(),
             FixedClock { now: ts, today: ts.date_naive() },
         )
@@ -1224,7 +1191,7 @@ mod tests {
     fn add_absence_copies_kind_port_and_note_to_each_date() {
         let ts = ts(23, 13, 30);
         let mut app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             FakeStore::default(),
             FixedClock { now: ts, today: ts.date_naive() },
         )
@@ -1265,7 +1232,7 @@ mod tests {
     fn add_absence_range_validates_before_commiting() {
         let ts = ts(23, 13, 30);
         let mut app = App::new_with_clock(
-            Config::default(),
+            test_config(),
             FakeStore::default().seed(vec![absence_record(
                 42,
                 23,
