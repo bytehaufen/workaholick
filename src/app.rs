@@ -849,11 +849,11 @@ mod tests {
         let timesheet = app.timesheet(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(
-            timesheet.breakdown().active_time(TimeCategory::Work(context)),
+            active_time(timesheet.breakdown(), TimeCategory::Work(context)),
             chrono::TimeDelta::hours(16)
         );
         assert_eq!(
-            timesheet.breakdown().break_time(TimeCategory::Work(context)),
+            break_time(timesheet.breakdown(), TimeCategory::Work(context)),
             chrono::TimeDelta::zero()
         );
     }
@@ -873,11 +873,11 @@ mod tests {
         let timesheet = app.timesheet(DateScope::Range { from: date(10), to: date(10) }).unwrap();
 
         assert_eq!(
-            timesheet.breakdown().active_time(TimeCategory::Work(context)),
+            active_time(timesheet.breakdown(), TimeCategory::Work(context)),
             chrono::TimeDelta::hours(10)
         );
         assert_eq!(
-            timesheet.breakdown().break_time(TimeCategory::Work(context)),
+            break_time(timesheet.breakdown(), TimeCategory::Work(context)),
             chrono::TimeDelta::zero()
         );
     }

@@ -48,7 +48,6 @@ impl ScheduleConfig {
         ]
     }
 
-    #[cfg(test)]
     pub(crate) fn new(
         mon_minutes: i64,
         tue_minutes: i64,
@@ -76,15 +75,7 @@ impl ScheduleConfig {
 
 impl Default for ScheduleConfig {
     fn default() -> Self {
-        Self {
-            mon_minutes: 480,
-            tue_minutes: 480,
-            wed_minutes: 480,
-            thu_minutes: 480,
-            fri_minutes: 480,
-            sat_minutes: 0,
-            sun_minutes: 0,
-        }
+        Self::new(480, 480, 480, 480, 480, 0, 0)
     }
 }
 

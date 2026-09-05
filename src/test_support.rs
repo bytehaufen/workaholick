@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use chrono::{DateTime, Local, NaiveDate, TimeZone};
+use chrono::{DateTime, Local, NaiveDate, TimeDelta, TimeZone};
 
 use crate::{
     config::{CliConfig, Config},
     domain::{
-        AbsenceKind, AbsencePortion, Record, RecordInput, WeeklySchedule, WorkCommand,
-        WorkRecordInput,
+        AbsenceKind, AbsencePortion, Record, RecordInput, TimeBreakdown, TimeCategory,
+        WeeklySchedule, WorkCommand, WorkRecordInput,
     },
 };
 
@@ -46,5 +46,19 @@ pub(crate) fn test_config() -> Config {
         store_path: PathBuf::from("/tmp/workaholick-test.jsonl"),
         schedule: Default::default(),
         cli: CliConfig::default(),
+    }
+}
+
+pub(crate) fn active_time(breakdown: &TimeBreakdown, kind: TimeCategory) -> TimeDelta {
+    match breakdown.iter().find(|(candidate, _)| *candidate == kind) {
+        Some((_, bucket)) => bucket.active_time(),
+        None => TimeDelta::zero(),
+    }
+}
+
+pub(crate) fn break_time(breakdown: &TimeBreakdown, kind: TimeCategory) -> TimeDelta {
+    match breakdown.iter().find(|(candidate, _)| *candidate == kind) {
+        Some((_, bucket)) => bucket.break_time(),
+        None => TimeDelta::zero(),
     }
 }

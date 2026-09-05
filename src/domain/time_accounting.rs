@@ -54,21 +54,6 @@ impl TimeBreakdown {
             .map(|(_, bucket)| bucket.active_time().num_minutes().max(0))
             .sum()
     }
-
-    #[cfg(test)]
-    pub(crate) fn active_time(&self, kind: TimeCategory) -> TimeDelta {
-        self.bucket(kind).active
-    }
-
-    #[cfg(test)]
-    pub(crate) fn break_time(&self, kind: TimeCategory) -> TimeDelta {
-        self.bucket(kind).break_time
-    }
-
-    #[cfg(test)]
-    fn bucket(&self, kind: TimeCategory) -> TimeBucket {
-        self.0.get(&kind).cloned().unwrap_or_default()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -326,7 +311,7 @@ fn add_absence_credits(
 #[cfg(test)]
 mod test {
     use crate::domain::{Record, WorkCommand};
-    use crate::test_support::{absence_record, date, empty_schedule, ts, work_record};
+    use crate::test_support::{self, absence_record, date, empty_schedule, ts, work_record};
 
     use super::*;
 
@@ -357,18 +342,22 @@ mod test {
         TimeDelta::minutes(n)
     }
 
+    fn bucket(breakdown: &TimeBreakdown, kind: TimeCategory) -> TimeBucket {
+        breakdown.0.get(&kind).cloned().unwrap_or_default()
+    }
+
     fn assert_bucket(
         breakdown: &TimeBreakdown,
         kind: TimeCategory,
         active: TimeDelta,
         break_time: TimeDelta,
     ) {
-        assert_eq!(breakdown.active_time(kind), active);
-        assert_eq!(breakdown.break_time(kind), break_time);
+        assert_eq!(test_support::active_time(breakdown, kind), active);
+        assert_eq!(test_support::break_time(breakdown, kind), break_time);
     }
 
     fn assert_bucket_dates(breakdown: &TimeBreakdown, kind: TimeCategory, dates: &[NaiveDate]) {
-        let actual = breakdown.bucket(kind).dates;
+        let actual = bucket(breakdown, kind).dates;
         let expected = dates.iter().copied().collect::<HashSet<_>>();
 
         assert_eq!(actual, expected);
