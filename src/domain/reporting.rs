@@ -1,6 +1,18 @@
 use crate::domain::Period;
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, NaiveTime, TimeZone};
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ReportingError {
+    #[error("cannot calculate the week start for {date}; it is outside the supported date range")]
+    WeekStartOutOfRange { date: NaiveDate },
+
+    #[error("cannot calculate the day after {date}; it is outside the supported date range")]
+    NextDayOutOfRange { date: NaiveDate },
+
+    #[error("local midnight for {date} is ambiguous or does not exist")]
+    InvalidLocalMidnight { date: NaiveDate },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum DateScope {
     Period { period: Period, offset: i64 },
@@ -54,21 +66,20 @@ impl TimeWindow {
     }
 }
 
-pub(crate) fn start_of_week(date: NaiveDate) -> anyhow::Result<NaiveDate> {
+pub(crate) fn start_of_week(date: NaiveDate) -> Result<NaiveDate, ReportingError> {
     date.checked_sub_days(Days::new(date.weekday().num_days_from_monday().into()))
-        .ok_or_else(|| anyhow::anyhow!("week start is outside      the supported date range"))
+        .ok_or(ReportingError::WeekStartOutOfRange { date })
 }
 
-pub(crate) fn start_of_day(date: NaiveDate) -> anyhow::Result<DateTime<Local>> {
+pub(crate) fn start_of_day(date: NaiveDate) -> Result<DateTime<Local>, ReportingError> {
     Local
         .with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0)
         .single()
-        .ok_or_else(|| anyhow::anyhow!("ambiguous or nonexistent time conversion"))
+        .ok_or(ReportingError::InvalidLocalMidnight { date })
 }
 
-pub(crate) fn next_day(date: NaiveDate) -> anyhow::Result<NaiveDate> {
-    date.succ_opt()
-        .ok_or_else(|| anyhow::anyhow!("timesheet range end should have a successor day"))
+pub(crate) fn next_day(date: NaiveDate) -> Result<NaiveDate, ReportingError> {
+    date.succ_opt().ok_or(ReportingError::NextDayOutOfRange { date })
 }
 
 #[cfg(test)]

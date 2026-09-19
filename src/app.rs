@@ -1,7 +1,11 @@
 use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate};
 
 use crate::config::Config;
-use crate::domain::{AbsenceKind, AbsencePortion, WeeklySchedule};
+use crate::domain::reporting::ReportingError;
+use crate::domain::{
+    AbsenceKind, AbsencePortion, RecordSetError, TimelineValidationError, TimesheetError,
+    WeeklySchedule,
+};
 use crate::domain::{
     AbsenceRecord, ChangeOutcome, Period, Record, RecordChange, RecordId, RecordInput, Timesheet,
     WorkCommand, WorkContext, WorkRecord,
@@ -10,9 +14,40 @@ use crate::domain::{
     reporting::{self, DateScope, TimeWindow},
     validate_records,
 };
-use crate::store::RecordRepository;
+use crate::store::{CommitError, RecordRepository};
 
-use anyhow::{Context, Result};
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum AppError {
+    #[error(transparent)]
+    TimelineValidation(#[from] TimelineValidationError),
+
+    #[error(transparent)]
+    Records(#[from] RecordSetError),
+
+    #[error(transparent)]
+    Reporting(#[from] ReportingError),
+
+    #[error(transparent)]
+    Store(#[from] CommitError),
+
+    #[error(transparent)]
+    Timesheet(#[from] TimesheetError),
+
+    #[error("range start date {from} must not be after end date {to}")]
+    InvalidDateRange { from: NaiveDate, to: NaiveDate },
+
+    #[error("period offset must be zero or negative, got {offset}")]
+    PositivePeriodOffset { offset: i64 },
+
+    #[error("{period} period at offset {offset} is outside the supported date range")]
+    PeriodOutOfRange { period: Period, offset: i64 },
+
+    #[error("range start date {from} must not be after today ({today})")]
+    FutureRangeStart { from: NaiveDate, today: NaiveDate },
+
+    #[error("selected date range is empty")]
+    EmptyTimeWindow,
+}
 
 pub trait Clock {
     fn today(&self) -> NaiveDate;
@@ -40,13 +75,13 @@ pub(crate) struct App<S: RecordRepository, C: Clock = SystemClock> {
 }
 
 impl<STORE: RecordRepository> App<STORE, SystemClock> {
-    pub fn new(config: Config, store: STORE) -> Result<Self> {
+    pub fn new(config: Config, store: STORE) -> Result<Self, AppError> {
         Self::new_with_clock(config, store, SystemClock)
     }
 }
 
 impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
-    pub fn new_with_clock(config: Config, store: STORE, clock: C) -> Result<Self> {
+    pub fn new_with_clock(config: Config, store: STORE, clock: C) -> Result<Self, AppError> {
         validate_records(store.records())?;
 
         Ok(Self { weekly_schedule: config.schedule.to_weekly_schedule(), store, clock })
@@ -54,7 +89,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
 
     ///// Work
 
-    pub fn start_work(&mut self, context: WorkContext) -> anyhow::Result<RecordId> {
+    pub fn start_work(&mut self, context: WorkContext) -> Result<RecordId, AppError> {
         let input = RecordInput::new_work(self.clock.now(), WorkCommand::Start { context });
 
         self.insert_record(input)
@@ -64,7 +99,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         &mut self,
         title: String,
         description: Option<String>,
-    ) -> anyhow::Result<RecordId> {
+    ) -> Result<RecordId, AppError> {
         let input =
             RecordInput::new_work(self.clock.now(), WorkCommand::End { title, description });
 
@@ -75,18 +110,18 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         &mut self,
         title: String,
         description: Option<String>,
-    ) -> anyhow::Result<RecordId> {
+    ) -> Result<RecordId, AppError> {
         let input =
             RecordInput::new_work(self.clock.now(), WorkCommand::Log { title, description });
         self.insert_record(input)
     }
 
-    pub fn start_break(&mut self) -> anyhow::Result<RecordId> {
+    pub fn start_break(&mut self) -> Result<RecordId, AppError> {
         let input = RecordInput::new_work(self.clock.now(), WorkCommand::BreakStart);
         self.insert_record(input)
     }
 
-    pub fn end_break(&mut self, description: Option<String>) -> anyhow::Result<RecordId> {
+    pub fn end_break(&mut self, description: Option<String>) -> Result<RecordId, AppError> {
         let input = RecordInput::new_work(self.clock.now(), WorkCommand::BreakEnd { description });
         self.insert_record(input)
     }
@@ -97,20 +132,23 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         portion: AbsencePortion,
         note: Option<String>,
         range: Option<(NaiveDate, NaiveDate)>,
-    ) -> anyhow::Result<Vec<RecordId>> {
+    ) -> Result<Vec<RecordId>, AppError> {
         let (from, to) = range.unwrap_or_else(|| {
             let today = self.clock.today();
             (today, today)
         });
 
-        anyhow::ensure!(from <= to, "Absence start date must be on or before end date");
+        if from > to {
+            return Err(AppError::InvalidDateRange { from, to });
+        }
+
         let mut candidate = self.store.records().clone();
 
         let dates_iter = std::iter::successors(Some(from), |date| date.succ_opt())
             .take_while(|date| *date <= to);
 
         let changes = dates_iter
-            .map(|date| -> anyhow::Result<(RecordChange, RecordId)> {
+            .map(|date| -> Result<(RecordChange, RecordId), AppError> {
                 let id = candidate.next_id();
 
                 let change = RecordChange::Insert {
@@ -128,7 +166,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
 
         let ids = changes.iter().map(|change| change.1).collect::<Vec<_>>();
 
-        changes.into_iter().try_for_each(|change| -> anyhow::Result<()> {
+        changes.into_iter().try_for_each(|change| -> Result<(), AppError> {
             let _ = self.store.commit(change.0)?;
             Ok(())
         })?;
@@ -143,14 +181,14 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         record.map(RecordInput::from_record)
     }
 
-    pub fn update_record(&mut self, id: RecordId, input: RecordInput) -> anyhow::Result<Record> {
+    pub fn update_record(&mut self, id: RecordId, input: RecordInput) -> Result<Record, AppError> {
         match self.apply_validated_change(RecordChange::Update { id, input })? {
             ChangeOutcome::Updated { previous } => Ok(previous),
             _ => unreachable!("update change must return update outcome"),
         }
     }
 
-    pub fn delete_record(&mut self, id: RecordId) -> anyhow::Result<Record> {
+    pub fn delete_record(&mut self, id: RecordId) -> Result<Record, AppError> {
         match self.apply_validated_change(RecordChange::Delete { id })? {
             ChangeOutcome::Deleted { record } => Ok(record),
             _ => unreachable!("delete change must return delete outcome"),
@@ -172,14 +210,14 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
             .max()
     }
 
-    pub fn timesheet(&self, scope: DateScope) -> anyhow::Result<Timesheet> {
+    pub fn timesheet(&self, scope: DateScope) -> Result<Timesheet, AppError> {
         let window = self.time_window_for(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
 
-        build_timesheet(&records, window, &scope, &self.weekly_schedule)
+        Ok(build_timesheet(&records, window, &scope, &self.weekly_schedule)?)
     }
 
-    pub fn activity(&self, scope: DateScope) -> anyhow::Result<ActivityReport> {
+    pub fn activity(&self, scope: DateScope) -> Result<ActivityReport, AppError> {
         let window = self.time_window_for(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
 
@@ -192,22 +230,22 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         self.store.records().next_id()
     }
 
-    fn insert_record(&mut self, input: RecordInput) -> anyhow::Result<RecordId> {
+    fn insert_record(&mut self, input: RecordInput) -> Result<RecordId, AppError> {
         match self.apply_validated_change(RecordChange::Insert { id: self.next_id(), input })? {
             ChangeOutcome::Inserted { id } => Ok(id),
             _ => unreachable!("insert change must return insert outcome"),
         }
     }
 
-    fn apply_validated_change(&mut self, change: RecordChange) -> anyhow::Result<ChangeOutcome> {
+    fn apply_validated_change(&mut self, change: RecordChange) -> Result<ChangeOutcome, AppError> {
         let mut candidate = self.store.records().clone();
         let _ = candidate.apply_change(&change)?;
         validate_records(&candidate)?;
 
-        self.store.commit(change)
+        Ok(self.store.commit(change)?)
     }
 
-    fn time_window_for(&self, scope: &DateScope) -> anyhow::Result<TimeWindow> {
+    fn time_window_for(&self, scope: &DateScope) -> Result<TimeWindow, AppError> {
         let now = self.clock.now();
         let today = self.clock.today();
 
@@ -216,18 +254,21 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
                 period_time_window(*period, *offset, today, now)?
             }
             DateScope::Range { from, to } => {
-                anyhow::ensure!(
-                    *from <= *to,
-                    "Timesheet start date must be on or before end date."
-                );
-                anyhow::ensure!(*from <= today, "Timesheet start date is in the future.");
+                if from > to {
+                    return Err(AppError::InvalidDateRange { from: *from, to: *to });
+                }
+                if *from > today {
+                    return Err(AppError::FutureRangeStart { from: *from, today });
+                }
                 let end = reporting::next_day(*to)?;
 
                 date_window(*from, end, now)?
             }
         };
 
-        anyhow::ensure!(!window.is_empty(), "Timesheet range is empty.");
+        if window.is_empty() {
+            return Err(AppError::EmptyTimeWindow);
+        }
 
         Ok(window)
     }
@@ -267,44 +308,42 @@ fn period_time_window(
     offset: i64,
     today: NaiveDate,
     now: DateTime<Local>,
-) -> anyhow::Result<TimeWindow> {
-    anyhow::ensure!(offset <= 0, "Timesheet period offset must be zero or negative.");
+) -> Result<TimeWindow, AppError> {
+    if offset > 0 {
+        return Err(AppError::PositivePeriodOffset { offset });
+    }
+
+    let out_of_range = || AppError::PeriodOutOfRange { period, offset };
 
     match period {
         Period::Week => {
             let current_week_start = reporting::start_of_week(today);
             let weeks_back = offset.unsigned_abs();
-            let days_back = weeks_back.checked_mul(7).context("week offset is too large")?;
+            let days_back = weeks_back.checked_mul(7).ok_or_else(out_of_range)?;
+
             let start = current_week_start?
                 .checked_sub_days(Days::new(days_back))
-                .context("week offset is too large")?;
-            let end =
-                start.checked_add_days(Days::new(7)).with_context(|| "week end should exist")?;
+                .ok_or_else(out_of_range)?;
+            let end = start.checked_add_days(Days::new(7)).ok_or_else(out_of_range)?;
 
             date_window(start, end, now)
         }
         Period::Month => {
-            let current_month_start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
-                .with_context(|| "month start should be valid")?;
-            let months_back =
-                u32::try_from(offset.unsigned_abs()).context("month offset is too large")?;
+            let current_month_start =
+                NaiveDate::from_ymd_opt(today.year(), today.month(), 1).ok_or_else(out_of_range)?;
+            let months_back = u32::try_from(offset.unsigned_abs()).map_err(|_| out_of_range())?;
             let start = current_month_start
                 .checked_sub_months(Months::new(months_back))
-                .with_context(|| "month offset is too large")?;
-            let end = start
-                .checked_add_months(Months::new(1))
-                .with_context(|| "next month start should be valid")?;
+                .ok_or_else(out_of_range)?;
+            let end = start.checked_add_months(Months::new(1)).ok_or_else(out_of_range)?;
 
             date_window(start, end, now)
         }
         Period::Year => {
-            let years_back =
-                i32::try_from(offset.unsigned_abs()).context("year offset is too large")?;
-            let year = today.year().checked_sub(years_back).context("year offset is too large")?;
-            let start = NaiveDate::from_ymd_opt(year, 1, 1)
-                .with_context(|| "year start should be valid")?;
-            let end = NaiveDate::from_ymd_opt(year + 1, 1, 1)
-                .with_context(|| "next year start should be valid")?;
+            let years_back = i32::try_from(offset.unsigned_abs()).map_err(|_| out_of_range())?;
+            let year = today.year().checked_sub(years_back).ok_or_else(out_of_range)?;
+            let start = NaiveDate::from_ymd_opt(year, 1, 1).ok_or_else(out_of_range)?;
+            let end = NaiveDate::from_ymd_opt(year + 1, 1, 1).ok_or_else(out_of_range)?;
 
             date_window(start, end, now)
         }
@@ -315,7 +354,7 @@ fn date_window(
     start: NaiveDate,
     end: NaiveDate,
     now: DateTime<Local>,
-) -> anyhow::Result<TimeWindow> {
+) -> Result<TimeWindow, AppError> {
     Ok(TimeWindow::new(reporting::start_of_day(start)?, reporting::start_of_day(end)?.min(now)))
 }
 
@@ -331,6 +370,7 @@ mod tests {
             AbsencePortion::{self},
             DailyTotals, RecordSet, TimeCategory, WeeklyTotals, WorkContext,
         },
+        store::CommitError,
         test_support::*,
     };
 
@@ -376,8 +416,8 @@ mod tests {
             &self.records
         }
 
-        fn commit(&mut self, change: RecordChange) -> anyhow::Result<ChangeOutcome> {
-            self.records.apply_change(&change)
+        fn commit(&mut self, change: RecordChange) -> Result<ChangeOutcome, CommitError> {
+            Ok(self.records.apply_change(&change)?)
         }
     }
 
@@ -565,7 +605,7 @@ mod tests {
             .time_window_for(&DateScope::Period { period: Period::Week, offset: 1 })
             .unwrap_err();
 
-        assert_eq!(err.to_string(), "Timesheet period offset must be zero or negative.");
+        assert_eq!(err.to_string(), "period offset must be zero or negative, got 1");
     }
 
     #[test]
@@ -580,7 +620,10 @@ mod tests {
 
         let err = app.timesheet(DateScope::Range { from: date(12), to: date(10) }).unwrap_err();
 
-        assert_eq!(err.to_string(), "Timesheet start date must be on or before end date.");
+        assert_eq!(
+            err.to_string(),
+            "range start date 2026-01-12 must not be after end date 2026-01-10"
+        );
     }
 
     #[test]
@@ -593,7 +636,10 @@ mod tests {
 
         let err = app.timesheet(DateScope::Range { from: date(16), to: date(17) }).unwrap_err();
 
-        assert_eq!(err.to_string(), "Timesheet start date is in the future.");
+        assert_eq!(
+            err.to_string(),
+            "range start date 2026-01-16 must not be after today (2026-01-15)"
+        );
     }
 
     #[test]
@@ -1066,7 +1112,7 @@ mod tests {
         );
         let err = app.update_record(1.into(), update).unwrap_err();
 
-        assert_eq!(err.to_string(), "record 1 cannot be updated with a different record type");
+        assert_eq!(err.to_string(), "record 1 cannot change its type");
 
         let expected = app.store.records().get(&1.into()).unwrap().as_work().unwrap().command();
         assert!(matches!(expected, WorkCommand::Start { context: WorkContext::Home }));
@@ -1184,7 +1230,10 @@ mod tests {
             )
             .unwrap_err();
 
-        assert_eq!(err.to_string(), "Absence start date must be on or before end date");
+        assert_eq!(
+            err.to_string(),
+            "range start date 2026-01-25 must not be after end date 2026-01-24"
+        );
         assert!(app.day(date(24)).is_empty());
         assert!(app.day(date(25)).is_empty());
     }

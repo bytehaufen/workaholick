@@ -1,33 +1,47 @@
-use anyhow::Error;
+use std::error::Error;
+
 use colored::Colorize;
 
-use crate::domain::TimelineValidationError;
+use crate::{
+    app::AppError, bootstrap::RunError, cli::DispatchError, domain::TimelineValidationError,
+};
 
-pub fn render_error(err: &Error) -> String {
-    if let Some(validation_error) = find_validation_error(err) {
-        return render_validation_error(validation_error);
-    };
-
-    format!("{err:?}")
-}
-
-fn find_validation_error(err: &Error) -> Option<&TimelineValidationError> {
-    err.downcast_ref::<TimelineValidationError>()
-        .or_else(|| err.chain().find_map(|cause| cause.downcast_ref::<TimelineValidationError>()))
+pub(crate) fn render_error(err: &RunError) -> String {
+    match err {
+        RunError::App(AppError::TimelineValidation(error))
+        | RunError::Dispatch(DispatchError::App(AppError::TimelineValidation(error))) => {
+            render_validation_error(error)
+        }
+        _ => render_error_chain(err),
+    }
 }
 
 fn render_validation_error(err: &TimelineValidationError) -> String {
     format!("{}: {err}", "validation error".red().bold())
 }
 
+fn render_error_chain(err: &dyn Error) -> String {
+    let mut rendered = err.to_string();
+    let mut source = err.source();
+
+    while let Some(cause) = source {
+        rendered.push_str("\n  caused by: ");
+        rendered.push_str(&cause.to_string());
+        source = cause.source();
+    }
+
+    rendered
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        domain::{RecordSet, WorkCommand, validate_records},
+        config::ConfigError,
+        domain::{RecordSet, RecordSetError, WorkCommand, validate_records},
+        store::{CommitError, StoreError},
         test_support::work_record,
     };
-    use anyhow::{Context, anyhow};
     use colored::control;
     use std::sync::{Mutex, OnceLock};
 
@@ -43,14 +57,6 @@ mod tests {
     }
 
     #[test]
-    fn render_error_passes_through_non_validation_errors() {
-        let err = anyhow!("plain error");
-        let rendered = render_error(&err);
-
-        assert_eq!(rendered, format!("{err:?}"));
-    }
-
-    #[test]
     fn render_error_reformats_validation_errors() {
         let text = with_color_override(true, || {
             let record = work_record(
@@ -62,7 +68,8 @@ mod tests {
             );
 
             let record_set = RecordSet::try_from_records(vec![record]).unwrap();
-            let err = validate_records(&record_set).unwrap_err();
+            let validation_error = validate_records(&record_set).unwrap_err();
+            let err = RunError::from(AppError::from(validation_error));
 
             render_error(&err)
         });
@@ -74,7 +81,32 @@ mod tests {
     }
 
     #[test]
-    fn render_error_finds_validation_errors_inside_context() {
+    fn render_error_includes_config_read_cause() {
+        let err = RunError::Config(ConfigError::Read {
+            path: "/myfake.config".into(),
+            source: std::io::Error::other("fake error"),
+        });
+
+        let rendered = render_error(&err);
+
+        assert_eq!(rendered, "could not read config file /myfake.config\n  caused by: fake error");
+    }
+
+    #[test]
+    fn render_error_includes_dispatch_store_read_cause() {
+        let err = RunError::Dispatch(DispatchError::App(AppError::Store(CommitError::Store(
+            StoreError::Read {
+                path: "/my/fake/path".into(),
+                source: std::io::Error::other("fake error"),
+            },
+        ))));
+
+        let rendered = render_error(&err);
+        assert_eq!(rendered, "could not read records from /my/fake/path\n  caused by: fake error");
+    }
+
+    #[test]
+    fn render_error_formats_dispatch_validation_error() {
         let rendered = with_color_override(false, || {
             let record = work_record(
                 1,
@@ -84,14 +116,30 @@ mod tests {
                 WorkCommand::Log { title: "status".into(), description: None },
             );
 
-            let err = validate_records(&RecordSet::try_from_records(vec![record]).unwrap())
-                .context("outer")
-                .unwrap_err();
+            let records = RecordSet::try_from_records(vec![record]).unwrap();
+            let validation_error = validate_records(&records).unwrap_err();
+            let err = RunError::Dispatch(DispatchError::App(AppError::TimelineValidation(
+                validation_error,
+            )));
 
-            assert!(find_validation_error(&err).is_some());
             render_error(&err)
         });
 
         assert_eq!(rendered, "validation error: cannot log while idle for 2026-01-12");
+    }
+
+    #[test]
+    fn render_error_includes_invalid_records_cause_exactly_once() {
+        let err = RunError::Store(StoreError::InvalidRecords {
+            path: "/my/store.jsonl".into(),
+            source: RecordSetError::DuplicateId { id: 67.into() },
+        });
+
+        let rendered = render_error(&err);
+
+        assert_eq!(
+            rendered,
+            "records loaded from /my/store.jsonl are invalid\n  caused by: record with id 67 already exists"
+        );
     }
 }

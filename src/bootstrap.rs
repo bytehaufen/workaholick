@@ -1,12 +1,27 @@
-use anyhow::Result;
-
 use crate::{
     App, JsonlFileStore,
-    cli::{self, CliCommand, ConfigCommand, ShellEditor},
-    config,
+    app::AppError,
+    cli::{self, CliCommand, ConfigCommand, DispatchError, ShellEditor},
+    config::{self, ConfigError},
+    store::StoreError,
 };
 
-pub fn run_app() -> Result<()> {
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum RunError {
+    #[error(transparent)]
+    App(#[from] AppError),
+
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+
+    #[error(transparent)]
+    Store(#[from] StoreError),
+
+    #[error(transparent)]
+    Dispatch(#[from] DispatchError),
+}
+
+pub(crate) fn run_app() -> Result<(), RunError> {
     let cli = cli::parse();
 
     let editor = ShellEditor::real();
@@ -57,5 +72,5 @@ pub fn run_app() -> Result<()> {
 
     let mut app = App::new(cfg, store)?;
 
-    cli::run(&mut app, cli, &editor, formatter)
+    Ok(cli::run(&mut app, cli, &editor, formatter)?)
 }

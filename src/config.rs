@@ -3,17 +3,76 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result};
 use directories::UserDirs;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     domain::WeeklySchedule,
-    editor::{Editor, ports::FileType},
+    editor::{Editor, EditorError, ports::FileType},
 };
 
 const APP_NAME: &str = env!("CARGO_PKG_NAME");
 const CONFIG_NAME: &str = "config";
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ConfigError {
+    #[error("no home directory is availableto determine the default store path")]
+    MissingHomeDirectory,
+
+    #[error("no config file at {path}")]
+    MissingConfigFile { path: PathBuf },
+
+    #[error("could not determine the config file path")]
+    ConfigPath {
+        #[source]
+        source: confy::ConfyError,
+    },
+
+    #[error("config file already present at {path}")]
+    AlreadyExists { path: PathBuf },
+
+    #[error("could not create directory {path}")]
+    CreateDir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("could not read config file {path}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("could not write config file {path}")]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: confy::ConfyError,
+    },
+
+    #[error("could not parse config file {path}")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+
+    #[error("could not render config file content for {path}")]
+    RenderConfig {
+        path: PathBuf,
+        #[source]
+        source: toml::ser::Error,
+    },
+
+    #[error("could not edit config file {path}")]
+    Edit {
+        path: PathBuf,
+        #[source]
+        source: EditorError,
+    },
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(default)]
@@ -94,7 +153,7 @@ pub enum OutputFormatter {
 }
 
 impl Config {
-    fn for_current_user() -> anyhow::Result<Self> {
+    fn for_current_user() -> Result<Self, ConfigError> {
         Ok(Self {
             store_path: default_store_path()?,
             schedule: Default::default(),
@@ -130,36 +189,36 @@ impl<'de> Deserialize<'de> for Config {
     }
 }
 
-pub fn init() -> Result<PathBuf> {
+pub(crate) fn init() -> Result<PathBuf, ConfigError> {
     let path = config_path()?;
     init_at(&path)
 }
 
-pub fn load() -> Result<Config> {
-    let path = existing_config_path()?;
+pub(crate) fn load() -> Result<Config, ConfigError> {
+    let path = config_path()?;
     load_from(&path)
 }
 
-pub fn show() -> Result<String> {
-    let path = existing_config_path()?;
+pub(crate) fn show() -> Result<String, ConfigError> {
+    let path = config_path()?;
     show_from(&path)
 }
 
-pub fn edit(editor: &dyn Editor) -> Result<()> {
+pub(crate) fn edit(editor: &dyn Editor) -> Result<(), ConfigError> {
     let path = config_path()?;
     edit_at(&path, editor)
 }
 
-pub fn init_at(path: impl AsRef<Path>) -> Result<PathBuf> {
+pub(crate) fn init_at(path: impl AsRef<Path>) -> Result<PathBuf, ConfigError> {
     let path = path.as_ref();
 
     if path.exists() {
-        anyhow::bail!("Config already exists at {} --aborting", path.display())
+        return Err(ConfigError::AlreadyExists { path: path.to_path_buf() });
     }
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
-            .with_context(|| format!("creating config directory {}", parent.display()))?;
+            .map_err(|source| ConfigError::CreateDir { path: parent.to_path_buf(), source })?;
     }
 
     let cfg = Config::for_current_user()?;
@@ -168,22 +227,24 @@ pub fn init_at(path: impl AsRef<Path>) -> Result<PathBuf> {
     Ok(path.to_path_buf())
 }
 
-pub fn load_from(path: impl AsRef<Path>) -> Result<Config> {
+pub(crate) fn load_from(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
     let path = path.as_ref();
     ensure_exists(path)?;
 
     let contents = fs::read_to_string(path)
-        .with_context(|| format!("reading config file {}", path.display()))?;
-    toml::from_str(&contents).with_context(|| format!("parsing config file {}", path.display()))
+        .map_err(|source| ConfigError::Read { path: path.to_path_buf(), source })?;
+    toml::from_str(&contents)
+        .map_err(|source| ConfigError::Parse { path: path.to_path_buf(), source })
 }
 
-pub fn show_from(path: impl AsRef<Path>) -> Result<String> {
+pub(crate) fn show_from(path: impl AsRef<Path>) -> Result<String, ConfigError> {
     let path = path.as_ref();
     ensure_exists(path)?;
-    fs::read_to_string(path).with_context(|| format!("reading config file {}", path.display()))
+    fs::read_to_string(path)
+        .map_err(|source| ConfigError::Read { path: path.to_path_buf(), source })
 }
 
-pub fn edit_at(path: impl AsRef<Path>, editor: &dyn Editor) -> Result<()> {
+pub(crate) fn edit_at(path: impl AsRef<Path>, editor: &dyn Editor) -> Result<(), ConfigError> {
     let path = path.as_ref();
     ensure_exists(path)?;
     let materialized = render_config_for_editing(path)?;
@@ -194,23 +255,25 @@ pub fn edit_at(path: impl AsRef<Path>, editor: &dyn Editor) -> Result<()> {
          # Keep the format valid.\n\n"
     );
 
-    let editored =
-        editor.edit(&(header + &materialized), FileType::Toml).context("opening editor")?;
-    let cfg: Config = toml::from_str(&editored).context("config TOML is invalid (not saving)")?;
+    let editored = editor
+        .edit(&(header + &materialized), FileType::Toml)
+        .map_err(|source| ConfigError::Edit { path: path.to_path_buf(), source })?;
+    let cfg: Config = toml::from_str(&editored)
+        .map_err(|source| ConfigError::Parse { path: path.to_path_buf(), source })?;
     save(path, &cfg)?;
 
     Ok(())
 }
 
-fn save(path: &Path, cfg: &Config) -> Result<()> {
+fn save(path: &Path, cfg: &Config) -> Result<(), ConfigError> {
     confy::store_path_perms(path, cfg, config_file_permissions())
-        .with_context(|| format!("writing config file {}", path.display()))
+        .map_err(|source| ConfigError::Write { path: path.to_path_buf(), source })
 }
 
-fn render_config_for_editing(path: &Path) -> Result<String> {
+fn render_config_for_editing(path: &Path) -> Result<String, ConfigError> {
     let cfg = load_from(path)?;
     toml::to_string_pretty(&cfg)
-        .with_context(|| format!("serializing config file {}", path.display()))
+        .map_err(|source| ConfigError::RenderConfig { path: path.to_path_buf(), source })
 }
 
 fn config_file_permissions() -> Permissions {
@@ -226,36 +289,23 @@ fn config_file_permissions() -> Permissions {
     }
 }
 
-fn config_path() -> Result<PathBuf> {
-    confy::get_configuration_file_path(APP_NAME, CONFIG_NAME).context("computing config path")
+fn config_path() -> Result<PathBuf, ConfigError> {
+    confy::get_configuration_file_path(APP_NAME, CONFIG_NAME)
+        .map_err(|source| ConfigError::ConfigPath { source })
 }
 
-fn existing_config_path() -> Result<PathBuf> {
-    let path = config_path()?;
-
+fn ensure_exists(path: &Path) -> Result<(), ConfigError> {
     if !path.exists() {
-        anyhow::bail!(
-            "Config file does not exist at {} (use `{} config init` to initialize it)",
-            path.display(),
-            APP_NAME
-        );
-    }
-
-    Ok(path)
-}
-
-fn ensure_exists(path: &Path) -> Result<()> {
-    if !path.exists() {
-        anyhow::bail!("Config file does not exist at {}", path.display());
+        return Err(ConfigError::MissingConfigFile { path: path.to_path_buf() });
     }
 
     Ok(())
 }
 
-fn default_store_path() -> anyhow::Result<PathBuf> {
+fn default_store_path() -> Result<PathBuf, ConfigError> {
     let home = UserDirs::new()
         .map(|user_dirs| user_dirs.home_dir().to_path_buf())
-        .context("no home directory found")?;
+        .ok_or(ConfigError::MissingHomeDirectory)?;
 
     Ok(home.join(APP_NAME).join("data.jsonl"))
 }
@@ -264,9 +314,9 @@ fn default_store_path() -> anyhow::Result<PathBuf> {
 mod tests {
     use super::*;
     use crate::config::{APP_NAME, OutputFormatter};
+    use crate::editor::EditorError;
     use crate::editor::ports::{Editor, FileType};
     use crate::test_support::test_config;
-    use anyhow::Result;
     use std::{cell::RefCell, fs, path::PathBuf};
 
     struct CapturingEditor {
@@ -284,7 +334,7 @@ mod tests {
     }
 
     impl Editor for CapturingEditor {
-        fn edit(&self, initial: &str, file_type: FileType) -> Result<String> {
+        fn edit(&self, initial: &str, file_type: FileType) -> Result<String, EditorError> {
             assert!(matches!(file_type, FileType::Toml));
             let _ = self.seen.replace(Some(initial.to_string()));
             Ok(initial.to_string())

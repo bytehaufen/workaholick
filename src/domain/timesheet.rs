@@ -1,7 +1,9 @@
 mod builder;
+mod error;
 mod totals;
 
 pub(crate) use builder::build_timesheet;
+pub(crate) use error::TimesheetError;
 pub(crate) use totals::{DailyTotals, WeeklyTotals};
 
 use crate::domain::{TimeBreakdown, reporting::TimeWindow};

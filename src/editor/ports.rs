@@ -1,4 +1,3 @@
-use anyhow::{Result, bail};
 use std::{
     env,
     fmt::Display,
@@ -7,6 +6,8 @@ use std::{
     process::Command,
 };
 use tempfile::Builder;
+
+use crate::editor::EditorError;
 
 #[derive(Debug, Clone, Copy)]
 pub enum FileType {
@@ -24,7 +25,7 @@ impl Display for FileType {
 }
 
 pub trait Editor {
-    fn edit(&self, initial: &str, file_type: FileType) -> Result<String>;
+    fn edit(&self, initial: &str, file_type: FileType) -> Result<String, EditorError>;
 }
 
 pub trait Env {
@@ -38,43 +39,55 @@ impl Env for StdEnv {
 }
 
 pub trait Fs {
-    fn write_string(&self, path: &Path, content: &str) -> Result<()>;
-    fn read_string(&self, path: &Path) -> Result<String>;
+    fn write_string(&self, path: &Path, content: &str) -> Result<(), EditorError>;
+    fn read_string(&self, path: &Path) -> Result<String, EditorError>;
 }
 pub struct StdFs;
 impl Fs for StdFs {
-    fn write_string(&self, path: &Path, content: &str) -> Result<()> {
-        fs::write(path, content)?;
+    fn write_string(&self, path: &Path, content: &str) -> Result<(), EditorError> {
+        fs::write(path, content)
+            .map_err(|source| EditorError::WriteTempFile { path: path.to_path_buf(), source })?;
         Ok(())
     }
 
-    fn read_string(&self, path: &Path) -> Result<String> {
-        Ok(fs::read_to_string(path)?)
+    fn read_string(&self, path: &Path) -> Result<String, EditorError> {
+        fs::read_to_string(path)
+            .map_err(|source| EditorError::ReadTempFile { path: path.to_path_buf(), source })
     }
 }
 
 pub trait Temp {
-    fn temp_file(&self, extension: &str) -> Result<PathBuf>;
+    fn temp_file(&self, extension: &str) -> Result<PathBuf, EditorError>;
 }
 pub struct TempFileTemp;
 impl Temp for TempFileTemp {
-    fn temp_file(&self, extension: &str) -> Result<PathBuf> {
-        let file = Builder::new().suffix(&format!(".{extension}")).tempfile()?;
+    fn temp_file(&self, extension: &str) -> Result<PathBuf, EditorError> {
+        let file = Builder::new()
+            .suffix(&format!(".{extension}"))
+            .tempfile()
+            .map_err(|source| EditorError::CreateTempFile { source })?;
 
-        let (_file, path) = file.keep()?;
+        let (_file, path) =
+            file.keep().map_err(|source| EditorError::PersistTempFile { source: source.error })?;
         Ok(path)
     }
 }
 
 pub trait Process {
-    fn run(&self, program: &str, args: &[String]) -> Result<()>;
+    fn run(&self, program: &str, args: &[String]) -> Result<(), EditorError>;
 }
 pub struct StdProcess;
 impl Process for StdProcess {
-    fn run(&self, program: &str, args: &[String]) -> Result<()> {
-        let status = Command::new(program).args(args).status()?;
+    fn run(&self, program: &str, args: &[String]) -> Result<(), EditorError> {
+        let status = Command::new(program)
+            .args(args)
+            .status()
+            .map_err(|source| EditorError::Launch { program: program.to_string(), source })?;
         if !status.success() {
-            bail!("editor exited with {status}");
+            return Err(EditorError::Failed {
+                program: program.to_string(),
+                message: status.to_string(),
+            });
         }
 
         Ok(())
@@ -122,7 +135,7 @@ mod tests {
     #[test]
     fn std_process_run_failure_is_err() {
         let err = StdProcess.run("false", &[]).unwrap_err();
-        assert!(err.to_string().contains("editor exited with"));
+        assert!(err.to_string().contains("exit status"));
     }
 
     #[test]

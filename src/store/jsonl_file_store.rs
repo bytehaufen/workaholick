@@ -2,10 +2,8 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow};
-
 use crate::domain::{ChangeOutcome, Record, RecordChange, RecordSet};
-use crate::store::RecordRepository;
+use crate::store::{CommitError, RecordRepository, StoreError};
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
 
@@ -25,18 +23,23 @@ impl Drop for JsonlFileStore {
 }
 
 impl JsonlFileStore {
-    pub fn new(file_path: impl AsRef<Path>) -> Result<Self> {
+    pub fn new(file_path: impl AsRef<Path>) -> Result<Self, StoreError> {
         let file_path: &Path = file_path.as_ref();
         let parent = file_path
             .parent()
-            .ok_or_else(|| anyhow!("Expected parent directory for file path: {:?}", file_path))?;
-        fs::create_dir_all(parent)?;
+            .ok_or_else(|| StoreError::MissingParentDirectory { path: file_path.to_path_buf() })?;
+
+        fs::create_dir_all(parent)
+            .map_err(|source| StoreError::CreateDirectory { path: parent.to_path_buf(), source })?;
 
         let (lock_file, lock_path) = Self::create_lock_file(file_path)?;
 
         let try_load = || {
             let records = Self::read_file(file_path)?;
-            RecordSet::try_from_records(records)
+            RecordSet::try_from_records(records).map_err(|source| StoreError::InvalidRecords {
+                path: file_path.to_path_buf(),
+                source,
+            })
         };
 
         let records_by_id = match try_load() {
@@ -51,7 +54,7 @@ impl JsonlFileStore {
         Ok(Self { file_path: file_path.into(), _lock_file: lock_file, lock_path, records_by_id })
     }
 
-    fn read_from<R: BufRead>(reader: R, path: &Path) -> Result<Vec<Record>> {
+    fn read_from<R: BufRead>(reader: R, path: &Path) -> Result<Vec<Record>, StoreError> {
         reader
             .lines()
             .enumerate()
@@ -60,35 +63,33 @@ impl JsonlFileStore {
                 other => Some((index, other)),
             })
             .map(|(index, line)| {
-                let line = line?;
+                let line =
+                    line.map_err(|source| StoreError::Read { path: path.to_path_buf(), source })?;
                 let line_num = index + 1;
 
-                serde_json::from_str::<Record>(&line).map_err(|e| {
-                    anyhow!(
-                        "parse JSON on line {} (file {:?}): {}\n  | {}",
-                        line_num,
-                        path,
-                        e.to_string().replace(" at line 1", ""), // Remove serde's useless line info
-                        line.trim()
-                    )
+                serde_json::from_str::<Record>(&line).map_err(|source| StoreError::Parse {
+                    line: line_num,
+                    path: path.to_path_buf(),
+                    source,
                 })
             })
             .collect()
     }
 
     /// Reads in the file at `path` in a by timeestamp sorted `Vec<Record>`
-    fn read_file(path: &Path) -> Result<Vec<Record>> {
+    fn read_file(path: &Path) -> Result<Vec<Record>, StoreError> {
         if !path.exists() {
             return Ok(Vec::new());
         };
 
-        let file = File::open(path).with_context(|| format!("open file {path:?} for reading"))?;
+        let file = File::open(path)
+            .map_err(|source| StoreError::Read { path: path.to_path_buf(), source })?;
 
         let reader = BufReader::with_capacity(BUFFER_SIZE, file);
         Self::read_from(reader, path)
     }
 
-    fn replace_file(&self, from: &Path, to: &Path) -> Result<()> {
+    fn replace_file(&self, from: &Path, to: &Path) -> Result<(), StoreError> {
         #[cfg(windows)]
         {
             if to.exists() {
@@ -96,8 +97,11 @@ impl JsonlFileStore {
             }
         }
 
-        fs::rename(from, to)
-            .with_context(|| format!("replace log file via rename: {from:?} -> {to:?}"))?;
+        fs::rename(from, to).map_err(|source| StoreError::Replace {
+            from: from.to_path_buf(),
+            to: to.to_path_buf(),
+            source,
+        })?;
         Ok(())
     }
 
@@ -105,36 +109,43 @@ impl JsonlFileStore {
         path.with_added_extension("tmp")
     }
 
-    fn persist(&mut self) -> Result<()> {
+    fn persist(&mut self) -> Result<(), StoreError> {
         let file_path = &self.file_path;
         let temp_file = Self::temp_file_path(file_path);
 
-        let file = OpenOptions::new().create(true).truncate(true).write(true).open(&temp_file)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&temp_file)
+            .map_err(|source| StoreError::Persist { path: temp_file.clone(), source })?;
 
         let mut writer = BufWriter::with_capacity(BUFFER_SIZE, file);
 
-        self.records_by_id.iter().try_for_each(|record| -> anyhow::Result<()> {
-            serde_json::to_writer(&mut writer, record)?;
-            writeln!(writer)?;
+        self.records_by_id.iter().try_for_each(|record| -> Result<(), StoreError> {
+            serde_json::to_writer(&mut writer, record)
+                .map_err(|source| StoreError::Serialize { path: temp_file.clone(), source })?;
+            writeln!(writer)
+                .map_err(|source| StoreError::Persist { path: temp_file.clone(), source })?;
             Ok(())
         })?;
 
-        writer.flush()?;
-        writer.get_ref().sync_all()?;
+        writer.flush().map_err(|source| StoreError::Persist { path: temp_file.clone(), source })?;
+        writer
+            .get_ref()
+            .sync_all()
+            .map_err(|source| StoreError::Persist { path: temp_file.clone(), source })?;
 
         self.replace_file(&temp_file, &self.file_path)
     }
 
-    fn create_lock_file(file_path: &Path) -> Result<(File, PathBuf)> {
+    fn create_lock_file(file_path: &Path) -> Result<(File, PathBuf), StoreError> {
         let path = file_path.with_added_extension("lock");
-        let file = File::create_new(&path).map_err(|error| {
-            if error.kind() == ErrorKind::AlreadyExists {
-                anyhow!(
-                    "store is already in use (lock file exists): {path:?}\n\
-                    If no other instance is running, remove the lock file."
-                )
+        let file = File::create_new(&path).map_err(|source| {
+            if source.kind() == ErrorKind::AlreadyExists {
+                StoreError::AlreadyLocked { path: path.clone() }
             } else {
-                anyhow!("create lock file {path:?}: {error}")
+                StoreError::CreateLock { path: path.clone(), source }
             }
         })?;
 
@@ -147,7 +158,7 @@ impl RecordRepository for JsonlFileStore {
         &self.records_by_id
     }
 
-    fn commit(&mut self, change: RecordChange) -> anyhow::Result<ChangeOutcome> {
+    fn commit(&mut self, change: RecordChange) -> Result<ChangeOutcome, CommitError> {
         let change_outcome = self.records_by_id.apply_change(&change)?;
         self.persist()?;
         Ok(change_outcome)
@@ -161,7 +172,10 @@ mod tests {
     use std::path::Path;
 
     use crate::{
-        domain::{RecordId, RecordInput, WorkCommand, WorkContext, WorkRecord, WorkRecordInput},
+        domain::{
+            RecordId, RecordInput, RecordSetError, WorkCommand, WorkContext, WorkRecord,
+            WorkRecordInput,
+        },
         test_support::{self, ts},
     };
 
@@ -453,10 +467,10 @@ mod tests {
                 ),
             })
             .unwrap_err();
-        assert_eq!(update_err.to_string(), "id 999 does not exist");
+        assert_eq!(update_err.to_string(), "record with id 999 does not exist");
 
         let delete_err = store.commit(RecordChange::Delete { id: 123.into() }).unwrap_err();
-        assert_eq!(delete_err.to_string(), "id 123 does not exist");
+        assert_eq!(delete_err.to_string(), "record with id 123 does not exist");
     }
 
     #[test]
@@ -559,7 +573,7 @@ mod tests {
     fn new_rejects_path_without_parent_directory() {
         let file_path = PathBuf::from("/");
         let err = JsonlFileStore::new(&file_path).unwrap_err();
-        assert!(err.to_string().contains("Expected parent directory for file path"));
+        assert_eq!(err.to_string(), "store path / has no parent directory");
     }
 
     #[test]
@@ -576,8 +590,7 @@ mod tests {
         std::fs::set_permissions(&file_path, perms).unwrap();
 
         let err = JsonlFileStore::new(&file_path).unwrap_err().to_string();
-        assert!(err.contains("open file"));
-        assert!(err.contains("for reading"));
+        assert!(err.contains("could not read records from"));
 
         let mut perms = std::fs::metadata(&file_path).unwrap().permissions();
         perms.set_mode(0o644);
@@ -603,7 +616,7 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("replace log file via rename"));
+        assert!(err.contains("could not replace"));
     }
 
     #[test]
@@ -673,7 +686,7 @@ mod tests {
 
         let err = JsonlFileStore::new(&file_path).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("parse JSON on line 1"));
+        assert!(msg.contains("could not parse record at line 1 in "));
     }
 
     #[test]
@@ -702,7 +715,13 @@ mod tests {
         );
 
         let error = JsonlFileStore::new(&store_file_path).unwrap_err();
-        assert_eq!(error.to_string(), "duplicate id 0 in records");
+        assert!(matches!(
+            error,
+            StoreError::InvalidRecords {
+                path,
+                source: RecordSetError::DuplicateId { id },
+            } if path == store_file_path && id == 0.into()
+        ));
     }
 
     #[test]
@@ -726,8 +745,7 @@ mod tests {
         std::fs::set_permissions(&lock_dir, perms).unwrap();
 
         let msg = err.to_string();
-        assert!(msg.contains("create lock file"));
-        assert!(msg.contains("Permission denied"));
+        assert!(msg.contains("could not create lock file "));
     }
 
     #[test]
@@ -802,5 +820,17 @@ mod tests {
         let _ = store.commit(RecordChange::Delete { id }).unwrap();
         assert_eq!(store.records().len(), 0);
         assert!(store.records().is_empty());
+    }
+
+    #[test]
+    fn new_reports_parent_path_when_directory_creation_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("not-a-directory");
+        std::fs::write(&parent, "blocking file").unwrap();
+
+        let store_path = parent.join("data.jsonl");
+        let err = JsonlFileStore::new(&store_path).unwrap_err();
+
+        assert!(matches!(err, StoreError::CreateDirectory { path, .. } if path == parent));
     }
 }

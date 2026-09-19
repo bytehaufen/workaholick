@@ -1,21 +1,55 @@
+use chrono::NaiveDate;
+
 use super::args::{Cli, CliCommand};
 use super::edit_format::{parse_edited, render_for_edit};
 use super::format;
 use crate::App;
-use crate::cli::args::{AbsenceDetailsArgs, WorkSubcommand};
+use crate::app::AppError;
+use crate::cli::args::{AbsenceDetailsArgs, ArgsError, WorkSubcommand};
+use crate::cli::edit_format::EditFormatError;
+use crate::cli::format::FormatError;
 use crate::config::OutputFormatter;
 use crate::domain::RecordId;
+use crate::editor::EditorError;
 use crate::editor::{Editor, ports::FileType};
 use crate::store::RecordRepository;
 
-use anyhow::Result;
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DispatchError {
+    #[error(transparent)]
+    App(#[from] AppError),
+
+    #[error(transparent)]
+    Editor(#[from] EditorError),
+
+    #[error(transparent)]
+    EditFormat(#[from] EditFormatError),
+
+    #[error(transparent)]
+    FormatError(#[from] FormatError),
+
+    #[error(transparent)]
+    Arguments(#[from] ArgsError),
+
+    #[error("record with ID {id} does not exist")]
+    RecordNotFound { id: RecordId },
+
+    #[error("internal error: command was handled before dispatch")]
+    AlreadyHandledCommand,
+
+    #[error("no records exist")]
+    NoRecordsExist,
+
+    #[error("no records for date {date} exist")]
+    NoRecordsForDate { date: NaiveDate },
+}
 
 pub(crate) fn run<S: RecordRepository>(
     app: &mut App<S>,
     cli: Cli,
     editor: &dyn Editor,
     formatter: OutputFormatter,
-) -> Result<()> {
+) -> Result<(), DispatchError> {
     run_inner(app, cli, editor, formatter)
 }
 
@@ -24,10 +58,10 @@ fn run_inner<S: RecordRepository>(
     cli: Cli,
     editor: &dyn Editor,
     formatter: OutputFormatter,
-) -> Result<()> {
+) -> Result<(), DispatchError> {
     match cli.command {
-        CliCommand::Config { .. } => anyhow::bail!("config handled in main"),
-        CliCommand::Completions { .. } => anyhow::bail!("completions handled in main"),
+        CliCommand::Config { .. } => Err(DispatchError::AlreadyHandledCommand),
+        CliCommand::Completions { .. } => Err(DispatchError::AlreadyHandledCommand),
 
         CliCommand::Work { command } => {
             let id = match command {
@@ -57,9 +91,7 @@ fn run_inner<S: RecordRepository>(
         }
         CliCommand::Edit { id } => {
             let id = id.into();
-            let record = app
-                .get_record_input(id)
-                .ok_or_else(|| anyhow::anyhow!("No record with ID {id}"))?;
+            let record = app.get_record_input(id).ok_or(DispatchError::RecordNotFound { id })?;
             let initial = render_for_edit(&record)?;
             let edited = editor.edit(&initial, FileType::Ron)?;
             let patch = parse_edited(&edited)?;
@@ -70,26 +102,25 @@ fn run_inner<S: RecordRepository>(
         }
         CliCommand::Day { date } => {
             let Some(date) = date.or_else(|| app.last_record_date()) else {
-                anyhow::bail!("There are no records.");
+                return Err(DispatchError::NoRecordsExist);
             };
 
             let day_overview = app.day(date);
             if day_overview.is_empty() {
-                println!("No records for {date}.");
-                return Ok(());
+                return Err(DispatchError::NoRecordsForDate { date });
             }
 
-            format::print_day(formatter, date, &day_overview)
+            Ok(format::print_day(formatter, date, &day_overview)?)
         }
         CliCommand::Timesheet(timesheet_args) => {
             let timesheet = app.timesheet(timesheet_args.scope())?;
-            format::print_timesheet(formatter, &timesheet)
+            Ok(format::print_timesheet(formatter, &timesheet)?)
         }
         CliCommand::Activity(activity_args) => {
             let scope = activity_args.scope();
             let activity_report = app.activity(scope.clone())?;
 
-            format::print_activity(formatter, &activity_report, activity_args.group_by_title)
+            Ok(format::print_activity(formatter, &activity_report, activity_args.group_by_title)?)
         }
     }
 }

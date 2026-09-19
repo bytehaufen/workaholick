@@ -2,7 +2,6 @@
 mod markdown_formatter;
 mod port;
 
-use anyhow::Result;
 use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
 
 use crate::{
@@ -20,11 +19,20 @@ use crate::domain::{
     Timesheet, WorkCommand, activity_report::ActivityReport, reporting::TimeWindow,
 };
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FormatError {
+    #[cfg(not(feature = "markdown"))]
+    #[error(
+        "config sets formatter to `markdown`, but this binary was built without the `markdown` feature"
+    )]
+    MarkdownFeatureDisabled,
+}
+
 pub fn print_day(
     formatter: OutputFormatter,
     date: NaiveDate,
     day_overview: &DayOverview,
-) -> Result<()> {
+) -> Result<(), FormatError> {
     match formatter {
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
@@ -36,15 +44,16 @@ pub fn print_day(
 
             #[cfg(not(feature = "markdown"))]
             {
-                anyhow::bail!(
-                    "Config sets formatter to `markdown`, but this binary was built without the `markdown` feature"
-                )
+                Err(FormatError::MarkdownFeatureDisabled)
             }
         }
     }
 }
 
-pub fn print_timesheet(formatter: OutputFormatter, timesheet: &Timesheet) -> Result<()> {
+pub fn print_timesheet(
+    formatter: OutputFormatter,
+    timesheet: &Timesheet,
+) -> Result<(), FormatError> {
     match formatter {
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
@@ -56,9 +65,7 @@ pub fn print_timesheet(formatter: OutputFormatter, timesheet: &Timesheet) -> Res
 
             #[cfg(not(feature = "markdown"))]
             {
-                anyhow::bail!(
-                    "Config sets formatter to `markdown`, but this binary was built without the `markdown` feature"
-                )
+                Err(FormatError::MarkdownFeatureDisabled)
             }
         }
     }
@@ -68,7 +75,7 @@ pub fn print_activity(
     formatter: OutputFormatter,
     activity_report: &ActivityReport,
     group_by_title: bool,
-) -> Result<()> {
+) -> Result<(), FormatError> {
     match formatter {
         OutputFormatter::Markdown => {
             #[cfg(feature = "markdown")]
@@ -80,9 +87,7 @@ pub fn print_activity(
 
             #[cfg(not(feature = "markdown"))]
             {
-                anyhow::bail!(
-                    "Config sets formatter to `markdown`, but this binary was built without the `markdown` feature"
-                )
+                Err(FormatError::MarkdownFeatureDisabled)
             }
         }
     }

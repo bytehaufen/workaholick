@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use crate::editor::EditorError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorCommand {
@@ -13,8 +13,9 @@ pub fn choose_editor(env_visual: Option<String>, env_editor: Option<String>) -> 
         .unwrap_or("vi".into())
 }
 
-pub fn parse_editor_command(cmd: &str) -> Result<EditorCommand> {
-    let parts = shlex::split(cmd).ok_or_else(|| anyhow!("Could not parse Editor: {cmd}"))?;
+pub fn parse_editor_command(cmd: &str) -> Result<EditorCommand, EditorError> {
+    let parts =
+        shlex::split(cmd).ok_or_else(|| EditorError::ParseCommand { command: cmd.to_string() })?;
     if parts.is_empty() {
         return Ok(EditorCommand { program: "vi".into(), args: vec![] });
     }
@@ -95,6 +96,6 @@ mod tests {
     fn parse_editor_rejects_invalid_shell_syntax() {
         let err = parse_editor_command("nvim 'unterminated").unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("Could not parse Editor"));
+        assert_eq!(msg, "could not parse editor command");
     }
 }

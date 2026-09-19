@@ -9,6 +9,12 @@ use strum::VariantNames;
 
 use crate::domain::{AbsenceKind, AbsencePortion, Period, WorkContext, reporting::DateScope};
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ArgsError {
+    #[error("provide either --date or both --from and --to")]
+    InvalidAbsenceDateSelection,
+}
+
 // FIXME: Update when domain implemented
 const HEADER: Style = clap_cargo::style::HEADER;
 fn examples_help() -> String {
@@ -226,12 +232,12 @@ pub(crate) struct AbsenceDateArgs {
 }
 
 impl AbsenceDateArgs {
-    pub(crate) fn into_range(self) -> anyhow::Result<Option<(NaiveDate, NaiveDate)>> {
+    pub(crate) fn into_range(self) -> Result<Option<(NaiveDate, NaiveDate)>, ArgsError> {
         match (self.date, self.from, self.to) {
             (None, None, None) => Ok(None),
             (Some(date), None, None) => Ok(Some((date, date))),
             (None, Some(from), Some(to)) => Ok(Some((from, to))),
-            _ => anyhow::bail!("provide either --date or both --from and --to"),
+            _ => Err(ArgsError::InvalidAbsenceDateSelection),
         }
     }
 }

@@ -1,10 +1,9 @@
-use crate::editor;
 use crate::editor::command::parse_editor_command;
 use crate::editor::ports::{
     Editor, Env, FileType, Fs, Process, StdEnv, StdFs, StdProcess, Temp, TempFileTemp,
 };
+use crate::editor::{self, EditorError};
 
-use anyhow::{Context, Result};
 use std::fs;
 
 pub struct ShellEditor<E, F, T, P> {
@@ -27,10 +26,10 @@ impl ShellEditor<StdEnv, StdFs, TempFileTemp, StdProcess> {
 }
 
 impl<E: Env, F: Fs, T: Temp, P: Process> Editor for ShellEditor<E, F, T, P> {
-    fn edit(&self, initial: &str, file_type: FileType) -> Result<String> {
-        let path = self.temp.temp_file(&file_type.to_string()).context("creating temp file")?;
+    fn edit(&self, initial: &str, file_type: FileType) -> Result<String, EditorError> {
+        let path = self.temp.temp_file(&file_type.to_string())?;
 
-        self.fs.write_string(&path, initial).context("writing temp file")?;
+        self.fs.write_string(&path, initial)?;
 
         let cmd = editor::command::choose_editor(self.env.var("VISUAL"), self.env.var("EDITOR"));
         let mut cmd = parse_editor_command(&cmd)?;
@@ -38,9 +37,9 @@ impl<E: Env, F: Fs, T: Temp, P: Process> Editor for ShellEditor<E, F, T, P> {
         // Final arg is file path
         cmd.args.push(path.to_string_lossy().into());
 
-        self.proc.run(&cmd.program, &cmd.args).context("running editor")?;
+        self.proc.run(&cmd.program, &cmd.args)?;
 
-        let edited = self.fs.read_string(&path).context("reading edited file")?;
+        let edited = self.fs.read_string(&path)?;
 
         let _ = fs::remove_file(&path);
 
@@ -51,10 +50,10 @@ impl<E: Env, F: Fs, T: Temp, P: Process> Editor for ShellEditor<E, F, T, P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::{Result, anyhow};
     use std::{
         cell::RefCell,
         collections::HashMap,
+        io::{Error, ErrorKind},
         path::{Path, PathBuf},
         rc::Rc,
     };
@@ -80,13 +79,16 @@ mod tests {
         files: Rc<RefCell<HashMap<PathBuf, String>>>,
     }
     impl Fs for FakeFs {
-        fn write_string(&self, path: &Path, content: &str) -> Result<()> {
+        fn write_string(&self, path: &Path, content: &str) -> Result<(), EditorError> {
             let _ = self.files.borrow_mut().insert(path.to_path_buf(), content.to_string());
             Ok(())
         }
 
-        fn read_string(&self, path: &Path) -> Result<String> {
-            self.files.borrow().get(path).cloned().ok_or(anyhow!("missing file"))
+        fn read_string(&self, path: &Path) -> Result<String, EditorError> {
+            self.files.borrow().get(path).cloned().ok_or_else(|| EditorError::ReadTempFile {
+                path: path.to_path_buf(),
+                source: Error::new(ErrorKind::NotFound, "fake file does not exist"),
+            })
         }
     }
 
@@ -94,7 +96,7 @@ mod tests {
         path: PathBuf,
     }
     impl Temp for FakeTemp {
-        fn temp_file(&self, _extension: &str) -> Result<PathBuf> {
+        fn temp_file(&self, _extension: &str) -> Result<PathBuf, EditorError> {
             Ok(self.path.clone())
         }
     }
@@ -107,10 +109,13 @@ mod tests {
         edited: String,
     }
     impl Process for FakeProc {
-        fn run(&self, program: &str, args: &[String]) -> Result<()> {
+        fn run(&self, program: &str, args: &[String]) -> Result<(), EditorError> {
             self.calls.borrow_mut().push((program.to_string(), args.to_vec()));
             if self.fail {
-                return Err(anyhow!("process failed"));
+                return Err(EditorError::Failed {
+                    program: program.to_string(),
+                    message: "fake process failed".to_string(),
+                });
             }
 
             // Simulate the editor modifying the file
@@ -171,7 +176,7 @@ mod tests {
         let editor = ShellEditor::new(env, fs, temp, proc);
 
         let err = editor.edit("initial", FileType::Ron).unwrap_err();
-        assert!(err.to_string().contains("running editor"));
+        assert_eq!(err.to_string(), "editor `nvim` failed: fake process failed");
     }
 
     #[test]

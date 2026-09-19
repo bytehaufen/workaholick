@@ -1,9 +1,9 @@
-use anyhow::Context;
 use chrono::{Datelike, Days};
 
 use crate::domain::{
     DailyTotals, Period, Record, Timesheet, WeeklySchedule, WeeklyTotals, calculate_time_breakdown,
     reporting::{self, DateScope, TimeWindow},
+    timesheet::TimesheetError,
 };
 
 pub(crate) fn build_timesheet(
@@ -11,7 +11,7 @@ pub(crate) fn build_timesheet(
     window: TimeWindow,
     scope: &DateScope,
     weekly_schedule: &WeeklySchedule,
-) -> anyhow::Result<Timesheet> {
+) -> Result<Timesheet, TimesheetError> {
     let breakdown = calculate_time_breakdown(records, window, weekly_schedule)?;
 
     let timesheet = Timesheet::new(window, breakdown);
@@ -36,7 +36,7 @@ fn calculate_weekly_totals(
     records: &[Record],
     window: TimeWindow,
     weekly_schedule: &WeeklySchedule,
-) -> anyhow::Result<Vec<WeeklyTotals>> {
+) -> Result<Vec<WeeklyTotals>, TimesheetError> {
     let first_week_start = reporting::start_of_week(window.start().date_naive())?;
     let last_date = window.last_included_date();
 
@@ -47,7 +47,7 @@ fn calculate_weekly_totals(
     .map(|week_start| {
         let week_end = week_start
             .checked_add_days(Days::new(7))
-            .context("week end should be representable")?;
+            .ok_or(TimesheetError::WeekEndOutOfRange { week_start })?;
 
         let full_week_start = reporting::start_of_day(week_start)?;
         let full_week_end = reporting::start_of_day(week_end)?;
@@ -78,9 +78,9 @@ fn calculate_daily_totals(
     records: &[Record],
     window: TimeWindow,
     weekly_schedule: &WeeklySchedule,
-) -> anyhow::Result<Vec<DailyTotals>> {
+) -> Result<Vec<DailyTotals>, TimesheetError> {
     let daily_totals = TimeWindow::dates_in(window)
-        .map(|date| -> anyhow::Result<DailyTotals> {
+        .map(|date| -> Result<DailyTotals, TimesheetError> {
             let day_start = reporting::start_of_day(date)?.max(window.start());
             let day_end = reporting::start_of_day(reporting::next_day(date)?)?.min(window.end());
             let day_window = TimeWindow::new(day_start, day_end);
@@ -95,7 +95,7 @@ fn calculate_daily_totals(
                 weekly_schedule.minutes_for(day_start.weekday()),
             ))
         })
-        .collect::<anyhow::Result<Vec<_>>>()?;
+        .collect::<Result<Vec<_>, TimesheetError>>()?;
 
     Ok(daily_totals)
 }

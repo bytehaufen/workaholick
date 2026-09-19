@@ -9,16 +9,11 @@ use clap::CommandFactory;
 use clap_complete::generate;
 use std::io;
 
-pub(crate) use args::Cli;
-pub(crate) use args::CliCommand;
-pub(crate) use args::CompletionShell;
-pub(crate) use args::ConfigCommand;
-pub(crate) use args::parse;
-pub(crate) use dispatch::run;
-#[cfg(feature = "markdown")]
-pub(crate) use shell_editor::ShellEditor;
+pub(crate) use args::{Cli, CliCommand, CompletionShell, ConfigCommand, parse};
+pub(crate) use dispatch::{DispatchError, run};
+pub(crate) use validation_error::render_error;
 
-pub use validation_error::render_error;
+pub(crate) use shell_editor::ShellEditor;
 
 pub fn print_completions(shell: CompletionShell) {
     let mut cmd = Cli::command();

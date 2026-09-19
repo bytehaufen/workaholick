@@ -1,4 +1,3 @@
-use anyhow::Context;
 use indexmap::IndexMap;
 
 use crate::domain::{Record, RecordId, RecordInput};
@@ -19,15 +18,27 @@ pub(crate) enum ChangeOutcome {
 #[derive(Debug, Clone)]
 pub(crate) struct RecordSet(IndexMap<RecordId, Record>);
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum RecordSetError {
+    #[error("record with id {id} already exists")]
+    DuplicateId { id: RecordId },
+
+    #[error("record with id {id} does not exist")]
+    MissingId { id: RecordId },
+
+    #[error("record {id} cannot change its type")]
+    RecordTypeChanged { id: RecordId },
+}
+
 impl RecordSet {
-    pub fn try_from_records(records: Vec<Record>) -> anyhow::Result<Self> {
+    pub fn try_from_records(records: Vec<Record>) -> Result<RecordSet, RecordSetError> {
         let len = records.len();
         let mut records_by_id = records.into_iter().try_fold(
             IndexMap::with_capacity(len),
             |mut records_by_id, record| {
                 let id = *record.id();
                 if records_by_id.insert(id, record).is_some() {
-                    anyhow::bail!("duplicate id {id} in records");
+                    return Err(RecordSetError::DuplicateId { id });
                 }
 
                 Ok(records_by_id)
@@ -39,21 +50,22 @@ impl RecordSet {
         Ok(Self(records_by_id))
     }
 
-    pub fn apply_change(&mut self, change: &RecordChange) -> anyhow::Result<ChangeOutcome> {
+    pub fn apply_change(&mut self, change: &RecordChange) -> Result<ChangeOutcome, RecordSetError> {
         match change {
             RecordChange::Insert { id, input } => {
-                anyhow::ensure!(!self.0.contains_key(id), "id {id} already exists");
+                if self.0.contains_key(id) {
+                    return Err(RecordSetError::DuplicateId { id: *id });
+                }
                 let record = Record::from_input(*id, input.clone());
                 self.insert_sorted(*id, record);
 
                 Ok(ChangeOutcome::Inserted { id: *id })
             }
             RecordChange::Update { id, input } => {
-                let existing = self.0.get(id).with_context(|| format!("id {id} does not exist"))?;
-                anyhow::ensure!(
-                    same_record_type(existing, input),
-                    "record {id} cannot be updated with a different record type"
-                );
+                let existing = self.0.get(id).ok_or(RecordSetError::MissingId { id: *id })?;
+                if !same_record_type(existing, input) {
+                    return Err(RecordSetError::RecordTypeChanged { id: *id });
+                }
 
                 let updated_record = Record::from_input(*id, input.clone());
                 match self.0.shift_remove(id) {
@@ -62,13 +74,13 @@ impl RecordSet {
 
                         Ok(ChangeOutcome::Updated { previous })
                     }
-                    None => anyhow::bail!("id {id} does not exist"),
+                    None => Err(RecordSetError::MissingId { id: *id }),
                 }
             }
             RecordChange::Delete { id } => {
                 // We do a slow shift remove, to do not mess the order in the stored file
                 let record =
-                    self.0.shift_remove(id).with_context(|| format!("id {id} does not exist"))?;
+                    self.0.shift_remove(id).ok_or(RecordSetError::MissingId { id: *id })?;
 
                 Ok(ChangeOutcome::Deleted { record })
             }

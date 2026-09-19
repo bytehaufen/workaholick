@@ -9,7 +9,7 @@ pub(crate) use error::{CommandLabel, TimelineValidationError, WorkValidationIssu
 use crate::domain::{AbsenceRecord, Record, WorkRecord, record_set::RecordSet};
 use {absence::validate_absence_records, cross::validate_cross_rules, work::validate_work_records};
 
-pub(crate) fn validate_records(records: &RecordSet) -> anyhow::Result<()> {
+pub(crate) fn validate_records(records: &RecordSet) -> Result<(), TimelineValidationError> {
     let work_records: Vec<&WorkRecord> =
         records
             .iter()
