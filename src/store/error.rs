@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::domain::RecordSetError;
+use crate::domain::{RecordSetError, TimelineValidationError};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CommitError {
@@ -9,6 +9,9 @@ pub(crate) enum CommitError {
 
     #[error(transparent)]
     Store(#[from] StoreError),
+
+    #[error(transparent)]
+    TimelineValidation(#[from] TimelineValidationError),
 }
 
 #[derive(Debug, thiserror::Error)]

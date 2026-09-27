@@ -47,6 +47,9 @@ pub(crate) enum AppError {
 
     #[error("selected date range is empty")]
     EmptyTimeWindow,
+
+    #[error("repository returned no outcome for a committed change")]
+    NoChangeOutcome,
 }
 
 pub trait Clock {
@@ -142,34 +145,24 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
             return Err(AppError::InvalidDateRange { from, to });
         }
 
-        let mut candidate = self.store.records().clone();
-
         let dates_iter = std::iter::successors(Some(from), |date| date.succ_opt())
             .take_while(|date| *date <= to);
 
-        let changes = dates_iter
-            .map(|date| -> Result<(RecordChange, RecordId), AppError> {
-                let id = candidate.next_id();
-
-                let change = RecordChange::Insert {
-                    id,
-                    input: RecordInput::new_absence(date, kind, portion, note.clone()),
-                };
-
-                let _ = candidate.apply_change(&change)?;
-
-                Ok((change, id))
+        let changes: Vec<RecordChange> = dates_iter
+            .map(|date| RecordChange::Insert {
+                input: RecordInput::new_absence(date, kind, portion, note.clone()),
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect();
 
-        validate_records(&candidate)?;
-
-        let ids = changes.iter().map(|change| change.1).collect::<Vec<_>>();
-
-        changes.into_iter().try_for_each(|change| -> Result<(), AppError> {
-            let _ = self.store.commit(change.0)?;
-            Ok(())
-        })?;
+        let ids: Vec<RecordId> = self
+            .store
+            .commit(&changes)?
+            .into_iter()
+            .map(|change_outcome| match change_outcome {
+                ChangeOutcome::Inserted { id } => id,
+                _ => unreachable!("absence insert must return insert outcome"),
+            })
+            .collect();
 
         Ok(ids)
     }
@@ -226,23 +219,17 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    fn next_id(&self) -> RecordId {
-        self.store.records().next_id()
-    }
-
     fn insert_record(&mut self, input: RecordInput) -> Result<RecordId, AppError> {
-        match self.apply_validated_change(RecordChange::Insert { id: self.next_id(), input })? {
+        match self.apply_validated_change(RecordChange::Insert { input })? {
             ChangeOutcome::Inserted { id } => Ok(id),
             _ => unreachable!("insert change must return insert outcome"),
         }
     }
 
     fn apply_validated_change(&mut self, change: RecordChange) -> Result<ChangeOutcome, AppError> {
-        let mut candidate = self.store.records().clone();
-        let _ = candidate.apply_change(&change)?;
-        validate_records(&candidate)?;
+        let outcomes = self.store.commit(&[change])?;
 
-        Ok(self.store.commit(change)?)
+        outcomes.into_iter().next().ok_or(AppError::NoChangeOutcome)
     }
 
     fn time_window_for(&self, scope: &DateScope) -> Result<TimeWindow, AppError> {
@@ -416,8 +403,17 @@ mod tests {
             &self.records
         }
 
-        fn commit(&mut self, change: RecordChange) -> Result<ChangeOutcome, CommitError> {
-            Ok(self.records.apply_change(&change)?)
+        fn commit(&mut self, changes: &[RecordChange]) -> Result<Vec<ChangeOutcome>, CommitError> {
+            let mut candidate = self.records.clone();
+            let outcomes = changes
+                .iter()
+                .map(|change| candidate.apply_change(change))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            validate_records(&candidate)?;
+            self.records = candidate;
+
+            Ok(outcomes)
         }
     }
 
@@ -1029,67 +1025,6 @@ mod tests {
     }
 
     #[test]
-    fn insert_rejects_invalid_work_timeline_mutations() {
-        let now = ts(11, 5, 15);
-        let store = FakeStore::default().seed(vec![
-            work_record(1, 11, 5, 10, WorkCommand::Start { context: WorkContext::Home }),
-            work_record(2, 11, 5, 11, WorkCommand::BreakStart),
-        ]);
-
-        let mut app =
-            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
-                .unwrap();
-
-        let err = app.log_work("refactoring round  42".into(), None).unwrap_err();
-
-        assert_eq!(err.to_string(), "cannot log while breaking for 2026-01-11");
-        assert_eq!(app.store.records().iter().count(), 2);
-    }
-
-    #[test]
-    fn update_rejects_invalid_work_timeline_permutations() {
-        let now = ts(11, 8, 8);
-        let store = FakeStore::default().seed(vec![
-            work_record(1, 11, 8, 5, WorkCommand::Start { context: WorkContext::Home }),
-            work_record(2, 11, 8, 6, WorkCommand::BreakStart),
-        ]);
-
-        let mut app =
-            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
-                .unwrap();
-
-        let update =
-            RecordInput::new_work(ts(11, 8, 6), WorkCommand::Start { context: WorkContext::Home });
-
-        let err = app.update_record(2.into(), update).unwrap_err();
-
-        assert_eq!(err.to_string(), "cannot start home while already active (home) for 2026-01-11");
-
-        let expected = app.store.records().get(&2.into()).unwrap().as_work().unwrap().command();
-        assert!(matches!(expected, WorkCommand::BreakStart));
-    }
-
-    #[test]
-    fn delete_rejects_invalid_work_timeline_permutations() {
-        let now = ts(11, 8, 28);
-        let store = FakeStore::default().seed(vec![
-            work_record(1, 11, 8, 25, WorkCommand::Start { context: WorkContext::Home }),
-            work_record(2, 11, 8, 26, WorkCommand::BreakStart),
-        ]);
-
-        let mut app =
-            App::new_with_clock(test_config(), store, FixedClock { now, today: now.date_naive() })
-                .unwrap();
-
-        let err = app.delete_record(1.into()).unwrap_err();
-
-        assert_eq!(err.to_string(), "cannot start break while idle for 2026-01-11");
-
-        let expected = app.store.records().get(&1.into()).unwrap().as_work().unwrap().command();
-        assert!(matches!(expected, WorkCommand::Start { context: WorkContext::Home }));
-    }
-
-    #[test]
     fn update_rejects_record_type_changes() {
         let now = ts(11, 8, 35);
         let store = FakeStore::default().seed(vec![work_record(
@@ -1276,44 +1211,6 @@ mod tests {
             let absence_records = app.day(date(25)).absence_records;
             assert_eq!(absence_records.len(), 1);
             assert_details(&absence_records[0], ids[1], date(25));
-        }
-    }
-
-    #[test]
-    fn add_absence_range_validates_before_commiting() {
-        let ts = ts(23, 13, 30);
-        let mut app = App::new_with_clock(
-            test_config(),
-            FakeStore::default().seed(vec![absence_record(
-                42,
-                23,
-                AbsenceKind::Vacation,
-                AbsencePortion::FullDay,
-            )]),
-            FixedClock { now: ts, today: ts.date_naive() },
-        )
-        .unwrap();
-
-        let err = app
-            .add_absence_range(
-                AbsenceKind::Holiday,
-                AbsencePortion::FullDay,
-                Some("doc".to_string()),
-                Some((date(23), date(24))),
-            )
-            .unwrap_err();
-
-        assert_eq!(err.to_string(), "more than one full-day absence for 2026-01-23");
-
-        {
-            let absence_records = app.day(date(23)).absence_records;
-            assert_eq!(absence_records.len(), 1);
-            assert_eq!(*absence_records[0].id(), RecordId::from(42));
-            assert_eq!(*absence_records[0].kind(), AbsenceKind::Vacation);
-        }
-        {
-            let absence_records = app.day(date(24)).absence_records;
-            assert!(absence_records.is_empty());
         }
     }
 }

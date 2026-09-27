@@ -3,12 +3,12 @@ use indexmap::IndexMap;
 use crate::domain::{Record, RecordId, RecordInput};
 
 pub(crate) enum RecordChange {
-    Insert { id: RecordId, input: RecordInput },
+    Insert { input: RecordInput },
     Update { id: RecordId, input: RecordInput },
     Delete { id: RecordId },
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum ChangeOutcome {
     Inserted { id: RecordId },
     Updated { previous: Record },
@@ -52,14 +52,12 @@ impl RecordSet {
 
     pub fn apply_change(&mut self, change: &RecordChange) -> Result<ChangeOutcome, RecordSetError> {
         match change {
-            RecordChange::Insert { id, input } => {
-                if self.0.contains_key(id) {
-                    return Err(RecordSetError::DuplicateId { id: *id });
-                }
-                let record = Record::from_input(*id, input.clone());
-                self.insert_sorted(*id, record);
+            RecordChange::Insert { input } => {
+                let id = self.next_id();
+                let record = Record::from_input(id, input.clone());
+                self.insert_sorted(id, record);
 
-                Ok(ChangeOutcome::Inserted { id: *id })
+                Ok(ChangeOutcome::Inserted { id })
             }
             RecordChange::Update { id, input } => {
                 let existing = self.0.get(id).ok_or(RecordSetError::MissingId { id: *id })?;
