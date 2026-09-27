@@ -1,4 +1,4 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
@@ -89,54 +89,47 @@ impl JsonlFileStore {
         Self::read_from(reader, path)
     }
 
-    fn replace_file(&self, from: &Path, to: &Path) -> Result<(), StoreError> {
-        #[cfg(windows)]
+    fn persist(&self, candidate: &RecordSet) -> Result<(), StoreError> {
+        let parent = self
+            .file_path
+            .parent()
+            .ok_or_else(|| StoreError::MissingParentDirectory { path: self.file_path.clone() })?;
+
+        let temporary = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|source| StoreError::Persist { path: self.file_path.clone(), source })?;
+
         {
-            if to.exists() {
-                let _ = fs::remove_file(to);
-            }
+            let mut writer = BufWriter::with_capacity(BUFFER_SIZE, temporary.as_file());
+
+            candidate.iter().try_for_each(|record| -> Result<(), StoreError> {
+                serde_json::to_writer(&mut writer, record).map_err(|source| {
+                    StoreError::Serialize { path: temporary.path().to_path_buf(), source }
+                })?;
+                writeln!(writer).map_err(|source| StoreError::Persist {
+                    path: temporary.path().to_path_buf(),
+                    source,
+                })?;
+                Ok(())
+            })?;
+
+            writer.flush().map_err(|source| StoreError::Persist {
+                path: temporary.path().to_path_buf(),
+                source,
+            })?;
         }
 
-        fs::rename(from, to).map_err(|source| StoreError::Replace {
-            from: from.to_path_buf(),
-            to: to.to_path_buf(),
+        temporary.as_file().sync_all().map_err(|source| StoreError::Persist {
+            path: temporary.path().to_path_buf(),
             source,
         })?;
-        Ok(())
-    }
 
-    fn temp_file_path(path: &Path) -> PathBuf {
-        path.with_added_extension("tmp")
-    }
-
-    fn persist(&self, candidate: &RecordSet) -> Result<(), StoreError> {
-        let file_path = &self.file_path;
-        let temp_file = Self::temp_file_path(file_path);
-
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&temp_file)
-            .map_err(|source| StoreError::Persist { path: temp_file.clone(), source })?;
-
-        let mut writer = BufWriter::with_capacity(BUFFER_SIZE, file);
-
-        candidate.iter().try_for_each(|record| -> Result<(), StoreError> {
-            serde_json::to_writer(&mut writer, record)
-                .map_err(|source| StoreError::Serialize { path: temp_file.clone(), source })?;
-            writeln!(writer)
-                .map_err(|source| StoreError::Persist { path: temp_file.clone(), source })?;
-            Ok(())
+        let _file = temporary.persist(&self.file_path).map_err(|error| StoreError::Replace {
+            from: error.file.path().to_path_buf(),
+            to: self.file_path.to_path_buf(),
+            source: error.error,
         })?;
 
-        writer.flush().map_err(|source| StoreError::Persist { path: temp_file.clone(), source })?;
-        writer
-            .get_ref()
-            .sync_all()
-            .map_err(|source| StoreError::Persist { path: temp_file.clone(), source })?;
-
-        self.replace_file(&temp_file, &self.file_path)
+        Ok(())
     }
 
     fn create_lock_file(file_path: &Path) -> Result<(File, PathBuf), StoreError> {
@@ -590,7 +583,10 @@ mod tests {
     }
 
     #[test]
-    fn commit_preserves_memory_and_disk_when_persistance_fails() {
+    #[cfg(unix)]
+    fn commit_preserves_memory_and_disk_when_persistence_fails() {
+        use std::{fs::Permissions, os::unix::fs::PermissionsExt};
+
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("data.jsonl");
         let mut store = JsonlFileStore::new(&file_path).unwrap();
@@ -609,32 +605,42 @@ mod tests {
         let original_records = store.records().iter().cloned().collect::<Vec<_>>();
         let original_bytes = std::fs::read(&file_path).unwrap();
 
-        let temp_path = file_path.with_added_extension("tmp");
-        std::fs::create_dir(&temp_path).unwrap();
+        let changes = [
+            RecordChange::Insert {
+                input: RecordInput::new_absence(
+                    date(11),
+                    AbsenceKind::Holiday,
+                    AbsencePortion::FullDay,
+                    None,
+                ),
+            },
+            RecordChange::Insert {
+                input: RecordInput::new_absence(
+                    date(12),
+                    AbsenceKind::Holiday,
+                    AbsencePortion::FullDay,
+                    None,
+                ),
+            },
+        ];
 
-        let err = store
-            .commit(&[
-                RecordChange::Insert {
-                    input: RecordInput::new_absence(
-                        date(11),
-                        AbsenceKind::Holiday,
-                        AbsencePortion::FullDay,
-                        None,
-                    ),
-                },
-                RecordChange::Insert {
-                    input: RecordInput::new_absence(
-                        date(12),
-                        AbsenceKind::Holiday,
-                        AbsencePortion::FullDay,
-                        None,
-                    ),
-                },
-            ])
-            .unwrap_err();
+        let original_permissions = std::fs::metadata(dir.path()).unwrap().permissions();
+        std::fs::set_permissions(dir.path(), Permissions::from_mode(0o500)).unwrap();
+
+        if tempfile::NamedTempFile::new_in(dir.path()).is_ok() {
+            std::fs::set_permissions(dir.path(), original_permissions).unwrap();
+            eprintln!("Skipping: this user can write to a read-only directory.");
+
+            return;
+        }
+
+        let result = store.commit(&changes);
+        std::fs::set_permissions(dir.path(), original_permissions).unwrap();
+
+        let err = result.unwrap_err();
 
         assert!(
-            matches!(err, CommitError::Store(StoreError::Persist { path, ..  } ) if path == temp_path)
+            matches!(err, CommitError::Store(StoreError::Persist { path, source }) if path == file_path &&source.kind() == ErrorKind::PermissionDenied)
         );
         assert_eq!(store.records().iter().cloned().collect::<Vec<_>>(), original_records);
         assert_eq!(std::fs::read(&file_path).unwrap(), original_bytes);
