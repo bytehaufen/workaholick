@@ -1,5 +1,6 @@
 use std::{
-    fs::{self, Permissions},
+    fs,
+    io::{ErrorKind, Write},
     path::{Path, PathBuf},
 };
 
@@ -49,7 +50,7 @@ pub(crate) enum ConfigError {
     Write {
         path: PathBuf,
         #[source]
-        source: confy::ConfyError,
+        source: std::io::Error,
     },
 
     #[error("could not parse config file {path}")]
@@ -212,17 +213,18 @@ pub(crate) fn edit(editor: &dyn Editor) -> Result<(), ConfigError> {
 pub(crate) fn init_at(path: impl AsRef<Path>) -> Result<PathBuf, ConfigError> {
     let path = path.as_ref();
 
-    if path.exists() {
-        return Err(ConfigError::AlreadyExists { path: path.to_path_buf() });
-    }
-
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
         fs::create_dir_all(parent)
             .map_err(|source| ConfigError::CreateDir { path: parent.to_path_buf(), source })?;
     }
 
     let cfg = Config::for_current_user()?;
-    save(path, &cfg)?;
+    let temporary = prepare_config_file(path, &cfg)?;
+
+    let _file = temporary.persist_noclobber(path).map_err(|error| match error.error.kind() {
+        ErrorKind::AlreadyExists => ConfigError::AlreadyExists { path: path.to_path_buf() },
+        _ => ConfigError::Write { path: path.to_path_buf(), source: error.error },
+    })?;
 
     Ok(path.to_path_buf())
 }
@@ -266,27 +268,19 @@ pub(crate) fn edit_at(path: impl AsRef<Path>, editor: &dyn Editor) -> Result<(),
 }
 
 fn save(path: &Path, cfg: &Config) -> Result<(), ConfigError> {
-    confy::store_path_perms(path, cfg, config_file_permissions())
-        .map_err(|source| ConfigError::Write { path: path.to_path_buf(), source })
+    let temporary = prepare_config_file(path, cfg)?;
+
+    let _file = temporary
+        .persist(path)
+        .map_err(|error| ConfigError::Write { path: path.to_path_buf(), source: error.error })?;
+
+    Ok(())
 }
 
 fn render_config_for_editing(path: &Path) -> Result<String, ConfigError> {
     let cfg = load_from(path)?;
     toml::to_string_pretty(&cfg)
         .map_err(|source| ConfigError::RenderConfig { path: path.to_path_buf(), source })
-}
-
-fn config_file_permissions() -> Permissions {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        Permissions::from_mode(0o600)
-    }
-
-    #[cfg(not(unix))]
-    {
-        Permissions::readonly(false)
-    }
 }
 
 fn config_path() -> Result<PathBuf, ConfigError> {
@@ -308,6 +302,26 @@ fn default_store_path() -> Result<PathBuf, ConfigError> {
         .ok_or(ConfigError::MissingHomeDirectory)?;
 
     Ok(home.join(APP_NAME).join("data.jsonl"))
+}
+
+fn prepare_config_file(path: &Path, cfg: &Config) -> Result<tempfile::NamedTempFile, ConfigError> {
+    let contents = toml::to_string_pretty(cfg)
+        .map_err(|source| ConfigError::RenderConfig { path: path.to_path_buf(), source })?;
+
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+
+    let to_write_error = |source| ConfigError::Write { path: path.to_path_buf(), source };
+
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(to_write_error)?;
+
+    temporary.write_all(contents.as_bytes()).map_err(to_write_error)?;
+    temporary.flush().map_err(to_write_error)?;
+    temporary.as_file().sync_all().map_err(to_write_error)?;
+
+    Ok(temporary)
 }
 
 #[cfg(test)]
@@ -388,5 +402,65 @@ mod tests {
     #[test]
     fn app_name_is_set() {
         assert_eq!(APP_NAME, "workaholick")
+    }
+
+    #[test]
+    fn init_at_preserves_existing_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("conifg.toml");
+
+        let original = "store_path = \"/tmp/my-existing-records.jsonl\"\n";
+        fs::write(&path, original).unwrap();
+
+        let err = init_at(&path).unwrap_err();
+
+        assert!(
+            matches!(err, ConfigError::AlreadyExists { path: existing_path } if existing_path == path)
+        );
+
+        assert_eq!(fs::read(&path).unwrap(), original.as_bytes());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn save_preserves_existing_config_when_write_fails() {
+        use std::{fs::Permissions, os::unix::fs::PermissionsExt};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        let original_config = test_config();
+        save(&path, &original_config).unwrap();
+
+        let original_bytes = fs::read(&path).unwrap();
+
+        let mut changed_config = original_config.clone();
+        changed_config.store_path = dir.path().join("different-records.jsonl");
+
+        // Prevent creating temporary file needed for writing
+        let original_permissions = fs::metadata(dir.path()).unwrap().permissions();
+        fs::set_permissions(dir.path(), Permissions::from_mode(0o500)).unwrap();
+
+        // Aborte if user has permissions to write into a R-only dir
+        if tempfile::NamedTempFile::new_in(dir.path()).is_ok() {
+            fs::set_permissions(dir.path(), original_permissions).unwrap();
+            eprintln!("Skipping: this user can write to a read-only directory");
+
+            return;
+        }
+
+        let result = save(&path, &changed_config);
+
+        fs::set_permissions(dir.path(), original_permissions).unwrap();
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, ConfigError::Write { path: failed_path, source } if failed_path ==path && source.kind() == ErrorKind::PermissionDenied)
+        );
+
+        assert_eq!(fs::read(&path).unwrap(), original_bytes);
+
+        let reopened = load_from(&path).unwrap();
+        assert_eq!(reopened.store_path, original_config.store_path);
     }
 }
