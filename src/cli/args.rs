@@ -21,11 +21,11 @@ fn examples_help() -> String {
     format!(
         "{HEADER}Examples:{HEADER:#}
   workaholick work start office
-  workaholick work log \"Code review\" --description \"PR #184\"
-  workaholick work end \"Wrap up\" --description \"Release prep\"
+  workaholick work log \"Code review\" \"PR #184\"
+  workaholick work end \"Wrap up\" \"Release prep\"
   workaholick absence vacation
   workaholick absence vacation --date 2026-05-01
-  workaholick absence vacation --from 2026-05-01 -to 2026-05-04
+  workaholick absence vacation --from 2026-05-01 --to 2026-05-04
   workaholick absence sick --date 2026-05-01 --portion half-day --note \"doctor\"
   workaholick day
   workaholick timesheet week -1
@@ -504,5 +504,20 @@ mod tests {
 
         assert!(err.to_string().contains("the following required arguments were not provided"));
         assert!(err.to_string().contains("--from"));
+    }
+
+    #[test]
+    fn help_examples_use_valid_cli_syntax() {
+        let help = examples_help();
+
+        // Skip heading
+        help.lines().skip(1).map(str::trim).filter(|line| !line.is_empty()).for_each(|example| {
+            let args = shlex::split(example)
+                .unwrap_or_else(|| panic!("Invalid quoting in example help: {example}"));
+
+            if let Err(error) = Cli::try_parse_from(args).map(|_| ()) {
+                panic!("Invalid help example:\n  {example}\n  {error}");
+            }
+        })
     }
 }
