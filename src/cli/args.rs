@@ -15,7 +15,6 @@ pub(crate) enum ArgsError {
     InvalidAbsenceDateSelection,
 }
 
-// FIXME: Update when domain implemented
 const HEADER: Style = clap_cargo::style::HEADER;
 fn examples_help() -> String {
     format!(
@@ -86,7 +85,7 @@ pub enum CliCommand {
         dates: AbsenceDateArgs,
     },
 
-    /// Delete one or more records
+    /// Delete a records
     Delete {
         /// ID of the record to delete
         id: u64,
