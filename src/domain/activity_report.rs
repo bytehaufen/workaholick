@@ -1,12 +1,13 @@
 use chrono::{DateTime, Local, NaiveDate};
 
 use crate::domain::{
-    AbsenceKind, AbsencePortion, Record, TimelineValidationError, WorkCommand,
+    AbsenceKind, AbsencePortion, Record, RecordId, TimelineValidationError, WorkCommand,
     reporting::TimeWindow, transition_day_state, work_state::DayState,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkItemRow {
+    id: RecordId,
     date: NaiveDate,
     start: DateTime<Local>,
     end: DateTime<Local>,
@@ -17,6 +18,7 @@ pub struct WorkItemRow {
 
 impl WorkItemRow {
     pub(crate) fn new(
+        id: RecordId,
         date: NaiveDate,
         start: DateTime<Local>,
         end: DateTime<Local>,
@@ -24,7 +26,11 @@ impl WorkItemRow {
         title: String,
         description: Option<String>,
     ) -> Self {
-        Self { date, start, end, duration_minutes, title, description }
+        Self { id, date, start, end, duration_minutes, title, description }
+    }
+
+    pub(crate) fn id(&self) -> RecordId {
+        self.id
     }
 
     pub(crate) fn date(&self) -> NaiveDate {
@@ -79,6 +85,7 @@ impl ActivityWorkTitleGroup {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AbsenceItemRow {
+    pub id: RecordId,
     pub date: NaiveDate,
     pub kind: AbsenceKind,
     pub portion: AbsencePortion,
@@ -162,12 +169,14 @@ impl OpenItem {
 
     fn finish(
         &mut self,
+        id: RecordId,
         item_end: DateTime<Local>,
         title: String,
         description: Option<String>,
     ) -> Option<WorkItemRow> {
         let row = self.clipped_start.map(|start| {
             WorkItemRow::new(
+                id,
                 item_end.date_naive(),
                 start,
                 item_end,
@@ -240,6 +249,7 @@ pub fn calculate_activity_report(
                         window,
                     );
                     if let Some(row) = state.open_item.finish(
+                        *record.id(),
                         *record.timestamp(),
                         title.clone(),
                         description.clone(),
@@ -255,6 +265,7 @@ pub fn calculate_activity_report(
                         window,
                     );
                     if let Some(row) = state.open_item.finish(
+                        *record.id(),
                         *record.timestamp(),
                         title.clone(),
                         description.clone(),
@@ -277,6 +288,7 @@ pub fn calculate_activity_report(
         .filter_map(Record::as_absence)
         .filter(|record| dates.contains(record.date()))
         .map(|absence_record| AbsenceItemRow {
+            id: *absence_record.id(),
             date: *absence_record.date(),
             kind: *absence_record.kind(),
             portion: *absence_record.portion(),
@@ -325,6 +337,7 @@ mod tests {
             activity_report.work_items(),
             &[
                 WorkItemRow::new(
+                    RecordId::from(2),
                     ts(10, 10, 0).date_naive(),
                     ts(10, 8, 0),
                     ts(10, 10, 0),
@@ -333,6 +346,7 @@ mod tests {
                     None,
                 ),
                 WorkItemRow::new(
+                    RecordId::from(3),
                     ts(10, 12, 0).date_naive(),
                     ts(10, 10, 0),
                     ts(10, 12, 0),
@@ -366,6 +380,7 @@ mod tests {
         assert_eq!(
             activity_report.work_items(),
             &[WorkItemRow::new(
+                RecordId::from(4),
                 ts(10, 13, 0).date_naive(),
                 ts(10, 8, 0),
                 ts(10, 13, 0),
@@ -399,6 +414,7 @@ mod tests {
         assert_eq!(
             activity_report.absence_items()[0],
             AbsenceItemRow {
+                id: RecordId::from(1),
                 date: date(10),
                 kind: AbsenceKind::Holiday,
                 portion: AbsencePortion::HalfDay,
@@ -427,6 +443,7 @@ mod tests {
         assert_eq!(
             activity_report.work_items(),
             &[WorkItemRow::new(
+                RecordId::from(2),
                 ts(10, 10, 0).date_naive(),
                 ts(10, 0, 0),
                 ts(10, 10, 0),
@@ -454,6 +471,7 @@ mod tests {
             window(10, 0, 11, 0),
             vec![
                 WorkItemRow::new(
+                    RecordId::from(0),
                     ts(10, 10, 0).date_naive(),
                     ts(10, 8, 0),
                     ts(10, 10, 0),
@@ -462,6 +480,7 @@ mod tests {
                     None,
                 ),
                 WorkItemRow::new(
+                    RecordId::from(1),
                     ts(10, 12, 0).date_naive(),
                     ts(10, 10, 0),
                     ts(10, 12, 0),
@@ -470,6 +489,7 @@ mod tests {
                     Some("PR".into()),
                 ),
                 WorkItemRow::new(
+                    RecordId::from(2),
                     ts(10, 13, 0).date_naive(),
                     ts(10, 12, 0),
                     ts(10, 13, 0),

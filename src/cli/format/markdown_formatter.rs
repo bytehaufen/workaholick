@@ -192,14 +192,16 @@ impl Formatter for MarkdownFormatter {
                         });
                     }
                     super::WorkItems::Detailed(items) => {
-                        output
-                            .push_str("| Date | Start | End | Duration | Title | Description |\n");
-                        output.push_str("| :-- | :-- | :-- | --: | :-- | :-- |\n");
+                        output.push_str(
+                            "| Date | ID | Start | End | Duration | Title | Description |\n",
+                        );
+                        output.push_str("| :-- | --: | :-- | :-- | --: | :-- | :-- |\n");
 
                         items.iter().for_each(|row| {
                             output.push_str(&format!(
-                                "| {} | {} | {} | {} | {} | {} |\n",
+                                "| {} | {} | {} | {} | {} | {} | {} |\n",
                                 row.date,
+                                row.id,
                                 row.start,
                                 row.end,
                                 row.duration,
@@ -214,12 +216,13 @@ impl Formatter for MarkdownFormatter {
             if !activity_view.absence_items.is_empty() {
                 output.push_str("\n## Absences\n\n");
 
-                output.push_str("| Date | Kind | Portion | Note |\n");
-                output.push_str("| :-- | :-- | :-- | :-- |\n");
+                output.push_str("| Date | ID | Kind | Portion | Note |\n");
+                output.push_str("| :-- | --: | :-- | :-- | :-- |\n");
                 activity_view.absence_items.iter().for_each(|row| {
                     output.push_str(&format!(
-                        "| {} | {} | {} | {} |\n",
+                        "| {} | {} | {} | {} | {} |\n",
                         row.date,
+                        row.id,
                         row.kind,
                         row.portion,
                         escape_markdown_table_cell(&row.note.clone().unwrap_or_default())
@@ -241,7 +244,7 @@ mod tests {
     use chrono::{Local, TimeZone};
 
     use crate::domain::activity_report::AbsenceItemRow;
-    use crate::domain::{AbsenceKind, AbsencePortion, WeeklySchedule};
+    use crate::domain::{AbsenceKind, AbsencePortion, RecordId, WeeklySchedule};
     use crate::test_support::{absence_record, date, ts, work_record};
     use crate::{
         domain::{
@@ -521,16 +524,16 @@ _No tracked time._
 
 ## Work items
 
-| Date | Start | End | Duration | Title | Description |
-| :-- | :-- | :-- | --: | :-- | :-- |
-| 2026-01-10 | 08:00 | 10:00 | 2h | handoff | sync |
-| 2026-01-10 | 10:00 | 12:00 | 2h | wrap |  |
+| Date | ID | Start | End | Duration | Title | Description |
+| :-- | --: | :-- | :-- | --: | :-- | :-- |
+| 2026-01-10 | 0 | 08:00 | 10:00 | 2h | handoff | sync |
+| 2026-01-10 | 1 | 10:00 | 12:00 | 2h | wrap |  |
 
 ## Absences
 
-| Date | Kind | Portion | Note |
-| :-- | :-- | :-- | :-- |
-| 2026-01-11 | holiday | full-day | Not easter sunday |
+| Date | ID | Kind | Portion | Note |
+| :-- | --: | :-- | :-- | :-- |
+| 2026-01-11 | 2 | holiday | full-day | Not easter sunday |
 "#
         );
     }
@@ -552,9 +555,9 @@ _No tracked time._
 
 ## Absences
 
-| Date | Kind | Portion | Note |
-| :-- | :-- | :-- | :-- |
-| 2026-01-11 | holiday | full-day | Not easter sunday |
+| Date | ID | Kind | Portion | Note |
+| :-- | --: | :-- | :-- | :-- |
+| 2026-01-11 | 2 | holiday | full-day | Not easter sunday |
 "#
         );
     }
@@ -587,6 +590,7 @@ _No completed items._
             TimeWindow::new(ts(10, 0, 0), ts(12, 0, 0)),
             vec![
                 WorkItemRow::new(
+                    RecordId::from(0),
                     date(10),
                     ts(10, 8, 0),
                     ts(10, 10, 0),
@@ -594,9 +598,18 @@ _No completed items._
                     "handoff".into(),
                     Some("sync".into()),
                 ),
-                WorkItemRow::new(date(10), ts(10, 10, 0), ts(10, 12, 0), 120, "wrap".into(), None),
+                WorkItemRow::new(
+                    RecordId::from(1),
+                    date(10),
+                    ts(10, 10, 0),
+                    ts(10, 12, 0),
+                    120,
+                    "wrap".into(),
+                    None,
+                ),
             ],
             vec![AbsenceItemRow {
+                id: RecordId::from(2),
                 date: date(11),
                 kind: AbsenceKind::Holiday,
                 portion: AbsencePortion::FullDay,

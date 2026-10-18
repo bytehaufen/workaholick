@@ -171,6 +171,7 @@ impl WorkItems {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct WorkItemView {
+    pub id: String,
     pub date: String,
     pub start: String,
     pub end: String,
@@ -189,6 +190,7 @@ pub(super) struct WorkGroupView {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct AbsenceItemView {
+    pub id: String,
     pub date: String,
     pub kind: String,
     pub portion: String,
@@ -353,6 +355,7 @@ pub(super) fn prepare_activity_view(
                 .work_items()
                 .iter()
                 .map(|row| WorkItemView {
+                    id: row.id().to_string(),
                     date: row.date().to_string(),
                     start: format_activity_boundary(row.start(), row.date()),
                     end: format_activity_boundary(row.end(), row.date()),
@@ -368,6 +371,7 @@ pub(super) fn prepare_activity_view(
         .absence_items()
         .iter()
         .map(|row| AbsenceItemView {
+            id: row.id.to_string(),
             date: row.date.to_string(),
             kind: row.kind.to_string(),
             portion: row.portion.to_string(),
@@ -491,8 +495,8 @@ mod tests {
 
     use super::*;
     use crate::domain::{
-        AbsenceKind, AbsencePortion, DailyTotals, Timesheet, WeeklySchedule, WeeklyTotals,
-        WorkCommand, WorkContext,
+        AbsenceKind, AbsencePortion, DailyTotals, RecordId, Timesheet, WeeklySchedule,
+        WeeklyTotals, WorkCommand, WorkContext,
         activity_report::{AbsenceItemRow, ActivityReport, WorkItemRow},
         calculate_time_breakdown,
     };
@@ -556,6 +560,7 @@ mod tests {
             TimeWindow::new(ts(10, 0, 0), ts(12, 0, 0)),
             vec![
                 WorkItemRow::new(
+                    RecordId::from(0),
                     ts(10, 10, 0).date_naive(),
                     ts(10, 8, 0),
                     ts(10, 10, 0),
@@ -564,6 +569,7 @@ mod tests {
                     Some("sync".into()),
                 ),
                 WorkItemRow::new(
+                    RecordId::from(1),
                     ts(10, 12, 0).date_naive(),
                     ts(10, 10, 0),
                     ts(10, 12, 0),
@@ -573,6 +579,7 @@ mod tests {
                 ),
             ],
             vec![AbsenceItemRow {
+                id: RecordId::from(3),
                 date: date(11),
                 kind: AbsenceKind::Holiday,
                 portion: AbsencePortion::FullDay,
@@ -587,6 +594,7 @@ mod tests {
             display.work_items,
             WorkItems::Detailed(vec![
                 WorkItemView {
+                    id: "0".into(),
                     date: "2026-01-10".into(),
                     start: "08:00".into(),
                     end: "10:00".into(),
@@ -595,6 +603,7 @@ mod tests {
                     description: "sync".into(),
                 },
                 WorkItemView {
+                    id: "1".into(),
                     date: "2026-01-10".into(),
                     start: "10:00".into(),
                     end: "12:00".into(),
@@ -607,6 +616,7 @@ mod tests {
         assert_eq!(
             display.absence_items,
             vec![AbsenceItemView {
+                id: "3".into(),
                 date: "2026-01-11".to_string(),
                 kind: "holiday".to_string(),
                 portion: "full-day".to_string(),
@@ -621,6 +631,7 @@ mod tests {
             TimeWindow::new(ts(10, 0, 0), ts(12, 0, 0)),
             vec![
                 WorkItemRow::new(
+                    RecordId::from(0),
                     ts(10, 10, 0).date_naive(),
                     ts(10, 8, 0),
                     ts(10, 10, 0),
@@ -629,6 +640,7 @@ mod tests {
                     None,
                 ),
                 WorkItemRow::new(
+                    RecordId::from(1),
                     ts(10, 12, 0).date_naive(),
                     ts(10, 10, 0),
                     ts(10, 12, 0),
@@ -638,6 +650,7 @@ mod tests {
                 ),
             ],
             vec![AbsenceItemRow {
+                id: RecordId::from(2),
                 date: date(11),
                 kind: AbsenceKind::Holiday,
                 portion: AbsencePortion::FullDay,
@@ -661,6 +674,7 @@ mod tests {
         assert_eq!(
             display.absence_items,
             vec![AbsenceItemView {
+                id: "2".to_string(),
                 date: "2026-01-11".to_string(),
                 kind: "holiday".to_string(),
                 portion: "full-day".to_string(),
