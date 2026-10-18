@@ -92,40 +92,66 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
 
     ///// Work
 
-    pub fn start_work(&mut self, context: WorkContext) -> Result<RecordId, AppError> {
-        let input = RecordInput::new_work(self.clock.now(), WorkCommand::Start { context });
+    pub fn start_work(
+        &mut self,
+        timestamp: Option<DateTime<Local>>,
+        context: WorkContext,
+    ) -> Result<RecordId, AppError> {
+        let input = RecordInput::new_work(
+            timestamp.unwrap_or_else(|| self.clock.now()),
+            WorkCommand::Start { context },
+        );
 
         self.insert_record(input)
     }
 
     pub fn end_work(
         &mut self,
+        timestamp: Option<DateTime<Local>>,
         title: String,
         description: Option<String>,
     ) -> Result<RecordId, AppError> {
-        let input =
-            RecordInput::new_work(self.clock.now(), WorkCommand::End { title, description });
+        let input = RecordInput::new_work(
+            timestamp.unwrap_or_else(|| self.clock.now()),
+            WorkCommand::End { title, description },
+        );
 
         self.insert_record(input)
     }
 
     pub fn log_work(
         &mut self,
+        timestamp: Option<DateTime<Local>>,
         title: String,
         description: Option<String>,
     ) -> Result<RecordId, AppError> {
-        let input =
-            RecordInput::new_work(self.clock.now(), WorkCommand::Log { title, description });
+        let input = RecordInput::new_work(
+            timestamp.unwrap_or_else(|| self.clock.now()),
+            WorkCommand::Log { title, description },
+        );
         self.insert_record(input)
     }
 
-    pub fn start_break(&mut self) -> Result<RecordId, AppError> {
-        let input = RecordInput::new_work(self.clock.now(), WorkCommand::BreakStart);
+    pub fn start_break(
+        &mut self,
+        timestamp: Option<DateTime<Local>>,
+    ) -> Result<RecordId, AppError> {
+        let input = RecordInput::new_work(
+            timestamp.unwrap_or_else(|| self.clock.now()),
+            WorkCommand::BreakStart,
+        );
         self.insert_record(input)
     }
 
-    pub fn end_break(&mut self, description: Option<String>) -> Result<RecordId, AppError> {
-        let input = RecordInput::new_work(self.clock.now(), WorkCommand::BreakEnd { description });
+    pub fn end_break(
+        &mut self,
+        timestamp: Option<DateTime<Local>>,
+        description: Option<String>,
+    ) -> Result<RecordId, AppError> {
+        let input = RecordInput::new_work(
+            timestamp.unwrap_or_else(|| self.clock.now()),
+            WorkCommand::BreakEnd { description },
+        );
         self.insert_record(input)
     }
 
@@ -447,7 +473,7 @@ mod tests {
         let store = FakeStore::default();
         let mut app = App::new_with_clock(test_config(), store, clock).unwrap();
 
-        let _ = app.start_work(WorkContext::Office).unwrap();
+        let _ = app.start_work(None, WorkContext::Office).unwrap();
 
         let day_overview = app.day(fixed_now.date_naive());
         assert_eq!(day_overview.work_records.len(), 1);

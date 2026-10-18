@@ -63,13 +63,19 @@ fn run_inner<S: RecordRepository>(
         CliCommand::Config { .. } => Err(DispatchError::AlreadyHandledCommand),
         CliCommand::Completions { .. } => Err(DispatchError::AlreadyHandledCommand),
 
-        CliCommand::Work { command } => {
+        CliCommand::Work { command, timestamp } => {
             let id = match command {
-                WorkSubcommand::Start { context } => app.start_work(context)?,
-                WorkSubcommand::End { title, description } => app.end_work(title, description)?,
-                WorkSubcommand::Log { title, description } => app.log_work(title, description)?,
-                WorkSubcommand::BreakStart => app.start_break()?,
-                WorkSubcommand::BreakEnd { description } => app.end_break(description)?,
+                WorkSubcommand::Start { context } => app.start_work(timestamp, context)?,
+                WorkSubcommand::End { title, description } => {
+                    app.end_work(timestamp, title, description)?
+                }
+                WorkSubcommand::Log { title, description } => {
+                    app.log_work(timestamp, title, description)?
+                }
+                WorkSubcommand::BreakStart => app.start_break(timestamp)?,
+                WorkSubcommand::BreakEnd { description } => {
+                    app.end_break(timestamp, description)?
+                }
             };
 
             println!("✅ Record with ID {id} added.");

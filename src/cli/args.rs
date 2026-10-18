@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, offset::LocalResult};
 use clap::{
     ArgGroup, Args, ColorChoice, Parser, Subcommand, ValueEnum,
     builder::{PossibleValuesParser, TypedValueParser, styling::Style},
@@ -13,6 +13,16 @@ use crate::domain::{AbsenceKind, AbsencePortion, Period, WorkContext, reporting:
 pub(crate) enum ArgsError {
     #[error("provide either --date or both --from and --to")]
     InvalidAbsenceDateSelection,
+
+    #[error(
+        "expected 'YYYY-MM-DD HH:MM' or 'H:MM', \
+        e.g. '2026-10-18 08:00' or '7:00'"
+    )]
+    InvalidWorkTime,
+    #[error("local time {0} occurs twice because of a timezone transition")]
+    AmbiguousWorkTime(NaiveDateTime),
+    #[error("local time {0} does not exist because of a timezone transition")]
+    NonExistentWorkTime(NaiveDateTime),
 }
 
 const HEADER: Style = clap_cargo::style::HEADER;
@@ -29,6 +39,8 @@ fn examples_help() -> String {
   workaholick day
   workaholick timesheet week -1
   workaholick activity --from 2026-04-01 --to 2026-04-06 --group-by-title
+  workaholick work start office --at \"2026-10-18 08:00\"
+  workaholick work end \"Implementation\" --at \"17:00\"
 "
     )
 }
@@ -71,6 +83,10 @@ pub enum CliCommand {
         /// Work action to execute
         #[command(subcommand)]
         command: WorkSubcommand,
+        /// Local timestamp: 'YYYY-MM-DD HH:MM' or 'H:MM' (today).
+        /// Uses the current time when omitted.
+        #[arg(long = "at", global = true, value_name = "WHEN", value_parser = parse_work_timestamp)]
+        timestamp: Option<DateTime<Local>>,
     },
 
     /// Record an absence for a date
@@ -322,6 +338,21 @@ pub fn parse() -> Cli {
     Cli::parse()
 }
 
+fn parse_work_timestamp(value: &str) -> Result<DateTime<Local>, ArgsError> {
+    let local = NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M")
+        .or_else(|_| {
+            NaiveTime::parse_from_str(value, "%H:%M")
+                .map(|time| Local::now().date_naive().and_time(time))
+        })
+        .map_err(|_| ArgsError::InvalidWorkTime)?;
+
+    match Local.from_local_datetime(&local) {
+        LocalResult::Single(timestamp) => Ok(timestamp),
+        LocalResult::Ambiguous(_, _) => Err(ArgsError::AmbiguousWorkTime(local)),
+        LocalResult::None => Err(ArgsError::NonExistentWorkTime(local)),
+    }
+}
+
 fn work_context_parser() -> impl TypedValueParser<Value = WorkContext> {
     PossibleValuesParser::new(WorkContext::VARIANTS.iter().copied()).try_map(|s| s.parse())
 }
@@ -338,6 +369,24 @@ fn period_parser() -> impl TypedValueParser<Value = Period> {
 mod tests {
     use super::*;
     use clap::Parser;
+
+    #[test]
+    fn work_timestamp_rejects_invalid_input_with_a_typed_error() {
+        for input in [
+            "",
+            "not a timestamp",
+            "24:00",
+            "7:60",
+            "2026-02-29 08:00",
+            "2026-10-15",
+            "2026-10-15 08:00 trailing",
+        ] {
+            assert!(
+                matches!(parse_work_timestamp(input), Err(ArgsError::InvalidWorkTime)),
+                "unexpected result for {input:?}",
+            );
+        }
+    }
 
     #[test]
     fn timesheet_scope_defaults_to_current_week() {
