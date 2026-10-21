@@ -252,6 +252,14 @@ impl<'de> Deserialize<'de> for Config {
         }
 
         let raw = RawConfig::deserialize(deserializer)?;
+
+        let store_path = match raw.store_path.strip_prefix("~") {
+            Ok(path) => home_dir()
+                .map_err(|_| serde::de::Error::custom("cannot expand '~' to valid home directory"))?
+                .join(path),
+            Err(_) => raw.store_path,
+        };
+
         let schedule_hours = raw.schedule.as_array();
 
         if schedule_hours.iter().any(|&day_hours| day_hours.is_negative()) {
@@ -267,12 +275,7 @@ impl<'de> Deserialize<'de> for Config {
             )
         })?;
 
-        Ok(Self {
-            store_path: raw.store_path,
-            schedule: raw.schedule,
-            cli: raw.cli,
-            rounding: raw.rounding,
-        })
+        Ok(Self { store_path, schedule: raw.schedule, cli: raw.cli, rounding: raw.rounding })
     }
 }
 
@@ -382,12 +385,14 @@ fn ensure_exists(path: &Path) -> Result<(), ConfigError> {
     Ok(())
 }
 
-fn default_store_path() -> Result<PathBuf, ConfigError> {
-    let home = UserDirs::new()
+fn home_dir() -> Result<PathBuf, ConfigError> {
+    UserDirs::new()
         .map(|user_dirs| user_dirs.home_dir().to_path_buf())
-        .ok_or(ConfigError::MissingHomeDirectory)?;
+        .ok_or(ConfigError::MissingHomeDirectory)
+}
 
-    Ok(home.join(APP_NAME).join("data.jsonl"))
+fn default_store_path() -> Result<PathBuf, ConfigError> {
+    Ok(home_dir()?.join(APP_NAME).join("data.jsonl"))
 }
 
 fn prepare_config_file(path: &Path, cfg: &Config) -> Result<tempfile::NamedTempFile, ConfigError> {
