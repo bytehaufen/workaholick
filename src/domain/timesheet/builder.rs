@@ -1,9 +1,13 @@
 use chrono::{Datelike, Days};
 
-use crate::domain::{
-    DailyTotals, Period, Record, Timesheet, WeeklySchedule, WeeklyTotals, calculate_time_breakdown,
-    reporting::{self, DateScope, TimeWindow},
-    timesheet::TimesheetError,
+use crate::{
+    config::RoundingConfig,
+    domain::{
+        DailyTotals, Period, Record, Timesheet, WeeklySchedule, WeeklyTotals,
+        calculate_time_breakdown,
+        reporting::{self, DateScope, TimeWindow},
+        timesheet::TimesheetError,
+    },
 };
 
 pub(crate) fn build_timesheet(
@@ -11,18 +15,21 @@ pub(crate) fn build_timesheet(
     window: TimeWindow,
     scope: &DateScope,
     weekly_schedule: &WeeklySchedule,
+    rounding_config: &RoundingConfig,
 ) -> Result<Timesheet, TimesheetError> {
-    let breakdown = calculate_time_breakdown(records, window, weekly_schedule)?;
+    let breakdown = calculate_time_breakdown(records, window, weekly_schedule, rounding_config)?;
 
     let timesheet = Timesheet::new(window, breakdown);
     match scope {
         DateScope::Period { period: Period::Week, .. } => {
-            let daily_totals = calculate_daily_totals(records, window, weekly_schedule)?;
+            let daily_totals =
+                calculate_daily_totals(records, window, weekly_schedule, rounding_config)?;
             Ok(timesheet.with_daily_totals(daily_totals))
         }
         DateScope::Period { period: Period::Month | Period::Year, .. }
         | DateScope::Range { .. } => {
-            let weekly_totals = calculate_weekly_totals(records, window, weekly_schedule)?;
+            let weekly_totals =
+                calculate_weekly_totals(records, window, weekly_schedule, rounding_config)?;
             Ok(timesheet.with_weekly_totals(weekly_totals))
         }
     }
@@ -36,6 +43,7 @@ fn calculate_weekly_totals(
     records: &[Record],
     window: TimeWindow,
     weekly_schedule: &WeeklySchedule,
+    rounding_config: &RoundingConfig,
 ) -> Result<Vec<WeeklyTotals>, TimesheetError> {
     let first_week_start = reporting::start_of_week(window.start().date_naive())?;
     let last_date = window.last_included_date();
@@ -55,7 +63,8 @@ fn calculate_weekly_totals(
         let week_window =
             TimeWindow::new(full_week_start.max(window.start()), full_week_end.min(window.end()));
 
-        let week_time_breakdown = calculate_time_breakdown(records, week_window, weekly_schedule)?;
+        let week_time_breakdown =
+            calculate_time_breakdown(records, week_window, weekly_schedule, rounding_config)?;
 
         let worked_minutes = week_time_breakdown.work_active_minutes();
         let break_minutes = week_time_breakdown.break_minutes();
@@ -78,6 +87,7 @@ fn calculate_daily_totals(
     records: &[Record],
     window: TimeWindow,
     weekly_schedule: &WeeklySchedule,
+    rounding_config: &RoundingConfig,
 ) -> Result<Vec<DailyTotals>, TimesheetError> {
     let daily_totals = TimeWindow::dates_in(window)
         .map(|date| -> Result<DailyTotals, TimesheetError> {
@@ -85,7 +95,8 @@ fn calculate_daily_totals(
             let day_end = reporting::start_of_day(reporting::next_day(date)?)?.min(window.end());
             let day_window = TimeWindow::new(day_start, day_end);
 
-            let breakdown = calculate_time_breakdown(records, day_window, weekly_schedule)?;
+            let breakdown =
+                calculate_time_breakdown(records, day_window, weekly_schedule, rounding_config)?;
 
             Ok(DailyTotals::new(
                 date,

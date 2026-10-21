@@ -1,6 +1,6 @@
 use chrono::{DateTime, Datelike, Days, Local, Months, NaiveDate};
 
-use crate::config::Config;
+use crate::config::{Config, RoundingConfig};
 use crate::domain::reporting::ReportingError;
 use crate::domain::{
     AbsenceKind, AbsencePortion, RecordSetError, TimelineValidationError, TimesheetError,
@@ -73,6 +73,7 @@ impl Clock for SystemClock {
 #[derive(Debug)]
 pub(crate) struct App<S: RecordRepository, C: Clock = SystemClock> {
     weekly_schedule: WeeklySchedule,
+    rounding_config: RoundingConfig,
     store: S,
     clock: C,
 }
@@ -87,7 +88,12 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
     pub fn new_with_clock(config: Config, store: STORE, clock: C) -> Result<Self, AppError> {
         validate_records(store.records())?;
 
-        Ok(Self { weekly_schedule: config.schedule.to_weekly_schedule(), store, clock })
+        Ok(Self {
+            weekly_schedule: config.schedule.to_weekly_schedule(),
+            rounding_config: config.rounding,
+            store,
+            clock,
+        })
     }
 
     ///// Work
@@ -233,7 +239,7 @@ impl<STORE: RecordRepository, C: Clock> App<STORE, C> {
         let window = self.time_window_for(&scope)?;
         let records = self.store.records().iter().cloned().collect::<Vec<_>>();
 
-        Ok(build_timesheet(&records, window, &scope, &self.weekly_schedule)?)
+        Ok(build_timesheet(&records, window, &scope, &self.weekly_schedule, &self.rounding_config)?)
     }
 
     pub fn activity(&self, scope: DateScope) -> Result<ActivityReport, AppError> {

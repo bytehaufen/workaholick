@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use chrono::{DateTime, DurationRound, Local, RoundingError, TimeDelta};
 use directories::UserDirs;
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -77,10 +78,11 @@ pub(crate) enum ConfigError {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(default)]
-pub struct Config {
+pub(crate) struct Config {
     pub store_path: PathBuf,
     pub schedule: ScheduleConfig,
     pub cli: CliConfig,
+    pub rounding: RoundingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -153,12 +155,82 @@ pub enum OutputFormatter {
     Markdown,
 }
 
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RoundingVariant {
+    Ceil,
+    Floor,
+    #[default]
+    None,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RoundingType {
+    Start,
+    BreakStart,
+    BreakEnd,
+    End,
+}
+
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct RoundingConfig {
+    pub interval_minutes: u32,
+    pub start: RoundingVariant,
+    pub break_start: RoundingVariant,
+    pub break_end: RoundingVariant,
+    pub end: RoundingVariant,
+}
+
+impl RoundingConfig {
+    fn interval(&self) -> Result<TimeDelta, RoundingError> {
+        let interval = TimeDelta::minutes(i64::from(self.interval_minutes));
+
+        match interval.num_nanoseconds() {
+            Some(nanos) if nanos > 0 => Ok(interval),
+            _ => Err(RoundingError::DurationExceedsLimit),
+        }
+    }
+
+    fn validate(&self) -> Result<(), RoundingError> {
+        let disabled = [self.start, self.break_start, self.break_end, self.end]
+            .into_iter()
+            .all(|variant| matches!(variant, RoundingVariant::None));
+
+        if disabled {
+            return Ok(());
+        }
+
+        self.interval().map(|_| ())
+    }
+
+    pub fn round(
+        &self,
+        rounding_type: RoundingType,
+        timestamp: DateTime<Local>,
+    ) -> Result<DateTime<Local>, RoundingError> {
+        let variant = match rounding_type {
+            RoundingType::Start => self.start,
+            RoundingType::BreakStart => self.break_start,
+            RoundingType::BreakEnd => self.break_end,
+            RoundingType::End => self.end,
+        };
+
+        match variant {
+            RoundingVariant::None => Ok(timestamp),
+            RoundingVariant::Ceil => timestamp.duration_round_up(self.interval()?),
+            RoundingVariant::Floor => timestamp.duration_trunc(self.interval()?),
+        }
+    }
+}
+
 impl Config {
     fn for_current_user() -> Result<Self, ConfigError> {
         Ok(Self {
             store_path: default_store_path()?,
             schedule: Default::default(),
             cli: CliConfig::default(),
+            rounding: RoundingConfig::default(),
         })
     }
 }
@@ -175,6 +247,8 @@ impl<'de> Deserialize<'de> for Config {
             schedule: ScheduleConfig,
             #[serde(default)]
             cli: CliConfig,
+            #[serde(default)]
+            rounding: RoundingConfig,
         }
 
         let raw = RawConfig::deserialize(deserializer)?;
@@ -186,7 +260,19 @@ impl<'de> Deserialize<'de> for Config {
             ));
         }
 
-        Ok(Self { store_path: raw.store_path, schedule: raw.schedule, cli: raw.cli })
+        raw.rounding.validate().map_err(|_| {
+            serde::de::Error::custom(
+                "rounding.interval_minutes must be positive and fit in Chrono's \
+            nanosecond range when rounding is enabled",
+            )
+        })?;
+
+        Ok(Self {
+            store_path: raw.store_path,
+            schedule: raw.schedule,
+            cli: raw.cli,
+            rounding: raw.rounding,
+        })
     }
 }
 

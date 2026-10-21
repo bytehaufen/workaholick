@@ -2,10 +2,22 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, TimeDelta};
 
-use crate::domain::{
-    AbsenceKind, AbsencePortion, AbsenceRecord, Record, TimelineValidationError, WeeklySchedule,
-    WorkContext, reporting::TimeWindow, transition_day_state, work_state::DayState,
+use crate::{
+    config::{RoundingConfig, RoundingType},
+    domain::{
+        AbsenceKind, AbsencePortion, AbsenceRecord, Record, TimelineValidationError,
+        WeeklySchedule, WorkContext, reporting::TimeWindow, transition_day_state,
+        work_state::DayState,
+    },
 };
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum TimeAccountingError {
+    #[error(transparent)]
+    TimelineValidation(#[from] TimelineValidationError),
+    #[error("could not round work timestamp: {0}")]
+    Rounding(#[from] chrono::RoundingError),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TimeCategory {
@@ -172,7 +184,8 @@ pub(crate) fn calculate_time_breakdown(
     records: &[Record],
     window: TimeWindow,
     weekly_schedule: &WeeklySchedule,
-) -> Result<TimeBreakdown, TimelineValidationError> {
+    rounding_config: &RoundingConfig,
+) -> Result<TimeBreakdown, TimeAccountingError> {
     struct State {
         state: DayState,
         last_timestamp: Option<DateTime<Local>>,
@@ -185,71 +198,58 @@ pub(crate) fn calculate_time_breakdown(
     let init_state =
         State { state: DayState::Idle, last_timestamp: None, breakdown: TimeBreakdownMap::new() };
 
+    let scan_end = window
+        .end()
+        .checked_add_signed(TimeDelta::minutes(i64::from(rounding_config.interval_minutes)));
+
     let result = records
         .iter()
         .filter_map(Record::as_work)
-        .filter(|record| *record.timestamp() < window.end())
-        .try_fold(init_state, |fold_state, record| -> Result<State, TimelineValidationError> {
+        .take_while(|record| scan_end.is_none_or(|end| *record.timestamp() < end))
+        .try_fold(init_state, |fold_state, record| -> Result<State, TimeAccountingError> {
             let State { state, last_timestamp, mut breakdown } = fold_state;
             let next_state = transition_day_state(state, record.date(), record.command())?;
 
-            match (state, next_state) {
-                (DayState::Idle, DayState::Active(_)) => Ok(State {
-                    state: next_state,
-                    last_timestamp: Some(*record.timestamp()),
-                    breakdown,
-                }),
-                (DayState::Active(kind), DayState::Breaking(_)) => {
+            let rounding_type = match (state, next_state) {
+                (DayState::Idle, DayState::Active(_)) => RoundingType::Start,
+                (DayState::Active(_), DayState::Breaking(_)) => RoundingType::BreakStart,
+                (DayState::Breaking(_), DayState::Active(_)) => RoundingType::BreakEnd,
+                (DayState::Active(_), DayState::Idle) => RoundingType::End,
+
+                (DayState::Active(_), DayState::Active(_)) => {
+                    return Ok(State { state, last_timestamp, breakdown });
+                }
+                _ => unreachable!("breakdown transitions should use the shared validator"),
+            };
+
+            let rounded = rounding_config.round(rounding_type, *record.timestamp())?;
+            let timestamp = last_timestamp.map_or(rounded, |previous| rounded.max(previous));
+
+            match state {
+                DayState::Idle => {}
+                DayState::Active(kind) => {
                     add_time(
                         &mut breakdown,
                         TimeCategory::from(kind),
                         TimeBucket::active_mut,
                         last_timestamp,
-                        *record.timestamp(),
+                        timestamp,
                         window,
                     );
-                    Ok(State {
-                        state: next_state,
-                        last_timestamp: Some(*record.timestamp()),
-                        breakdown,
-                    })
                 }
-                (DayState::Breaking(kind), DayState::Active(_)) => {
+                DayState::Breaking(kind) => {
                     add_time(
                         &mut breakdown,
                         TimeCategory::from(kind),
                         TimeBucket::break_time_mut,
                         last_timestamp,
-                        *record.timestamp(),
+                        timestamp,
                         window,
                     );
-                    Ok(State {
-                        state: next_state,
-                        last_timestamp: Some(*record.timestamp()),
-                        breakdown,
-                    })
                 }
-                (DayState::Active(kind), DayState::Idle) => {
-                    add_time(
-                        &mut breakdown,
-                        TimeCategory::from(kind),
-                        TimeBucket::active_mut,
-                        last_timestamp,
-                        *record.timestamp(),
-                        window,
-                    );
-                    Ok(State {
-                        state: next_state,
-                        last_timestamp: Some(*record.timestamp()),
-                        breakdown,
-                    })
-                }
+            };
 
-                (DayState::Active(_), DayState::Active(_)) => {
-                    Ok(State { state, last_timestamp, breakdown })
-                }
-                _ => unreachable!("breakdown transitions should use the shared validator"),
-            }
+            Ok(State { state: next_state, last_timestamp: Some(timestamp), breakdown })
         })?;
 
     let State { state, last_timestamp, mut breakdown } = result;
@@ -310,6 +310,7 @@ fn add_absence_credits(
 
 #[cfg(test)]
 mod test {
+    use crate::config::RoundingVariant;
     use crate::domain::{Record, WorkCommand};
     use crate::test_support::{self, absence_record, date, empty_schedule, ts, work_record};
 
@@ -322,7 +323,8 @@ mod test {
     fn summarize(window: TimeWindow, records: impl IntoIterator<Item = Record>) -> TimeBreakdown {
         let records = records.into_iter().collect::<Vec<_>>();
 
-        calculate_time_breakdown(&records, window, &empty_schedule()).unwrap()
+        calculate_time_breakdown(&records, window, &empty_schedule(), &RoundingConfig::default())
+            .unwrap()
     }
 
     fn summarize_with_schedule(
@@ -331,7 +333,7 @@ mod test {
         schedule: &WeeklySchedule,
     ) -> TimeBreakdown {
         let records = records.into_iter().collect::<Vec<_>>();
-        calculate_time_breakdown(&records, window, schedule).unwrap()
+        calculate_time_breakdown(&records, window, schedule, &RoundingConfig::default()).unwrap()
     }
 
     fn hours(n: i64) -> TimeDelta {
@@ -504,6 +506,7 @@ mod test {
             ],
             window(28, 0, 28, 12),
             &empty_schedule(),
+            &RoundingConfig::default(),
         )
         .unwrap_err();
 
@@ -622,5 +625,28 @@ mod test {
             TimeCategory::Absence(AbsenceKind::Vacation),
             &[date(12), date(13)],
         );
+    }
+
+    #[test]
+    fn breakdown_applies_rounding_to_work_and_break_boundaries() {
+        let window = window(17, 0, 18, 12);
+        let schedule = empty_schedule();
+        let rounding_config = RoundingConfig {
+            interval_minutes: 15,
+            start: RoundingVariant::Ceil,
+            break_start: RoundingVariant::Floor,
+            break_end: RoundingVariant::Ceil,
+            end: RoundingVariant::Floor,
+        };
+        let records = [
+            work_record(1, 17, 7, 57, WorkCommand::Start { context: WorkContext::Home }),
+            work_record(2, 17, 12, 7, WorkCommand::BreakStart),
+            work_record(3, 17, 12, 53, WorkCommand::BreakEnd { description: None }),
+            work_record(4, 17, 17, 2, WorkCommand::End { title: "".into(), description: None }),
+        ];
+        let breakdown =
+            calculate_time_breakdown(&records, window, &schedule, &rounding_config).unwrap();
+
+        assert_bucket(&breakdown, TimeCategory::Work(WorkContext::Home), hours(8), hours(1));
     }
 }

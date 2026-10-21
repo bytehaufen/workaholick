@@ -494,13 +494,17 @@ fn is_midnight(boundary: DateTime<Local>) -> bool {
 mod tests {
 
     use super::*;
-    use crate::domain::{
-        AbsenceKind, AbsencePortion, DailyTotals, RecordId, Timesheet, WeeklySchedule,
-        WeeklyTotals, WorkCommand, WorkContext,
-        activity_report::{AbsenceItemRow, ActivityReport, WorkItemRow},
-        calculate_time_breakdown,
-    };
+    use crate::config::RoundingVariant;
     use crate::test_support::*;
+    use crate::{
+        config::RoundingConfig,
+        domain::{
+            AbsenceKind, AbsencePortion, DailyTotals, RecordId, Timesheet, WeeklySchedule,
+            WeeklyTotals, WorkCommand, WorkContext,
+            activity_report::{AbsenceItemRow, ActivityReport, WorkItemRow},
+            calculate_time_breakdown,
+        },
+    };
     use chrono::{Local, TimeZone};
 
     #[test]
@@ -696,7 +700,13 @@ mod tests {
         ];
         let timesheet = Timesheet::new(
             window,
-            calculate_time_breakdown(&records, window, &empty_schedule()).unwrap(),
+            calculate_time_breakdown(
+                &records,
+                window,
+                &empty_schedule(),
+                &RoundingConfig::default(),
+            )
+            .unwrap(),
         )
         .with_daily_totals(vec![
             DailyTotals::new(ts(12, 0, 0).date_naive(), 8 * 60, 0, 0, 8 * 60),
@@ -802,6 +812,7 @@ mod tests {
             ],
             window,
             &empty_schedule(),
+            &RoundingConfig::default(),
         )
         .unwrap();
         let timesheet = Timesheet::new(window, breakdown).with_weekly_totals(vec![
@@ -866,6 +877,7 @@ mod tests {
             ],
             window,
             weekly_schedule,
+            &RoundingConfig::default(),
         )
         .unwrap();
 
@@ -933,6 +945,50 @@ mod tests {
                 target: "8h".into(),
                 balance: "0m".into()
             })
+        );
+    }
+
+    #[test]
+    fn prepare_timesheet_view_respects_rounding() {
+        let window = TimeWindow::new(ts(5, 0, 0), ts(6, 0, 0));
+        let weekly_schedule = &WeeklySchedule::new([0, 0, 0, 0, 0, 0, 0]);
+        let breakdown = calculate_time_breakdown(
+            &[
+                work_record(1, 5, 7, 57, WorkCommand::Start { context: WorkContext::Office }),
+                work_record(4, 5, 16, 2, WorkCommand::End { title: "".into(), description: None }),
+            ],
+            window,
+            weekly_schedule,
+            &RoundingConfig {
+                interval_minutes: 15,
+                start: RoundingVariant::Ceil,
+                break_start: RoundingVariant::None,
+                break_end: RoundingVariant::None,
+                end: RoundingVariant::Floor,
+            },
+        )
+        .unwrap();
+
+        let timesheet = Timesheet::new(window, breakdown);
+
+        let display = prepare_timesheet_view(&timesheet);
+        assert_eq!(
+            display.rows,
+            vec![TimesheetViewRow {
+                activity: "work (office)".into(),
+                day_count: 1,
+                active: "8h".into(),
+                break_time: "0m".into()
+            }]
+        );
+        assert_eq!(
+            display.total,
+            TimesheetViewRow {
+                activity: "TOTAL".into(),
+                day_count: 1,
+                active: "8h".into(),
+                break_time: "0m".into(),
+            }
         );
     }
 }

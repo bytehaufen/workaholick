@@ -243,6 +243,7 @@ fn escape_markdown_table_cell(value: &str) -> String {
 mod tests {
     use chrono::{Local, TimeZone};
 
+    use crate::config::RoundingConfig;
     use crate::domain::activity_report::AbsenceItemRow;
     use crate::domain::{AbsenceKind, AbsencePortion, RecordId, WeeklySchedule};
     use crate::test_support::{absence_record, date, ts, work_record};
@@ -353,7 +354,9 @@ mod tests {
         ];
 
         let weekly_schedule = &WeeklySchedule::new([8 * 60, 8 * 60, 8 * 60, 0, 0, 0, 0]);
-        let breakdown = calculate_time_breakdown(&records, window, weekly_schedule).unwrap();
+        let breakdown =
+            calculate_time_breakdown(&records, window, weekly_schedule, &RoundingConfig::default())
+                .unwrap();
 
         let timesheet = Timesheet::new(window, breakdown).with_daily_totals(vec![
             DailyTotals::new(date(12), 2 * 60 + 15, 0, 0, 8 * 60),
@@ -391,7 +394,8 @@ mod tests {
         );
         let timesheet = Timesheet::new(
             window,
-            calculate_time_breakdown(&[], window, &empty_schedule()).unwrap(),
+            calculate_time_breakdown(&[], window, &empty_schedule(), &RoundingConfig::default())
+                .unwrap(),
         );
 
         let rendered = MarkdownFormatter::format_timesheet(&timesheet);
@@ -429,6 +433,7 @@ _No tracked time._
             ],
             window,
             &empty_schedule(),
+            &RoundingConfig::default(),
         )
         .unwrap();
         let timesheet = Timesheet::new(window, breakdown).with_weekly_totals(vec![
@@ -482,6 +487,7 @@ _No tracked time._
             ],
             window,
             weekly_schedule,
+            &RoundingConfig::default(),
         )
         .unwrap();
 

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Local, NaiveDate, TimeDelta, TimeZone};
 
 use crate::{
-    config::{CliConfig, Config},
+    config::{CliConfig, Config, RoundingConfig},
     domain::{
         AbsenceKind, AbsencePortion, Record, RecordInput, TimeBreakdown, TimeCategory,
         WeeklySchedule, WorkCommand, WorkRecordInput,
@@ -46,6 +46,7 @@ pub(crate) fn test_config() -> Config {
         store_path: PathBuf::from("/tmp/workaholick-test.jsonl"),
         schedule: Default::default(),
         cli: CliConfig::default(),
+        rounding: RoundingConfig::default(),
     }
 }
 
