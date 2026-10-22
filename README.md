@@ -119,7 +119,7 @@ On Linux, the default config is `~/.config/workaholick/config.toml`, or
 `$XDG_CONFIG_HOME/workaholick/config.toml` when that variable is set.
 `workaholick config show` prints the file.
 
-A generated config looks like this, with your home directory instead of `/home/user`:
+Example configuration, with your home directory instead of `/home/user`:
 
 ```toml
 store_path = "/home/user/workaholick/data.jsonl"
@@ -137,10 +137,23 @@ sun_minutes = 0
 # The only formatter for now
 [cli]
 formatter = "markdown"
+
+# Rounding settings applied for output like
+# `workaholick timesheet`
+[rounding]
+interval_minutes = 5
+start = "ceil"
+break_start = "floor"
+break_end = "ceil"
+end = "floor"
 ```
 
 A relative `store_path` is resolved from the directory you run the command in,
 not the config file's directory. An absolute path avoids surprises.
+
+The `[rounding]` section adjusts work and break timestamps for timesheet calculations
+without changing stored records. Each boundary supports `ceil` (up), `floor` (down),
+or `none` (the default), using `interval_minutes` as the rounding interval.
 
 To try things without touching your real records, choose an unused config path:
 
@@ -259,7 +272,6 @@ For zsh, make sure `~/.zfunc` is in `fpath` before `compinit` runs.
 
 ## Roadmap
 
-- [ ] Configurable rounding for start times
 - [ ] Android frontend
 
 ## Contributing
