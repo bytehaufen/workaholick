@@ -1,5 +1,5 @@
-use std::fs::{self, File};
-use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Write};
+use std::fs::{self, File, OpenOptions, TryLockError};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::domain::{ChangeOutcome, Record, RecordChange, RecordSet, validate_records};
@@ -11,15 +11,7 @@ const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
 pub struct JsonlFileStore {
     file_path: PathBuf,
     _lock_file: File,
-    lock_path: PathBuf,
     records_by_id: RecordSet,
-}
-
-impl Drop for JsonlFileStore {
-    fn drop(&mut self) {
-        // Lock-file is auto dropped, so we only remove it
-        let _ = fs::remove_file(&self.lock_path);
-    }
 }
 
 impl JsonlFileStore {
@@ -32,26 +24,14 @@ impl JsonlFileStore {
         fs::create_dir_all(parent)
             .map_err(|source| StoreError::CreateDirectory { path: parent.to_path_buf(), source })?;
 
-        let (lock_file, lock_path) = Self::create_lock_file(file_path)?;
+        let lock_file = Self::create_lock_file(file_path)?;
 
-        let try_load = || {
-            let records = Self::read_file(file_path)?;
-            RecordSet::try_from_records(records).map_err(|source| StoreError::InvalidRecords {
-                path: file_path.to_path_buf(),
-                source,
-            })
-        };
+        let records = Self::read_file(file_path)?;
+        let records_by_id = RecordSet::try_from_records(records).map_err(|source| {
+            StoreError::InvalidRecords { path: file_path.to_path_buf(), source }
+        })?;
 
-        let records_by_id = match try_load() {
-            Ok(records_by_id) => records_by_id,
-            Err(error) => {
-                drop(lock_file);
-                let _ = fs::remove_file(&lock_path);
-                return Err(error);
-            }
-        };
-
-        Ok(Self { file_path: file_path.into(), _lock_file: lock_file, lock_path, records_by_id })
+        Ok(Self { file_path: file_path.into(), _lock_file: lock_file, records_by_id })
     }
 
     fn read_from<R: BufRead>(reader: R, path: &Path) -> Result<Vec<Record>, StoreError> {
@@ -132,17 +112,22 @@ impl JsonlFileStore {
         Ok(())
     }
 
-    fn create_lock_file(file_path: &Path) -> Result<(File, PathBuf), StoreError> {
+    fn create_lock_file(file_path: &Path) -> Result<File, StoreError> {
         let path = file_path.with_added_extension("lock");
-        let file = File::create_new(&path).map_err(|source| {
-            if source.kind() == ErrorKind::AlreadyExists {
-                StoreError::AlreadyLocked { path: path.clone() }
-            } else {
-                StoreError::CreateLock { path: path.clone(), source }
-            }
-        })?;
 
-        Ok((file, path))
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|source| StoreError::CreateLock { path: path.clone(), source })?;
+
+        match file.try_lock() {
+            Ok(()) => Ok(file),
+            Err(TryLockError::WouldBlock) => Err(StoreError::AlreadyLocked { path }),
+            Err(TryLockError::Error(source)) => Err(StoreError::AcquireLock { path, source }),
+        }
     }
 }
 
@@ -585,7 +570,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn commit_preserves_memory_and_disk_when_persistence_fails() {
-        use std::{fs::Permissions, os::unix::fs::PermissionsExt};
+        use std::{fs::Permissions, io::ErrorKind, os::unix::fs::PermissionsExt};
 
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("data.jsonl");
@@ -666,22 +651,17 @@ mod tests {
     }
 
     #[test]
-    fn lock_file_is_removed_in_new_if_err() {
+    fn lock_is_released_if_new_fails() {
         let dir = tempfile::tempdir().unwrap();
-        let store_file_path = dir.path().join("data.jsonl");
-        let lock_file_path = store_file_path.with_added_extension("lock");
+        let path = dir.path().join("data.jsonl");
 
-        {
-            let _store = JsonlFileStore::new(&store_file_path).unwrap();
-            assert!(fs::exists(&lock_file_path).unwrap());
-        }
+        std::fs::write(&path, "invalid jason").unwrap();
 
-        let mut store_file = fs::File::create_new(&store_file_path).unwrap();
-        store_file.write_all("not parsable data".as_bytes()).unwrap();
+        let error = JsonlFileStore::new(&path).unwrap_err();
+        assert!(matches!(error, StoreError::Parse { .. }));
 
-        let _ = JsonlFileStore::new(&store_file_path).unwrap_err();
-
-        assert!(!fs::exists(&lock_file_path).unwrap());
+        std::fs::write(&path, "").unwrap();
+        assert!(JsonlFileStore::new(&path).is_ok());
     }
 
     #[test]
