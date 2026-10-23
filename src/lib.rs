@@ -2,6 +2,8 @@ mod app;
 mod bootstrap;
 pub mod cli;
 pub(crate) mod config;
+#[cfg(feature = "desktop")]
+mod desktop;
 mod domain;
 mod editor;
 mod store;

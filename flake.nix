@@ -176,6 +176,23 @@
               RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
               LLVM_COV = "${llvm}/bin/llvm-cov";
               LLVM_PROFDATA = "${llvm}/bin/llvm-profdata";
+              RUST_LOG = "workaholick=debug";
+
+              LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath (with pkgs; [
+                libclang
+                libgtkflow4
+                libxcb-render-util
+                libxcb
+                libxkbcommon
+                libx11
+                libxcursor
+                libxrandr
+                libxi
+                libxinerama
+                wayland
+                vulkan-loader
+                libGL
+              ])}:$LD_LIBRARY_PATH";
             };
           };
         };

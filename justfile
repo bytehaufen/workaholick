@@ -44,6 +44,9 @@ clippy:
 test *ARGS:
     cargo test --workspace --all-targets --all-features {{ ARGS }} -- --nocapture --color always
 
+watch-desktop:
+    cargo watch -x "run --all-features -- desktop"
+
 # Watch local checks
 watch:
     cargo watch -c -x "clippy --workspace --all-targets --all-features"

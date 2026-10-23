@@ -6,6 +6,9 @@ use crate::{
     store::StoreError,
 };
 
+#[cfg(feature = "desktop")]
+use crate::desktop::{self, DesktopError};
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RunError {
     #[error(transparent)]
@@ -13,6 +16,10 @@ pub(crate) enum RunError {
 
     #[error(transparent)]
     Config(#[from] ConfigError),
+
+    #[cfg(feature = "desktop")]
+    #[error(transparent)]
+    Desktop(#[from] DesktopError),
 
     #[error(transparent)]
     Store(#[from] StoreError),
@@ -71,6 +78,11 @@ pub(crate) fn run_app() -> Result<(), RunError> {
     let store = JsonlFileStore::new(&cfg.store_path)?;
 
     let mut app = App::new(cfg, store)?;
+
+    #[cfg(feature = "desktop")]
+    if let CliCommand::Desktop = &cli.command {
+        return Ok(desktop::run(&mut app)?);
+    }
 
     Ok(cli::run(&mut app, cli, &editor, formatter)?)
 }

@@ -77,6 +77,10 @@ pub enum CliCommand {
         shell: CompletionShell,
     },
 
+    /// Start in GUI mode
+    #[cfg(feature = "desktop")]
+    Desktop,
+
     /// Track timed work activity
     #[command(visible_alias = "w")]
     Work {

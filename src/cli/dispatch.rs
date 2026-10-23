@@ -62,6 +62,8 @@ fn run_inner<S: RecordRepository>(
     match cli.command {
         CliCommand::Config { .. } => Err(DispatchError::AlreadyHandledCommand),
         CliCommand::Completions { .. } => Err(DispatchError::AlreadyHandledCommand),
+        #[cfg(feature = "desktop")]
+        CliCommand::Desktop => Err(DispatchError::AlreadyHandledCommand),
 
         CliCommand::Work { command, timestamp } => {
             let id = match command {
