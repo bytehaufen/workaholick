@@ -70,6 +70,13 @@ pub(crate) enum StoreError {
         source: std::io::Error,
     },
 
+    #[error("could not acquire store lock {path}")]
+    AcquireLock {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
     #[error("store is already in use (lock file exists: {path})")]
     AlreadyLocked { path: PathBuf },
 
